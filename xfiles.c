@@ -96,6 +96,15 @@ ereallocarray(void *ptr, size_t nmemb, size_t size)
 	return p;
 }
 
+/* call getcwd checking for error; exit on error */
+static void
+egetcwd(char *path, size_t size)
+{
+	if (getcwd(path, size) == NULL) {
+		err(1, "getcwd");
+	}
+}
+
 /* call pipe checking for error; exit on error */
 static void
 epipe(int fd[])
@@ -156,7 +165,7 @@ static int
 wchdir(const char *path)
 {
 	if (chdir(path) == -1) {
-		warn(NULL);
+		warn("%s", path);
 		return -1;
 	}
 	return 0;
@@ -563,6 +572,7 @@ initfm(struct FM *fm, int argc, char *argv[])
 
 	fm->main = None;
 	fm->scroll = None;
+	fm->hist = fm->curr = NULL;
 	fm->entries = NULL;
 	fm->selected = NULL;
 	fm->capacity = 0;
@@ -629,6 +639,40 @@ initellipsis(void)
 	ellipsis.font = getfontucode(ucode);
 	XftTextExtentsUtf8(dpy, ellipsis.font, (XftChar8 *)ellipsis.s, ellipsis.len, &ext);
 	ellipsis.width = ext.xOff;
+}
+
+/* delete current cwd and previous from working directory history */
+static void
+delcwd(struct FM *fm)
+{
+	struct Histent *h, *tmp;
+
+	if (fm->curr == NULL)
+		return;
+	h = fm->curr->next;
+	while (h != NULL) {
+		tmp = h;
+		h = h->next;
+		free(tmp->cwd);
+		free(tmp);
+	}
+	fm->curr->next = NULL;
+	fm->hist = fm->curr;
+}
+
+/* insert cwd into working directory history */
+static void
+addcwd(struct FM *fm, char *path) {
+	struct Histent *h;
+
+	delcwd(fm);
+	h = emalloc(sizeof(*h));
+	h->cwd = estrdup(path);
+	h->next = NULL;
+	h->prev = fm->hist;
+	if (fm->hist)
+		fm->hist->next = h;
+	fm->curr = fm->hist = h;
 }
 
 /* select entries according to config.hide */
@@ -713,25 +757,22 @@ freeentries(struct FM *fm)
 }
 
 /* populate list of entries on fm; return -1 on error */
-static int
-listentries(struct FM *fm)
+static void
+listentries(struct FM *fm, int savecwd)
 {
 	struct dirent **array;
 	struct stat sb;
 	int i, n, isdir;
 	char path[PATH_MAX];
 
-	if (getcwd(path, sizeof(path)) == NULL) {
-		warn("getcwd");
-		return -1;
-	}
-	if ((n = scandir(path, &array, direntselect, NULL)) == -1) {
-		warn("scandir");
-		return -1;
-	}
+	egetcwd(path, sizeof(path));
+	if (savecwd)
+		addcwd(fm, path);
+	if ((n = scandir(path, &array, direntselect, NULL)) == -1)
+		err(1, "scandir");
 	freeentries(fm);
 	if (n > fm->capacity) {
-		fm->entries = ereallocarray(fm->entries, n, sizeof *fm->entries);
+		fm->entries = ereallocarray(fm->entries, n, sizeof(*fm->entries));
 		fm->capacity = n;
 	}
 	fm->nentries = n;
@@ -747,7 +788,6 @@ listentries(struct FM *fm)
 	}
 	free(array);
 	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycompar);
-	return 0;
 }
 
 /* get index of entry from pointer position; return -1 if not found */
@@ -1025,19 +1065,17 @@ selectentries(struct FM *fm, int a, int b, int select)
 
 /* change directory, reset fd of thumbnailer and index of entry whose thumbnail is being read */
 static void
-diropen(struct FM *fm, const char *name, int *fd, int *thumbi)
+diropen(struct FM *fm, const char *path, int *fd, int *thumbi, int savecwd)
 {
-	char path[PATH_MAX];
-
-	snprintf(path, sizeof(path), "./%s", name);
 	while (fm->selected)
 		selectentry(fm, fm->selected, 0);
-	if (*thumbi != -1 && *fd != -1) {/* close current thumbnailer fd and wait for it */
-		close(*fd);
-		wait(NULL);
-		*thumbi = -1;
-	}
-	if (wchdir(path) != -1 && listentries(fm) != -1) {
+	if (path == NULL || wchdir(path) != -1) {
+		if (*thumbi != -1 && *fd != -1) {       /* close current thumbnailer fd and wait for it */
+			close(*fd);
+			wait(NULL);
+			*thumbi = -1;
+		}
+		listentries(fm, savecwd);
 		calcsize(fm, -1, -1);
 		fm->row = 0;
 		fm->ydiff = 0;
@@ -1069,6 +1107,20 @@ fileopen(struct Entry *ent)
 	waitpid(pid1, NULL, 0);
 }
 
+/* go back (< 0) in cwd history; return nonzero when changing directory */
+static int
+navhistory(struct FM *fm, int *fd, int *thumbi, int dir)
+{
+	struct Histent *h;
+
+	h = (dir == BACK) ? fm->curr->prev : fm->curr->next;
+	if (h == NULL)
+		return 0;
+	diropen(fm, h->cwd, fd, thumbi, 0);
+	fm->curr = h;
+	return 1;
+}
+
 /* process X11 and poll events */
 static void
 runevent(struct FM *fm, struct pollfd pfd[], int *thumbi)
@@ -1080,6 +1132,7 @@ runevent(struct FM *fm, struct pollfd pfd[], int *thumbi)
 	Imlib_Image img;
 	int setlastent;
 	int i;
+	char path[PATH_MAX];
 
 	if (pfd[POLL_STDIN].revents & POLLHUP)
 		return;
@@ -1126,6 +1179,12 @@ runevent(struct FM *fm, struct pollfd pfd[], int *thumbi)
 			if (scroll(fm, fm->scrolly + fm->scrollh / 2 + (ev.xbutton.button == Button4 ? -5 : +5)))
 				drawentries(fm);
 			commitdraw(fm);
+		} else if (ev.type == ButtonPress && (ev.xbutton.button == BUTTON8 || ev.xbutton.button == BUTTON9)) {
+			/* navigate through history with mouse back/forth buttons */
+			if (navhistory(fm, &pfd[POLL_THUMB].fd, thumbi, (ev.xbutton.button == BUTTON8) ? BACK : FORTH)) {
+				drawentries(fm);
+				commitdraw(fm);
+			}
 		} else if (ev.type == ButtonPress && ev.xbutton.button == Button1 && ev.xbutton.x > fm->winw) {
 			/* scrollbar was manipulated */
 			grabscroll(fm, ev.xbutton.y);
@@ -1142,7 +1201,8 @@ runevent(struct FM *fm, struct pollfd pfd[], int *thumbi)
 			if (i != -1 && i == lastent && ev.xbutton.time - lasttime <= DOUBLECLICK) {
 				ent = fm->entries[i];
 				if (ent->isdir) {
-					diropen(fm, ent->name, &pfd[POLL_THUMB].fd, thumbi);
+					snprintf(path, sizeof(path), "./%s", ent->name);
+					diropen(fm, path, &pfd[POLL_THUMB].fd, thumbi, 1);
 					setlastent = 0;
 				} else {
 					fileopen(ent);
@@ -1179,8 +1239,6 @@ main(int argc, char *argv[])
 	int thumbi = -1;        /* index of current thumbnail, -1 if no thumbnail is being read */
 
 	path = parseoptions(argc, argv);
-	if (path != NULL)
-		wchdir(path);
 
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		warnx("warning: no locale support");
@@ -1211,11 +1269,8 @@ main(int argc, char *argv[])
 	pfd[POLL_STDIN].events = pfd[POLL_X11].events = pfd[POLL_THUMB].events = POLLIN;
 	esetcloexec(pfd[POLL_X11].fd);
 
-	if (listentries(&fm) != -1) {
-		drawentries(&fm);
-		thumbi = 0;
-		pfd[POLL_THUMB].fd = forkthumb(fm.entries[thumbi]->name);
-	}
+	diropen(&fm, path, &pfd[POLL_THUMB].fd, &thumbi, 1);
+	drawentries(&fm);
 
 	XMapWindow(dpy, fm.win);
 

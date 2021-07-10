@@ -40,6 +40,24 @@ enum {
 	PIX_LAST = 2,
 };
 
+/* history navigation direction */
+enum {
+	BACK,
+	FORTH,
+};
+
+/* extra mouse buttons, not covered by XLIB */
+enum {
+	BUTTON8 = 8,
+	BUTTON9 = 9,
+};
+
+/* working directory history entry */
+struct Histent {
+	struct Histent *prev, *next;
+	char *cwd;
+};
+
 /* position and size of a rectangle */
 struct Rect {
 	int x, y, w, h;
@@ -56,6 +74,8 @@ struct FM {
 	struct Entry *selected; /* list of selected entries */
 	struct Rect dirrect;    /* size and position of default thumbnail for directories */
 	struct Rect filerect;   /* size and position of default thumbnail for files */
+	struct Histent *hist;   /* cwd history; pointer to last cwd history entry */
+	struct Histent *curr;   /* current point in history */
 	Window win;             /* main window */
 	Pixmap main, scroll;    /* pixmap for main window and scroll bar */
 	Pixmap dir[PIX_LAST];   /* default pixmap for directories thumbnails */
