@@ -1129,6 +1129,27 @@ runevent(struct FM *fm, struct pollfd pfd[], int *thumbi)
 		} else if (ev.type == ButtonPress && ev.xbutton.button == Button1 && ev.xbutton.x > fm->winw) {
 			/* scrollbar was manipulated */
 			grabscroll(fm, ev.xbutton.y);
+		} else if (ev.type == ButtonPress && ev.xbutton.button == 8) {
+            diropen(fm, "..", &pfd[POLL_THUMB].fd, thumbi);
+			drawentries(fm);
+			commitdraw(fm);
+			lastent = (setlastent) ? i : -1;
+			lasttime = ev.xbutton.time;
+		} else if (ev.type == ButtonPress && ev.xbutton.button == 9) {
+			i = getentry(fm, ev.xbutton.x, ev.xbutton.y);
+			if (i != -1 && i == lastent) {
+				ent = fm->entries[i];
+				if (ent->isdir) {
+					diropen(fm, ent->name, &pfd[POLL_THUMB].fd, thumbi);
+					setlastent = 0;
+				} else {
+					fileopen(ent);
+				}
+			}
+			drawentries(fm);
+			commitdraw(fm);
+			lastent = (setlastent) ? i : -1;
+			lasttime = ev.xbutton.time;
 		} else if (ev.type == ButtonPress && ev.xbutton.button == Button1) {
 			/* mouse left button was pressed */
 			if (!(ev.xbutton.state & (ControlMask | ShiftMask)))
