@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <err.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
@@ -402,6 +403,53 @@ drawtext(XftDraw *draw, XftColor *color, int x, int y, int w, const char *text, 
 		text = next;
 	}
 	return textwidth;
+}
+
+/* load variable from environment variable */
+static int
+loadenv(char *name, char **retval, int *retint, unsigned int *retuint)
+{
+    int tempint;
+    char *tempval, *dummy;
+
+    tempval = getenv(name);
+    if (!tempval)
+        return 0;
+    if (retval)
+        (*retval) = tempval;
+    if (retint || retuint) {
+        errno = 0;
+        tempint = strtol(tempval, &dummy, 0);
+        if (!tempint && errno)
+            return 0;
+    }
+    if (retint)
+        (*retint) = tempint;
+    if (retuint)
+        (*retuint) = tempint;
+    return 1;
+}
+
+/* load config from env variables */
+static void
+loadconfig(struct Config *cfg) {
+    loadenv("XFILES_OPENER", &cfg->opener, NULL, NULL);
+    loadenv("XFILES_THUMBNAILER", &cfg->thumbnailer, NULL, NULL);
+    loadenv("XFILES_DIRTHUMB", &cfg->dirthumb_path, NULL, NULL);
+    loadenv("XFILES_FILETHUMB", &cfg->filethumb_path, NULL, NULL);
+
+    loadenv("XFILES_FONT", &cfg->font, NULL, NULL);
+    loadenv("XFILES_BACKGROUND", &cfg->background_color, NULL, NULL);
+    loadenv("XFILES_FOREGROUND", &cfg->foreground_color, NULL, NULL);
+    loadenv("XFILES_SELECTEDBG", &cfg->selbackground_color, NULL, NULL);
+    loadenv("XFILES_SELECTEDFG", &cfg->selforeground_color, NULL, NULL);
+    loadenv("XFILES_SCROLLBG", &cfg->scrollbackground_color, NULL, NULL);
+    loadenv("XFILES_SCROLLFG", &cfg->scrollforeground_color, NULL, NULL);
+
+    loadenv("XFILES_SCROLLPX", NULL, &cfg->scroll_pixels, NULL);
+    loadenv("XFILES_WIDTHPX", NULL, &cfg->width_pixels, NULL);
+    loadenv("XFILES_HEIGHTPX", NULL, &cfg->height_pixels, NULL);
+    loadenv("XFILES_HIDE", NULL, &cfg->hide, NULL);
 }
 
 /* load image from file and scale it to size; return the image and its size */
@@ -1191,6 +1239,8 @@ main(int argc, char *argv[])
 	depth = DefaultDepth(dpy, screen);
 	root = RootWindow(dpy, screen);
 	colormap = DefaultColormap(dpy, screen);
+
+    loadconfig(&config);
 
 	imlib_set_cache_size(2048 * 1024);
 	imlib_context_set_dither(1);

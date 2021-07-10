@@ -103,19 +103,19 @@ struct DC {
 
 /* configuration */
 struct Config {
-	const char *thumbnailer;
-	const char *opener;
+	char *thumbnailer;
+	char *opener;
 
-	const char *dirthumb_path;
-	const char *filethumb_path;
+	char *dirthumb_path;
+	char *filethumb_path;
 
-	const char *font;
-	const char *background_color;
-	const char *foreground_color;
-	const char *selbackground_color;
-	const char *selforeground_color;
-	const char *scrollbackground_color;
-	const char *scrollforeground_color;
+	char *font;
+	char *background_color;
+	char *foreground_color;
+	char *selbackground_color;
+	char *selforeground_color;
+	char *scrollbackground_color;
+	char *scrollforeground_color;
 
 	int scroll_pixels;      /* scroll bar width */
 	int width_pixels;       /* initial window width */
