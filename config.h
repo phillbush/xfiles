@@ -1,5 +1,5 @@
 static struct Config config = {
-	.opener = "open",
+	.opener = "xdg-open",
 	.thumbnailer = "thumbnail",
 	.dirthumb_path = "/home/phill/theme/icons/64x64/places/folder.png",
 	.filethumb_path = "/home/phill/theme/icons/64x64/mimetypes/unknown.png",

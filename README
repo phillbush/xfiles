@@ -6,8 +6,8 @@ script to open files, and call a script to produce and cache thumbnails.
 
 (0) Edit config.mk to your system configuration.
 
-(1) To use xfiles, first copy the scripts ./open and ./thumbnail to your
-    $PATH (or write their complete path in the following step).
+(1) First copy the scripts ./thumbnail to your $PATH (or write their
+    complete path in the following step).
 
 (2) Edit ./config.h, especially the four first items.  Set the `opener`
     field of the `config` structure to the name of the opener script (or
