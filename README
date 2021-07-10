@@ -1,0 +1,30 @@
+                                 xfiles
+
+This is a still incomplete file manager for X11.  It can only navigate
+through directories, select files (and do nothing with them), call a
+script to open files, and call a script to produce and cache thumbnails.
+
+(1) To use xfiles, first copy the scripts ./open and ./thumbnail to your
+    $PATH (or write their complete path in the following step).
+
+(2) Edit ./config.h, especially the four first items.  Set the `opener`
+    field of the `config` structure to the name of the opener script (or
+    to its complete path).  Set `thumbnailer` to the thumbnailer script.
+    Set `dirthumb_path` to the path to `folder.png`.  And finally, set
+    `filethumb_path` to the path to `file.png`.
+
+(3) Run make.
+
+(4) Run ./xfiles, you can give it the path to any directory as argument.
+
+(5) ???
+
+(6) Enjoy.
+
+
+§ TODO.
+
+• Implement right-click context menu.
+• Read configuration from X resources.
+• Read configuration from environment variables.
+• Implement drag-and-drop.

@@ -1,0 +1,239 @@
+.TH XFILES 1
+.SH NAME
+xfiles \- X file manager
+.SH SYNOPSIS
+.B xfiles
+.RI [ path ]
+.SH DESCRIPTION
+.B xfiles
+is a file manager for X11.
+It can be controlled with the mouse, with the keyboard,
+or with commands interpreted from the standard input.
+.B xfiles
+uses other programs to perform several tasks,
+such as open a file, copy a file, or get the path to the thumbnail of a file.
+.SH USAGE
+.B xfiles
+is controlled with the mouse, with the keyboard, or with commands interpreted from the standard input.
+.SS Mouse
+A single click with mouse button 1 (left button) selects a single file and mark it;
+or (if the pointer is over an empty area), unmarks the marked files.
+A single click with mouse button 1 while the Control key is pressed adds an file to the list of marked files.
+A single click with mouse button 1 while the Shift key is pressed adds a range of files to the list of marked files.
+Selecting a region with mouse button 1 marks all the files under the selected region.
+.PP
+A double click with mouse button 1 opens a directory with
+.B xfiles
+or opens a file with the program set by the
+.B $OPENER
+environment variable.
+.PP
+Drag-and-dropping with the mouse button 1 moves the dragged files.
+.PP
+A single click with the mouse button 3 (right button) on a empty region
+opens the menu for the current directory.
+A single click with the mouse button 3 on marked files opens the menu for those files.
+See the options on the menu below.
+.PP
+The mouse scroll wheel (buttons 4 and 5) can be used to scroll up or down the file list.
+.SS Menu
+The menu items, from the rightmost one, counterclockwise, are listed below.
+.PP
+The menu for the current directory contains the following items.
+.IP \(bu 2
+Toggle show hidden files.
+.IP \(bu 2
+Create a new file.
+.IP \(bu 2
+Create a new directory.
+.IP \(bu 2
+Paste copied or moved files.
+.PP
+The menu for entries contain the following items.
+.IP \(bu 2
+Call the
+.B $XFILES_MENU
+program to generate a menu for the selected or marked entries.
+.IP \(bu 2
+Move the file.
+.IP \(bu 2
+Copy the file.
+.IP \(bu 2
+Open the entry.
+.IP \(bu 2
+Call the
+.B $TRASH
+program on the entries to move them to the trash can.
+.IP \(bu 2
+Call the
+.B $XSTAT
+program on the entries to show their properties.
+.SS Keyboard
+The Arrow keys move the selection through the entries.
+.PP
+The Enter key opens a directory or a file.
+.PP
+The PageUp and PageDown keys scroll the entries up or down.
+.PP
+The Home or End keys select the first entry or last entry.
+.PP 
+The Space key adds a entry to the list of marked entries.
+.PP
+Typing any string moves the selection to the entry matching it.
+.SS Commands
+.TP
+.B cd PATH
+Change directory.
+.TP
+.B copy
+Set selection for copy.
+.TP
+.B echo STRING
+Echo string to stdout.
+.TP
+.B exit
+Exit
+.BR xfiles .
+.TP
+.B find STRING
+Find files on the current directory.
+.TP
+.B invert
+Invert selection.
+.TP
+.B move
+Set selection for moving.
+.TP
+.B open PATH
+Open file with
+.BR $OPENER .
+.TP
+.B paste
+Paste files set for copying or moving.
+.TP
+.B redraw
+Redraw thumbnails.
+.TP
+.B reload
+Reload entry list.
+.TP
+.B scroll MOVEMENT
+Scroll the screen.
+The argument can be
+.BR top ,
+.BR bottom ,
+.BR up ,
+.BR half-up ,
+.BR page-up ,
+.BR down ,
+.BR half-down ,
+or
+.BR page-down .
+.TP
+.B select ENTRIES...
+Select one or more entries in the current directory.
+.TP
+.B trash
+Move selected entries to trash.
+.TP
+.B unselect ENTRIES...
+Unselect one or more entries in the current directory.
+.SH ENVIRONMENT
+The following environment variables affect the execution of
+.B xfiles
+.TP
+.B HOME
+The user's home directory.
+.TP
+.B OPENER
+Program used to open files.
+If not set, the program
+.B open
+is used instead, if found.
+.TP
+.B PATH
+Where to look for programs.
+.TP
+.B TERMCMD
+Command used to invoke the terminal emulator.
+.TP
+.B THUMBNAILER
+Command used to get the path to the thumbnail of a file given as argument.
+.TP
+.B TRASH
+Program used to send files to the trash can.
+If not set, the program
+.B trash
+is used instead, if found.
+.TP
+.B XFILES_COMMANDS
+A semicolon-separated list of commands that can be run from
+.B xfiles
+stdin as a intern command.
+Each entry in the list is a colon-delimited name-value pair.
+The name is the name of the command as interpreted by
+.B xfiles.
+The value is the command that will be run with execve;
+this command will be run on the current directory of
+.B xfiles
+and will be given the list of marked files as arguments.
+See the
+.B EXAMPLE
+section for an example of a value for this environment variable.
+.TP
+.B XFILES_COPY
+Command used to copy files.
+It should have the same argument syntax as
+.IR cp (1).
+.TP
+.B XFILES_FIND
+Command used to find files.
+It should get as arguments a search specification.
+It should print to stdout a nul-separated list of found files.
+.TP
+.B XFILES_MENU
+Program used to create the submenu for selected entries.
+TODO
+.TP
+.TP
+.B XFILES_MOVE
+Command used to move files.
+It should have the same argument syntax as
+.IR mv (1).
+.TP
+.B XFILES_STATUS
+Command used to get status from the file and print a line to stdout.
+.B XSTAT
+Program used to check properties of selected entries.
+TODO.
+.SH RESOURCES
+.B xfiles
+understands the following X resources.
+.TP
+.B xfiles.font
+The font for the names of directory entries.
+.TP
+.B xfiles.background
+The color for the background of the main window.
+.TP
+.B xfiles.foreground.
+The color for the names of non-selected entries.
+.TP
+.B xfiles.selbackground.
+The background color of selected entries.
+.TP
+.B xfiles.selforeground.
+The color for the names of selected entries.
+.SH EXAMPLES
+The following is an example of a configuration for
+.B xfiles.
+.IP
+.EX
+$ prog
+.EE
+.PP
+This configuration
+.SH SEE ALSO
+.IR control (1),
+.IR progress (1),
+.IR xstat (1)

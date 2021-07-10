@@ -1,0 +1,71 @@
+#!/bin/sh
+
+usage() {
+	echo "usage: thumbnail filename" >&2
+	exit 1
+}
+
+mkthumbdir() {
+	mkdir -p "$thumbdir"
+}
+
+existthumb() {
+	[ -f "$thumbfile" ] && [ "$mtime" -eq "$(identify -format "%[Thumb::MTime]" "$thumbfile")" ]
+}
+
+getextension() {
+	echo "${1#*.}" | tr '[:upper:]' '[:lower:]'
+}
+
+genthumb() {
+	existthumb && return 0
+	case "$extension" in
+	png|jpg|gif)
+		convert "$canonpath[0]" -format png -set "Thumb::MTime" "$mtime" -thumbnail "$thumbsizex$thumbsize" "$thumbfile"
+		return $?
+		;;
+	webm|mp4|mkv)
+		ffmpegthumbnailer -i "$canonpath" -o "$thumbfile" -s "$thumbsize" &&\
+		mogrify -set "Thumb::MTime" "$mtime" "$thumbfile"
+		return $?
+		;;
+	svg)
+		rsvg-convert -h "$thumbsize" "$canonpath" >"$thumbfile" &&\
+		mogrify -set "Thumb::MTime" "$mtime" "$thumbfile"
+		return $?
+		;;
+	pdf)
+		pdftoppm -f 1 -l 1 -scale-to-y "$thumbsize" -scale-to-x -1 -singlefile -png "$canonpath" "${thumbfile%.png}" &&\
+		mogrify -set "Thumb::MTime" "$mtime" "$thumbfile"
+		return $?
+		;;
+	mp3)
+		ffmpeg -y -i "$canonpath" -f image2 -s "${thumbsize}x${thumbsize}" "$thumbfile" 2>/dev/null &&\
+		mogrify -set "Thumb::MTime" "$mtime" "$thumbfile"
+		return $?
+		;;
+	esac
+	return 1
+}
+
+case "$#" in
+1) ;;
+*) usage ;;
+esac
+
+umask 077
+
+origfile="$1"
+thumbsize=128
+thumbdir="${THUMBDIR:-"${CACHEDIR:-${XDG_CACHE_HOME:-"$HOME/.cache"}}/thumbnails/normal"}"
+canonpath="$(readlink -f "$origfile" 2>/dev/null)" || geticonpng error
+md5sum="$(echo "$canonpath" | md5)"
+mtime="$(stat -f %m "$canonpath")"
+thumbfile="$thumbdir/$md5sum.png"
+extension="$(getextension "$canonpath")"
+
+mkthumbdir
+if genthumb
+then
+	echo $thumbfile
+fi
