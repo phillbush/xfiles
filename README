@@ -4,6 +4,8 @@ This is a still incomplete file manager for X11.  It can only navigate
 through directories, select files (and do nothing with them), call a
 script to open files, and call a script to produce and cache thumbnails.
 
+(0) Edit config.mk to your system configuration.
+
 (1) To use xfiles, first copy the scripts ./open and ./thumbnail to your
     $PATH (or write their complete path in the following step).
 
