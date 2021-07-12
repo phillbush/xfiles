@@ -27,9 +27,7 @@ script to open files, and call a script to produce and cache thumbnails.
 § TODO.
 
 • Implement copy and move operations.
-• Implement option to call a script (I have a trash script that I will
-  use to delete files rather than rm them).
+• Implement CLI commands.
 • Implement right-click context menu.
-• Read configuration from X resources.
-• Read configuration from environment variables.
 • Implement drag-and-drop.
+• Use kqueue/inotify to check for directory changes.
