@@ -1068,8 +1068,11 @@ openimg(int fd, int *w, int *h)
 		warn("fdopen");
 		return NULL;
 	}
-	if (fgets(path, sizeof(path), fp) == NULL)
+	if (fgets(path, sizeof(path), fp) == NULL) {
+		fclose(fp);
 		return NULL;
+	}
+	fclose(fp);
 	len = strlen(path);
 	if (path[len - 1] == '\n')
 		path[len - 1] = '\0';
@@ -1209,8 +1212,6 @@ fileopen(struct Entry *ent)
 			fd = open(DEV_NULL, O_RDWR);
 			edup2(STDOUT_FILENO, fd);
 			eexec(config.opener, path);
-		} else {
-			waitpid(pid2, NULL, 0);
 		}
 		exit(0);
 	}
