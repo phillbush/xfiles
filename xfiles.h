@@ -1,7 +1,6 @@
 #define ELLIPSIS     "…"
 #define CLASS        "XFiles"
 #define TITLE        "XFiles"
-#define THUMBSIZE    64         /* size of each thumbnail */
 #define THUMBBORDER  3          /* thumbnail border (for highlighting) */
 #define DOUBLECLICK  250
 #define DEV_NULL     "/dev/null"
@@ -137,6 +136,7 @@ struct Config {
 	const char *scrollbackground_color;
 	const char *scrollforeground_color;
 
+	int thumbsize_pixels;   /* size of icons and thumbnails */
 	int scroll_pixels;      /* scroll bar width */
 	int width_pixels;       /* initial window width */
 	int height_pixels;      /* initial window height */

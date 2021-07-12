@@ -3,6 +3,9 @@
 xfiles \- X file manager
 .SH SYNOPSIS
 .B xfiles
+.RB [ \-a ]
+.RB [ \-g
+.IR geometry ]
 .RI [ path ]
 .SH DESCRIPTION
 .B xfiles
@@ -12,6 +15,20 @@ or with commands interpreted from the standard input.
 .B xfiles
 uses other programs to perform several tasks,
 such as open a file, copy a file, or get the path to the thumbnail of a file.
+.PP
+The options are as follows:
+.TP
+.B \-a
+Include directory entries whose names begin with a dot (\(aq.\(aq).
+.TP
+.BI \-g " geometry"
+Set window size to
+.IR geometry ,
+which is a string of the form
+.IR NxN .
+For example,
+.B 600x480
+creates a window 600 pixels wide and 480 pixels tall.
 .SH USAGE
 .B xfiles
 is controlled with the mouse, with the keyboard, or with commands interpreted from the standard input.
@@ -145,10 +162,25 @@ The following environment variables affect the execution of
 .B HOME
 The user's home directory.
 .TP
+.B ICONSIZE
+Icon size in the form
+.IR NxN ,
+for example,
+.BR 64x64 .
+This should be a subdirectory in the directory pointed to by the
+.B ICONPATH
+environment variable.
+.TP
+.B ICONPATH
+The directory containing icons.
+See the section
+.B FILES
+for more information on its structure.
+.TP
 .B OPENER
 Program used to open files.
 If not set, the program
-.B open
+.B xdg-open
 is used instead, if found.
 .TP
 .B PATH
@@ -159,6 +191,9 @@ Command used to invoke the terminal emulator.
 .TP
 .B THUMBNAILER
 Command used to get the path to the thumbnail of a file given as argument.
+If not set, the program
+.B thumbnail
+is used instead, if found.
 .TP
 .B TRASH
 Program used to send files to the trash can.
@@ -180,60 +215,58 @@ and will be given the list of marked files as arguments.
 See the
 .B EXAMPLE
 section for an example of a value for this environment variable.
+.SH FILES
+.B xfiles
+expects two icons to exist.
 .TP
-.B XFILES_COPY
-Command used to copy files.
-It should have the same argument syntax as
-.IR cp (1).
+.B $ICONPATH/$ICONSIZE/places/folder.png
+The image for the icon of directory entries.
 .TP
-.B XFILES_FIND
-Command used to find files.
-It should get as arguments a search specification.
-It should print to stdout a nul-separated list of found files.
-.TP
-.B XFILES_MENU
-Program used to create the submenu for selected entries.
-TODO
-.TP
-.TP
-.B XFILES_MOVE
-Command used to move files.
-It should have the same argument syntax as
-.IR mv (1).
-.TP
-.B XFILES_STATUS
-Command used to get status from the file and print a line to stdout.
-.B XSTAT
-Program used to check properties of selected entries.
-TODO.
+.B $ICONPATH/$ICONSIZE/mimetypes/unknown.png
+The image for the icon of non-directory (regular file) entries.
 .SH RESOURCES
 .B xfiles
 understands the following X resources.
 .TP
-.B xfiles.font
+.B xfiles.faceName
 The font for the names of directory entries.
 .TP
 .B xfiles.background
 The color for the background of the main window.
 .TP
-.B xfiles.foreground.
+.B xfiles.foreground
 The color for the names of non-selected entries.
 .TP
-.B xfiles.selbackground.
+.B xfiles.geometry
+The default size of XFiles window.
+It must be in the form WxH; for example, 600x460.
+.TP
+.BR xfiles.scrollbar.background " or " XFiles.Scrollbar.background
+The background color of the scroll bar.
+The second form is for compatibility with Athena widgets.
+.TP
+.BR xfiles.scrollbar.foreground " or " XFiles.Scrollbar.foreground
+The color of the scroll bar handler.
+The second form is for compatibility with Athena widgets.
+.TP
+.BR xfiles.scrollbar.thickness " or " XFiles.Scrollbar.thickness
+The thickness of the scroll bar, in pixels.
+The second form is for compatibility with Athena widgets.
+.TP
+.B xfiles.selbackground
 The background color of selected entries.
 .TP
-.B xfiles.selforeground.
+.B xfiles.selforeground
 The color for the names of selected entries.
 .SH EXAMPLES
-The following is an example of a configuration for
-.B xfiles.
-.IP
-.EX
-$ prog
-.EE
-.PP
-This configuration
+TODO
 .SH SEE ALSO
 .IR control (1),
 .IR progress (1),
 .IR xstat (1)
+.SH BUGS
+Scrolling with the scrollbar stops thumbnail loading.
+.PP
+.B xfiles
+is a work in progress.
+Not everything described in this manual is implemented yet.

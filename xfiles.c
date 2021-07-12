@@ -15,11 +15,13 @@
 #include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include <X11/Xft/Xft.h>
 #include <Imlib2.h>
 #include "xfiles.h"
 
+/* X11 constant values */
 static struct DC dc;
 static struct Ellipsis ellipsis;
 static Display *dpy;
@@ -27,9 +29,11 @@ static Visual *visual;
 static Window root;
 static Colormap colormap;
 static Atom atoms[ATOM_LAST];
+static XrmDatabase xdb;
 static int screen;
 static int depth;
 
+/* flags */
 static int running = 1;         /* whether xfiles is running */
 
 #include "config.h"
@@ -38,7 +42,7 @@ static int running = 1;         /* whether xfiles is running */
 static void
 usage(void)
 {
-	(void)fprintf(stderr, "usage: xfiles [-g geometry] [path]\n");
+	(void)fprintf(stderr, "usage: xfiles [-a] [-g geometry] [path]\n");
 	exit(1);
 }
 
@@ -226,16 +230,122 @@ parsefonts(const char *s)
 	dc.fonth = dc.fonts[0]->height;
 }
 
+/* parse geometry string, return *width and *height */
+static void
+parsegeometry(const char *str, int *width, int *height)
+{
+	int w, h;
+	char *end;
+	const char *s;
+
+	s = str;
+	w = strtol(s, &end, 10);
+	if (w < 1 || w > INT_MAX || *s == '\0' || *end != 'x')
+		goto error;
+	s = end + 1;
+	h = strtol(s, &end, 10);
+	if (h < 1 || h > INT_MAX || *s == '\0' || *end != '\0')
+		goto error;
+	*width = w;
+	*height = h;
+error:
+	return;
+}
+
+/* parse icon size string, return *size */
+static void
+parseiconsize(const char *str, int *size)
+{
+	int m, n;
+	char *end;
+	const char *s;
+
+	s = str;
+	m = strtol(s, &end, 10);
+	if (m < 1 || m > INT_MAX || *s == '\0' || *end != 'x')
+		goto error;
+	s = end + 1;
+	n = strtol(s, &end, 10);
+	if (n < 1 || n > INT_MAX || *s == '\0' || *end != '\0')
+		goto error;
+	if (m != n)
+		goto error;
+	*size = m;
+error:
+	return;
+}
+
+/* parse path for directory and file icons */
+static void
+parseiconpath(const char *s, int size, const char **dir, const char **file)
+{
+	static char dirpath[PATH_MAX];
+	static char filepath[PATH_MAX];
+
+	snprintf(dirpath, sizeof(dirpath), "%s/%dx%d/places/folder.png", s, size, size);
+	snprintf(filepath, sizeof(filepath), "%s/%dx%d/mimetypes/unknown.png", s, size, size);
+	*dir = dirpath;
+	*file = filepath;
+}
+
+/* get configuration from environment variables */
+static void
+parseenviron(void)
+{
+	char *s;
+
+	if ((s = getenv("ICONSIZE")) != NULL)
+		parseiconsize(s, &config.thumbsize_pixels);
+	if ((s = getenv("ICONPATH")) != NULL)
+		parseiconpath(s, config.thumbsize_pixels, &config.dirthumb_path, &config.filethumb_path);
+	if ((s = getenv("OPENER")) != NULL)
+		config.opener = s;
+	if ((s = getenv("THUMBNAILER")) != NULL)
+		config.thumbnailer = s;
+}
+
+/* get configuration from X resources */
+static void
+parseresources(void)
+{
+	XrmValue xval;
+	long n;
+	char *type;
+
+	if (XrmGetResource(xdb, "xfiles.faceName", "*", &type, &xval) == True)
+		config.font = xval.addr;
+	if (XrmGetResource(xdb, "xfiles.background", "*", &type, &xval) == True)
+		config.background_color = xval.addr;
+	if (XrmGetResource(xdb, "xfiles.foreground", "*", &type, &xval) == True)
+		config.foreground_color = xval.addr;
+	if (XrmGetResource(xdb, "xfiles.geometry", "*", &type, &xval) == True)
+		parsegeometry(xval.addr, &config.width_pixels, &config.height_pixels);
+	if (XrmGetResource(xdb, "xfiles.scrollbar.background", "XFiles.Scrollbar.background", &type, &xval) == True)
+		config.scrollbackground_color = xval.addr;
+	if (XrmGetResource(xdb, "xfiles.scrollbar.foreground", "XFiles.Scrollbar.foreground", &type, &xval) == True)
+		config.scrollforeground_color = xval.addr;
+	if (XrmGetResource(xdb, "xfiles.scrollbar.thickness", "XFiles.Scrollbar.thickness", &type, &xval) == True)
+		if ((n = strtol(xval.addr, NULL, 10)) > 0)
+			config.scroll_pixels = n;
+	if (XrmGetResource(xdb, "xfiles.selbackground", "*", &type, &xval) == True)
+		config.selbackground_color = xval.addr;
+	if (XrmGetResource(xdb, "xfiles.selforeground", "*", &type, &xval) == True)
+		config.selforeground_color = xval.addr;
+}
+
 /* parse options; return argument (if given) or NULL */
 static char *
 parseoptions(int argc, char *argv[])
 {
 	int ch;
 
-	while ((ch = getopt(argc, argv, "g:")) != -1) {
+	while ((ch = getopt(argc, argv, "ag:")) != -1) {
 		switch (ch) {
+		case 'a':
+			config.hide = !config.hide;
+			break;
 		case 'g':
-			// TODO
+			parsegeometry(optarg, &config.width_pixels, &config.height_pixels);
 			break;
 		default:
 			usage();
@@ -490,13 +600,13 @@ drawthumb(struct FM *fm, Imlib_Image img, struct Rect *thumb, Pixmap *pix)
 		return;
 
 	/* compute position of thumbnails */
-	thumb->x = fm->thumbx + max((THUMBSIZE - thumb->w) / 2, 0);
-	thumb->y = fm->thumby + max((THUMBSIZE - thumb->h) / 2, 0);
+	thumb->x = fm->thumbx + max((config.thumbsize_pixels - thumb->w) / 2, 0);
+	thumb->y = fm->thumby + max((config.thumbsize_pixels - thumb->h) / 2, 0);
 
 	/* clean pixmaps */
 	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[UNSEL], dc.gc, fm->thumbx, fm->thumby, THUMBSIZE, THUMBSIZE);
-	XFillRectangle(dpy, pix[SEL], dc.gc, fm->thumbx - THUMBBORDER, fm->thumby - THUMBBORDER, THUMBSIZE + 2 * THUMBBORDER, THUMBSIZE + 2 * THUMBBORDER);
+	XFillRectangle(dpy, pix[UNSEL], dc.gc, fm->thumbx, fm->thumby, config.thumbsize_pixels, config.thumbsize_pixels);
+	XFillRectangle(dpy, pix[SEL], dc.gc, fm->thumbx - THUMBBORDER, fm->thumby - THUMBBORDER, config.thumbsize_pixels + 2 * THUMBBORDER, config.thumbsize_pixels + 2 * THUMBBORDER);
 
 	/* draw border on sel pixmap around thumbnail */
 	XSetForeground(dpy, dc.gc, dc.select[COLOR_BG].pixel);
@@ -579,13 +689,13 @@ initfm(struct FM *fm, int argc, char *argv[])
 	fm->nentries = 0;
 	fm->row = 0;
 	fm->ydiff = 0;
-	fm->entryw = THUMBSIZE * 2;
-	fm->entryh = THUMBSIZE + 3 * dc.fonth + 2 * THUMBBORDER;
-	fm->thumbx = THUMBSIZE / 2;
+	fm->entryw = config.thumbsize_pixels * 2;
+	fm->entryh = config.thumbsize_pixels + 3 * dc.fonth + 2 * THUMBBORDER;
+	fm->thumbx = config.thumbsize_pixels / 2;
 	fm->thumby = dc.fonth / 2;
 	fm->textw = fm->entryw - dc.fonth;
 	fm->textx = dc.fonth / 2;
-	fm->texty0 = dc.fonth / 2 + THUMBSIZE + 2 * THUMBBORDER;
+	fm->texty0 = dc.fonth / 2 + config.thumbsize_pixels + 2 * THUMBBORDER;
 	fm->texty1 = fm->texty0 + dc.fonth;
 	memset(&fm->dirrect, 0, sizeof(fm->dirrect));
 	memset(&fm->filerect, 0, sizeof(fm->filerect));
@@ -619,9 +729,9 @@ initfm(struct FM *fm, int argc, char *argv[])
 	XFillRectangle(dpy, fm->dir[SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
 
 	/* draw default thumbnails */
-	fileimg = loadimg(config.filethumb_path, THUMBSIZE, &fm->filerect.w, &fm->filerect.h);
+	fileimg = loadimg(config.filethumb_path, config.thumbsize_pixels, &fm->filerect.w, &fm->filerect.h);
 	drawthumb(fm, fileimg, &fm->filerect, fm->file);
-	dirimg = loadimg(config.dirthumb_path, THUMBSIZE, &fm->dirrect.w, &fm->dirrect.h);
+	dirimg = loadimg(config.dirthumb_path, config.thumbsize_pixels, &fm->dirrect.w, &fm->dirrect.h);
 	drawthumb(fm, dirimg, &fm->dirrect, fm->dir);
 }
 
@@ -797,7 +907,7 @@ getentry(struct FM *fm, int x, int y)
 	struct Entry *ent;
 	int i, n, w, h;
 
-	if (x < fm->x0 || x >= fm->x0 + fm->winw)
+	if (x < fm->x0 || x >= fm->x0 + fm->ncol * fm->entryw)
 		return -1;
 	if (y < 0 || y >= fm->winh)
 		return -1;
@@ -963,7 +1073,7 @@ openimg(int fd, int *w, int *h)
 	len = strlen(path);
 	if (path[len - 1] == '\n')
 		path[len - 1] = '\0';
-	return loadimg(path, THUMBSIZE, w, h);
+	return loadimg(path, config.thumbsize_pixels, w, h);
 }
 
 /* scroll list by manipulating scroll bar with pointer; return 1 if fm->row changes */
@@ -1220,6 +1330,8 @@ runevent(struct FM *fm, struct pollfd pfd[], int *thumbi)
 static void
 cleandc(void)
 {
+	size_t i;
+
 	XftColorFree(dpy, visual, colormap, &dc.normal[COLOR_BG]);
 	XftColorFree(dpy, visual, colormap, &dc.normal[COLOR_FG]);
 	XftColorFree(dpy, visual, colormap, &dc.select[COLOR_BG]);
@@ -1227,6 +1339,9 @@ cleandc(void)
 	XftColorFree(dpy, visual, colormap, &dc.scroll[COLOR_BG]);
 	XftColorFree(dpy, visual, colormap, &dc.scroll[COLOR_FG]);
 	XFreeGC(dpy, dc.gc);
+	for (i = 0; i < dc.nfonts; i++)
+		XftFontClose(dpy, dc.fonts[i]);
+	free(dc.fonts);
 }
 
 /* xfiles: X11 file manager */
@@ -1235,10 +1350,9 @@ main(int argc, char *argv[])
 {
 	struct pollfd pfd[POLL_LAST];
 	struct FM fm;
-	char *path;
 	int thumbi = -1;        /* index of current thumbnail, -1 if no thumbnail is being read */
-
-	path = parseoptions(argc, argv);
+	char *path;
+	char *xrm;
 
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		warnx("warning: no locale support");
@@ -1249,6 +1363,12 @@ main(int argc, char *argv[])
 	depth = DefaultDepth(dpy, screen);
 	root = RootWindow(dpy, screen);
 	colormap = DefaultColormap(dpy, screen);
+
+	XrmInitialize();
+	if ((xrm = XResourceManagerString(dpy)) != NULL && (xdb = XrmGetStringDatabase(xrm)) != NULL)
+		parseresources();
+	parseenviron();
+	path = parseoptions(argc, argv);
 
 	imlib_set_cache_size(2048 * 1024);
 	imlib_context_set_dither(1);
