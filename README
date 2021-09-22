@@ -1,28 +1,31 @@
                                  xfiles
 
 This is a still incomplete file manager for X11.  It can only navigate
-through directories, select files (and do nothing with them), call a
-script to open files, and call a script to produce and cache thumbnails.
+through directories, select files (and do nothing with them), and call
+a script to open files.
 
-(0) Edit config.mk to your system configuration.
+To run xfiles, do the following:
+• (1) First copy the script ./thumbnail to your $PATH.
+• (2) Run make.
+• (3) Run ./xfiles, you can give it the path to any directory as argument.
 
-(1) First copy the scripts ./thumbnail to your $PATH (or write their
-    complete path in the following step).
+§ Customization
 
-(2) Edit ./config.h, especially the four first items.  Set the `opener`
-    field of the `config` structure to the name of the opener script (or
-    to its complete path).  Set `thumbnailer` to the thumbnailer script.
-    Set `dirthumb_path` to the path to `folder.png`.  And finally, set
-    `filethumb_path` to the path to `file.png`.
+You can edit ./config.h, to customize your build at compile time.
+You can also set some environment variables and X resources to customize
+XFiles at runtime.
 
-(3) Run make.
+You can set the `opener` field of the `config` structure (in the
+`config.h` file) to the name of the opener script (or its complete
+path).  Set `thumbnailer` to the thumbnailer script.  You can also
+set the environment variables `OPENER` and `THUMBNAILER` to the names
+(or absolute paths) of those programs.
 
-(4) Run ./xfiles, you can give it the path to any directory as argument.
-
-(5) ???
-
-(6) Enjoy.
-
+You can set `dirthumb_path` to the path a png image of a folder icon
+(this should be provided by your icon theme); and set `filethumb_path`
+to the path of a file icon.  If these are not provided, xfiles will use
+the icons provided at compilation time by the files `file.xpm` and
+`folder.xpm`.
 
 § TODO.
 
@@ -30,4 +33,5 @@ script to open files, and call a script to produce and cache thumbnails.
 • Implement CLI commands.
 • Implement right-click context menu.
 • Implement drag-and-drop.
+• Reimplement thumbnails with threads.
 • Use kqueue/inotify to check for directory changes.
