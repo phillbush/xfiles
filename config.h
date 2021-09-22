@@ -1,6 +1,8 @@
 static struct Config config = {
 	.opener = "xdg-open",
 	.thumbnailer = "thumbnail",
+	.dirthumb_path = "",
+	.filethumb_path = "",
 
 	.font = "monospace:size=9,DejaVuSansMono:size=9",
 	.background_color = "#000000",

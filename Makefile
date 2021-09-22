@@ -1,4 +1,23 @@
-include config.mk
+# program name
+PROG = xfiles
+
+# paths
+PREFIX = /usr/local
+MANPREFIX = ${PREFIX}/share/man
+LOCALINC = /usr/local/include
+LOCALLIB = /usr/local/lib
+X11INC = /usr/X11R6/include
+X11LIB = /usr/X11R6/lib
+FREETYPEINC = /usr/include/freetype2
+FREETYPEINCOBSD = ${X11INC}/freetype2
+
+# includes and libs
+INCS = -I${LOCALINC} -I${X11INC} -I${FREETYPEINC} -I${FREETYPEINCOBSD}
+LIBS = -L${LOCALLIB} -L${X11LIB} -lfontconfig -lXft -lX11 -lXpm -lImlib2
+
+# flags
+CFLAGS = -g -O0 -Wall -Wextra ${INCS} ${CPPFLAGS}
+LDFLAGS = ${LIBS}
 
 bindir = ${DESTDIR}${PREFIX}
 mandir = ${DESTDIR}${MANPREFIX}
@@ -11,7 +30,7 @@ all: ${PROG}
 ${PROG}: ${OBJS}
 	${CC} -o $@ ${OBJS} ${LDFLAGS}
 
-${OBJS}: config.h ${PROG}.h
+${OBJS}: config.h
 
 .c.o:
 	${CC} ${CFLAGS} -c $<

@@ -1,13 +1,13 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
-
 #include <ctype.h>
 #include <dirent.h>
 #include <err.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
-#include <poll.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,9 +17,156 @@
 #include <X11/Xatom.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
+#include <X11/xpm.h>
 #include <X11/Xft/Xft.h>
 #include <Imlib2.h>
-#include "xfiles.h"
+#include "file.xpm"
+#include "folder.xpm"
+
+#define ELLIPSIS     "…"
+#define CLASS        "XFiles"
+#define TITLE        "XFiles"
+#define THUMBBORDER  3          /* thumbnail border (for highlighting) */
+#define DOUBLECLICK  250
+#define DEV_NULL     "/dev/null"
+#define DOTDOT       ".."
+
+/* fg and bg colors */
+enum {
+	COLOR_FG,
+	COLOR_BG,
+	COLOR_LAST
+};
+
+/* atoms */
+enum {
+	UTF8_STRING,
+	WM_DELETE_WINDOW,
+	_NET_WM_NAME,
+	_NET_WM_PID,
+	_NET_WM_WINDOW_TYPE,
+	_NET_WM_WINDOW_TYPE_NORMAL,
+	ATOM_LAST,
+};
+
+/* unselected and selected pixmaps */
+enum {
+	PIX_UNSEL = 0,
+	PIX_SEL = 1,
+	PIX_LAST = 2,
+};
+
+/* history navigation direction */
+enum {
+	BACK,
+	FORTH,
+};
+
+/* extra mouse buttons, not covered by XLIB */
+enum {
+	BUTTON8 = 8,
+	BUTTON9 = 9,
+};
+
+/* working directory history entry */
+struct Histent {
+	struct Histent *prev, *next;
+	char *cwd;
+};
+
+/* position and size of a rectangle */
+struct Rect {
+	int x, y, w, h;
+};
+
+/* horizontal position and size of a line segment */
+struct Line {
+	int x, w;
+};
+
+/* file manager */
+struct FM {
+	struct Entry **entries; /* array of pointer to entries */
+	struct Entry *selected; /* list of selected entries */
+	struct Rect dirrect;    /* size and position of default thumbnail for directories */
+	struct Rect filerect;   /* size and position of default thumbnail for files */
+	struct Histent *hist;   /* cwd history; pointer to last cwd history entry */
+	struct Histent *curr;   /* current point in history */
+	Window win;             /* main window */
+	Pixmap main, scroll;    /* pixmap for main window and scroll bar */
+	Pixmap dir[PIX_LAST];   /* default pixmap for directories thumbnails */
+	Pixmap file[PIX_LAST];  /* default pixmap for file thumbnails */
+	int capacity;           /* capacity of entries */
+	int nentries;           /* number of entries */
+	int row;                /* index of first visible column */
+	int ydiff;              /* how much the icons are scrolled up */
+	int winw, winh;         /* size of main window */
+	int thumbx, thumby;     /* position of thumbnail from entry top left corner */
+	int x0;                 /* position of first entry */
+	int entryw, entryh;     /* size of each entry */
+	int scrollh, scrolly;   /* size and position of scroll bar handle */
+	int textw;              /* width of each file name */
+	int textx;              /* position of each name from entry top left corner */
+	int texty0, texty1;     /* position of each line from entry top left corner */
+	int ncol, nrow;         /* number of columns and rows visible at a time */
+	int maxrow;             /* maximum value fm->row can scroll */
+};
+
+/* directory entry */
+struct Entry {
+	struct Entry *sprev;    /* for the linked list of selected entries */
+	struct Entry *snext;    /* for the linked list of selected entries */
+	struct Rect thumb;      /* position and size of the thumbnail */
+	struct Line line[2];    /* position and size of both text lines */
+	Pixmap pix[PIX_LAST];   /* unselected and selected content of the widget */
+	int issel;              /* whether entry is selected */
+	int isdir;              /* whether entry is a directory */
+	int drawn;              /* whether unsel and sel pixmaps were drawn */
+	char *name;             /* file name */
+};
+
+/* draw context */
+struct DC {
+	GC gc;
+	XftColor normal[COLOR_LAST];
+	XftColor select[COLOR_LAST];
+	XftColor scroll[COLOR_LAST];
+	FcPattern *pattern;
+	XftFont **fonts;
+	size_t nfonts;
+	int fonth;
+};
+
+/* configuration */
+struct Config {
+	const char *thumbnailer;
+	const char *opener;
+
+	const char *dirthumb_path;
+	const char *filethumb_path;
+
+	const char *font;
+	const char *background_color;
+	const char *foreground_color;
+	const char *selbackground_color;
+	const char *selforeground_color;
+	const char *scrollbackground_color;
+	const char *scrollforeground_color;
+
+	int thumbsize_pixels;   /* size of icons and thumbnails */
+	int scroll_pixels;      /* scroll bar width */
+	int width_pixels;       /* initial window width */
+	int height_pixels;      /* initial window height */
+	int hide;               /* whether to hide .* entries */
+};
+
+/* ellipsis size and font structure */
+struct Ellipsis {
+	char *s;
+	size_t len;     /* length of s */
+	int width;      /* size of ellipsis string */
+	XftFont *font;  /* font containing ellipsis */
+};
 
 /* X11 constant values */
 static struct DC dc;
@@ -32,6 +179,11 @@ static Atom atoms[ATOM_LAST];
 static XrmDatabase xdb;
 static int screen;
 static int depth;
+static char *xrm;
+
+/* threads */
+pthread_t thumbt;
+sem_t thumblock;
 
 /* flags */
 static int running = 1;         /* whether xfiles is running */
@@ -106,15 +258,6 @@ egetcwd(char *path, size_t size)
 {
 	if (getcwd(path, size) == NULL) {
 		err(1, "getcwd");
-	}
-}
-
-/* call pipe checking for error; exit on error */
-static void
-epipe(int fd[])
-{
-	if (pipe(fd) == -1) {
-		err(1, "pipe");
 	}
 }
 
@@ -282,8 +425,10 @@ parseiconpath(const char *s, int size, const char **dir, const char **file)
 	static char dirpath[PATH_MAX];
 	static char filepath[PATH_MAX];
 
-	snprintf(dirpath, sizeof(dirpath), "%s/%dx%d/places/folder.png", s, size, size);
-	snprintf(filepath, sizeof(filepath), "%s/%dx%d/mimetypes/unknown.png", s, size, size);
+	if (s != NULL) {
+		snprintf(dirpath, sizeof(dirpath), "%s/%dx%d/places/folder.png", s, size, size);
+		snprintf(filepath, sizeof(filepath), "%s/%dx%d/mimetypes/unknown.png", s, size, size);
+	}
 	*dir = dirpath;
 	*file = filepath;
 }
@@ -603,23 +748,18 @@ drawthumb(struct FM *fm, Imlib_Image img, struct Rect *thumb, Pixmap *pix)
 	thumb->x = fm->thumbx + max((config.thumbsize_pixels - thumb->w) / 2, 0);
 	thumb->y = fm->thumby + max((config.thumbsize_pixels - thumb->h) / 2, 0);
 
-	/* clean pixmaps */
-	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[UNSEL], dc.gc, fm->thumbx, fm->thumby, config.thumbsize_pixels, config.thumbsize_pixels);
-	XFillRectangle(dpy, pix[SEL], dc.gc, fm->thumbx - THUMBBORDER, fm->thumby - THUMBBORDER, config.thumbsize_pixels + 2 * THUMBBORDER, config.thumbsize_pixels + 2 * THUMBBORDER);
-
 	/* draw border on sel pixmap around thumbnail */
 	XSetForeground(dpy, dc.gc, dc.select[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[SEL], dc.gc, thumb->x - THUMBBORDER, thumb->y - THUMBBORDER, thumb->w + 2 * THUMBBORDER, thumb->h + 2 * THUMBBORDER);
+	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x - THUMBBORDER, thumb->y - THUMBBORDER, thumb->w + 2 * THUMBBORDER, thumb->h + 2 * THUMBBORDER);
 	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[SEL], dc.gc, thumb->x, thumb->y, thumb->w, thumb->h);
+	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x, thumb->y, thumb->w, thumb->h);
 
 	/* draw thumbnail on both pixmaps */
 	imlib_context_set_image(img);
 	imlib_image_set_changes_on_disk();
-	imlib_context_set_drawable(pix[UNSEL]);
+	imlib_context_set_drawable(pix[PIX_UNSEL]);
 	imlib_render_image_on_drawable(thumb->x, thumb->y);
-	imlib_context_set_drawable(pix[SEL]);
+	imlib_context_set_drawable(pix[PIX_SEL]);
 	imlib_render_image_on_drawable(thumb->x, thumb->y);
 
 	/* free image */
@@ -670,6 +810,49 @@ initdc(void)
 	parsefonts(config.font);
 }
 
+/* draw fallback icons from .xpm files */
+static void
+xpmread(struct FM *fm, struct Rect *thumb, Pixmap *pix, const char **data)
+{
+	XGCValues val;
+	XpmAttributes xa;
+	XImage *img;
+	Pixmap orig;
+	int status;
+
+	memset(&xa, 0, sizeof xa);
+	status = XpmCreateImageFromData(dpy, (char **)data, &img, NULL, &xa);
+	if (status != XpmSuccess)
+		errx(1, "could not load default icon");
+
+	/* create Pixmap from XImage */
+	orig = XCreatePixmap(dpy, fm->win, config.thumbsize_pixels, config.thumbsize_pixels, img->depth);
+	if (!(xa.valuemask & (XpmSize | XpmHotspot)))
+		errx(1, "could not load default icon");
+	val.foreground = 1;
+	val.background = 0;
+	XChangeGC(dpy, dc.gc, GCForeground | GCBackground, &val);
+	XPutImage(dpy, orig, dc.gc, img, 0, 0, 0, 0, img->width, img->height);
+
+	/* compute size and position of thumbnails */
+	thumb->w = xa.width;
+	thumb->h = xa.height;
+	thumb->x = fm->thumbx + max((config.thumbsize_pixels - thumb->w) / 2, 0);
+	thumb->y = fm->thumby + max((config.thumbsize_pixels - thumb->h) / 2, 0);
+
+	/* draw border on sel pixmap around thumbnail */
+	XSetForeground(dpy, dc.gc, dc.select[COLOR_BG].pixel);
+	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x - THUMBBORDER, thumb->y - THUMBBORDER, thumb->w + 2 * THUMBBORDER, thumb->h + 2 * THUMBBORDER);
+	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
+	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x, thumb->y, thumb->w, thumb->h);
+
+	XCopyArea(dpy, orig, pix[PIX_UNSEL], dc.gc, 0, 0, thumb->w, thumb->h, thumb->x, thumb->y);
+	XCopyArea(dpy, orig, pix[PIX_SEL], dc.gc, 0, 0, thumb->w, thumb->h, thumb->x, thumb->y);
+
+	XDestroyImage(img);
+	XFreePixmap(dpy, orig);
+}
+
 /* create window and set its properties */
 static void
 initfm(struct FM *fm, int argc, char *argv[])
@@ -718,21 +901,38 @@ initfm(struct FM *fm, int argc, char *argv[])
 	calcsize(fm, config.width_pixels, config.height_pixels);
 
 	/* create and clean default thumbnails */
-	fm->file[UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	fm->file[SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	fm->dir[UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	fm->dir[SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
+	fm->file[PIX_UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
+	fm->file[PIX_SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
+	fm->dir[PIX_UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
+	fm->dir[PIX_SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
 	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, fm->file[UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->file[SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->dir[UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->dir[SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
+	XFillRectangle(dpy, fm->file[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
+	XFillRectangle(dpy, fm->file[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
+	XFillRectangle(dpy, fm->dir[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
+	XFillRectangle(dpy, fm->dir[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
+
+	/* clean pixmaps */
+	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
+	XFillRectangle(dpy, fm->file[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
+	XFillRectangle(dpy, fm->file[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
+	XFillRectangle(dpy, fm->dir[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
+	XFillRectangle(dpy, fm->dir[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
 
 	/* draw default thumbnails */
-	fileimg = loadimg(config.filethumb_path, config.thumbsize_pixels, &fm->filerect.w, &fm->filerect.h);
-	drawthumb(fm, fileimg, &fm->filerect, fm->file);
-	dirimg = loadimg(config.dirthumb_path, config.thumbsize_pixels, &fm->dirrect.w, &fm->dirrect.h);
-	drawthumb(fm, dirimg, &fm->dirrect, fm->dir);
+	if (config.filethumb_path != NULL && config.filethumb_path[0] != '\0') {
+		fileimg = loadimg(config.filethumb_path, config.thumbsize_pixels, &fm->filerect.w, &fm->filerect.h);
+		drawthumb(fm, fileimg, &fm->filerect, fm->file);
+	} else {
+		warnx("could not find icon for files; using default icon");
+		xpmread(fm, &fm->filerect, fm->file, file);
+	}
+	if (config.dirthumb_path != NULL && config.dirthumb_path[0] != '\0') {
+		dirimg = loadimg(config.dirthumb_path, config.thumbsize_pixels, &fm->dirrect.w, &fm->dirrect.h);
+		drawthumb(fm, dirimg, &fm->dirrect, fm->dir);
+	} else {
+		warnx("could not find icon for directories; using default icon");
+		xpmread(fm, &fm->dirrect, fm->dir, folder);
+	}
 }
 
 /* compute width of ellipsis string */
@@ -833,8 +1033,8 @@ allocentry(struct FM *fm, const char *name, int isdir)
 
 	ent = emalloc(sizeof *ent);
 	ent->sprev = ent->snext = NULL;
-	ent->pix[UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	ent->pix[SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
+	ent->pix[PIX_UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
+	ent->pix[PIX_SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
 	ent->issel = 0;
 	ent->isdir = isdir;
 	ent->drawn = 0;
@@ -842,12 +1042,12 @@ allocentry(struct FM *fm, const char *name, int isdir)
 	memset(ent->line, 0, sizeof(ent->line));
 	if (ent->isdir) {
 		ent->thumb = fm->dirrect;
-		XCopyArea(dpy, fm->dir[UNSEL], ent->pix[UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
-		XCopyArea(dpy, fm->dir[SEL], ent->pix[SEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
+		XCopyArea(dpy, fm->dir[PIX_UNSEL], ent->pix[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
+		XCopyArea(dpy, fm->dir[PIX_SEL], ent->pix[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
 	} else {
 		ent->thumb = fm->filerect;
-		XCopyArea(dpy, fm->file[UNSEL], ent->pix[UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
-		XCopyArea(dpy, fm->file[SEL], ent->pix[SEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
+		XCopyArea(dpy, fm->file[PIX_UNSEL], ent->pix[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
+		XCopyArea(dpy, fm->file[PIX_SEL], ent->pix[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
 	}
 	return ent;
 }
@@ -859,8 +1059,8 @@ freeentries(struct FM *fm)
 	int i;
 
 	for (i = 0; i < fm->nentries; i++) {
-		XFreePixmap(dpy, fm->entries[i]->pix[UNSEL]);
-		XFreePixmap(dpy, fm->entries[i]->pix[SEL]);
+		XFreePixmap(dpy, fm->entries[i]->pix[PIX_UNSEL]);
+		XFreePixmap(dpy, fm->entries[i]->pix[PIX_SEL]);
 		free(fm->entries[i]->name);
 		free(fm->entries[i]);
 	}
@@ -938,7 +1138,7 @@ copyentry(struct FM *fm, int i)
 
 	if (i < fm->row * fm->ncol || i >= fm->row * fm->ncol + fm->nrow * fm->ncol)
 		return;
-	pix = (fm->entries[i]->issel ? fm->entries[i]->pix[SEL] : fm->entries[i]->pix[UNSEL]);
+	pix = (fm->entries[i]->issel ? fm->entries[i]->pix[PIX_SEL] : fm->entries[i]->pix[PIX_UNSEL]);
 	i -= fm->row * fm->ncol;
 	x = i % fm->ncol;
 	y = (i / fm->ncol) % fm->nrow;
@@ -961,6 +1161,13 @@ commitdraw(struct FM *fm)
 	XCopyArea(dpy, fm->scroll, fm->win, dc.gc, 0, 0, config.scroll_pixels, fm->winh, fm->winw, 0);
 }
 
+/* check if we can break line at the given character (is space, hyphen, etc) */
+static int
+isbreakable(char c)
+{
+	return c == '.' || c == '-' || c == '_';
+}
+
 /* draw names below thumbnail on its pixmaps */
 static void
 drawentry(struct FM *fm, struct Entry *ent)
@@ -972,14 +1179,19 @@ drawentry(struct FM *fm, struct Entry *ent)
 	do {
 		prevw = textw0;
 		prevlen = len0;
-		for (; ent->name[len0] != '\0' && !isspace(ent->name[len0]); len0++)
+		for (; ent->name[len0] != '\0' && !isspace(ent->name[len0]) && !isbreakable(ent->name[len0]); len0++)
 			;
 		textw0 = drawtext(NULL, NULL, 0, 0, 0, ent->name, len0);
-		while (isspace(ent->name[len0]))
+		while (isspace(ent->name[len0]) || isbreakable(ent->name[len0]))
 			len0++;
 	} while (textw0 < fm->textw && ent->name[len0] != '\0' && prevw != textw0);
-	i = len0 = prevlen;
-	textw0 = prevw;
+	if (textw0 >= fm->textw) {
+		len0 = prevlen;
+		textw0 = prevw;
+	}
+	while (len0 > 0 && isbreakable(ent->name[len0 - 1]))
+		len0--;
+	i = len0;
 	while (len0 > 0 && isspace(ent->name[len0 - 1]))
 		len0--;
 	if (i > 0 && ent->name[i] != '\0') {
@@ -993,7 +1205,7 @@ drawentry(struct FM *fm, struct Entry *ent)
 	x0 = fm->textx + max(0, (fm->textw - textw0) / 2);
 	x1 = fm->textx + max(0, (fm->textw - textw1) / 2);
 
-	draw = XftDrawCreate(dpy, ent->pix[UNSEL], visual, colormap);
+	draw = XftDrawCreate(dpy, ent->pix[PIX_UNSEL], visual, colormap);
 	drawtext(draw, &dc.normal[COLOR_FG], x0, fm->texty0, fm->textw, ent->name, len0);
 	if (i > 0 && ent->name[i] != '\0')
 		drawtext(draw, &dc.normal[COLOR_FG], x1, fm->texty1, fm->textw, ent->name + i, len1);
@@ -1002,11 +1214,11 @@ drawentry(struct FM *fm, struct Entry *ent)
 	ent->line[0].w = textw0;
 
 	XSetForeground(dpy, dc.gc, dc.select[COLOR_BG].pixel);
-	XFillRectangle(dpy, ent->pix[SEL], dc.gc, x0, fm->texty0, textw0, dc.fonth);
-	draw = XftDrawCreate(dpy, ent->pix[SEL], visual, colormap);
+	XFillRectangle(dpy, ent->pix[PIX_SEL], dc.gc, x0, fm->texty0, textw0, dc.fonth);
+	draw = XftDrawCreate(dpy, ent->pix[PIX_SEL], visual, colormap);
 	drawtext(draw, &dc.select[COLOR_FG], x0, fm->texty0, fm->textw, ent->name, len0);
 	if (i > 0 && ent->name[i] != '\0') {
-		XFillRectangle(dpy, ent->pix[SEL], dc.gc, x1, fm->texty1, textw1, dc.fonth);
+		XFillRectangle(dpy, ent->pix[PIX_SEL], dc.gc, x1, fm->texty1, textw1, dc.fonth);
 		drawtext(draw, &dc.select[COLOR_FG], x1, fm->texty1, fm->textw, ent->name + i, len1);
 	}
 	ent->line[1].x = x1;
@@ -1032,51 +1244,6 @@ drawentries(struct FM *fm)
 		copyentry(fm, i);
 	}
 	commitdraw(fm);
-}
-
-/* fork process that get thumbnail */
-static int
-forkthumb(const char *name)
-{
-	pid_t pid;
-	int fd[2];
-	char path[PATH_MAX];
-
-	snprintf(path, sizeof(path), "./%s", name);
-	epipe(fd);
-	if ((pid = efork()) > 0) {      /* parent */
-		close(fd[1]);
-		return fd[0];
-	} else {                        /* children */
-		close(fd[0]);
-		if (fd[1] != STDOUT_FILENO)
-			edup2(fd[1], STDOUT_FILENO);
-		eexec(config.thumbnailer, path);
-	}
-	return -1;
-}
-
-/* read image path from file descriptor and open image; return its size on *w and *h */
-static Imlib_Image
-openimg(int fd, int *w, int *h)
-{
-	FILE *fp;
-	int len;
-	char path[PATH_MAX];
-
-	if ((fp = fdopen(fd, "r")) == NULL) {
-		warn("fdopen");
-		return NULL;
-	}
-	if (fgets(path, sizeof(path), fp) == NULL) {
-		fclose(fp);
-		return NULL;
-	}
-	fclose(fp);
-	len = strlen(path);
-	if (path[len - 1] == '\n')
-		path[len - 1] = '\0';
-	return loadimg(path, config.thumbsize_pixels, w, h);
 }
 
 /* scroll list by manipulating scroll bar with pointer; return 1 if fm->row changes */
@@ -1176,24 +1343,24 @@ selectentries(struct FM *fm, int a, int b, int select)
 	}
 }
 
-/* change directory, reset fd of thumbnailer and index of entry whose thumbnail is being read */
+/* change directory, TODO */
 static void
-diropen(struct FM *fm, const char *path, int *fd, int *thumbi, int savecwd)
+diropen(struct FM *fm, const char *path, int savecwd)
 {
 	while (fm->selected)
 		selectentry(fm, fm->selected, 0);
 	if (path == NULL || wchdir(path) != -1) {
-		if (*thumbi != -1 && *fd != -1) {       /* close current thumbnailer fd and wait for it */
-			close(*fd);
-			wait(NULL);
-			*thumbi = -1;
-		}
+		//if (*thumbi != -1 && *fd != -1) {       /* close current thumbnailer fd and wait for it */
+		//	close(*fd);
+		//	wait(NULL);
+		//	*thumbi = -1;
+		//}
 		listentries(fm, savecwd);
 		calcsize(fm, -1, -1);
 		fm->row = 0;
 		fm->ydiff = 0;
-		*thumbi = 0;
-		*fd = forkthumb(fm->entries[*thumbi]->name);
+		//*thumbi = 0;
+		//*fd = forkthumb(fm->entries[*thumbi]->name);
 	}
 }
 
@@ -1220,110 +1387,129 @@ fileopen(struct Entry *ent)
 
 /* go back (< 0) in cwd history; return nonzero when changing directory */
 static int
-navhistory(struct FM *fm, int *fd, int *thumbi, int dir)
+navhistory(struct FM *fm, int dir)
 {
 	struct Histent *h;
 
 	h = (dir == BACK) ? fm->curr->prev : fm->curr->next;
 	if (h == NULL)
 		return 0;
-	diropen(fm, h->cwd, fd, thumbi, 0);
+	diropen(fm, h->cwd, 0);
 	fm->curr = h;
 	return 1;
 }
 
-/* process X11 and poll events */
+/* stop running */
 static void
-runevent(struct FM *fm, struct pollfd pfd[], int *thumbi)
+stoprunning(void)
+{
+	running = 0;
+}
+
+/* handle left mouse button click */
+static void
+mouseclick(struct FM *fm, XButtonPressedEvent *ev)
 {
 	static int lastent = -1;        /* index of last clicked entry; -1 if none */
-	static Time lasttime = 0;
+	static Time lasttime = 0;       /* time of last click action */
 	struct Entry *ent;
-	XEvent ev;
-	Imlib_Image img;
 	int setlastent;
 	int i;
 	char path[PATH_MAX];
 
-	if (pfd[POLL_STDIN].revents & POLLHUP)
-		return;
-	if (pfd[POLL_STDIN].revents & POLLIN) {
-		// TODO;
-	}
-	if (pfd[POLL_THUMB].revents & POLLIN) {
-		ent = fm->entries[*thumbi];
-		img = openimg(pfd[POLL_THUMB].fd, &ent->thumb.w, &ent->thumb.h);
-		close(pfd[POLL_THUMB].fd);
-		wait(NULL);
-		if (img != NULL) {
-			drawthumb(fm, img, &ent->thumb, ent->pix);
-			copyentry(fm, *thumbi);
-			if (*thumbi >= fm->row * fm->ncol && *thumbi < fm->row * fm->ncol + fm->nrow * fm->ncol) {
-				commitdraw(fm);
-			}
-		}
-		if (*thumbi != -1 && ++(*thumbi) < fm->nentries) {
-			pfd[POLL_THUMB].fd = forkthumb(fm->entries[*thumbi]->name);
+	setlastent = 1;
+	if (!(ev->state & (ControlMask | ShiftMask)))
+		while (fm->selected)
+			selectentry(fm, fm->selected, 0);
+	i = getentry(fm, ev->x, ev->y);
+	if (ev->state & ShiftMask)
+		selectentries(fm, i, lastent, 1);
+	else if (i != -1)
+		selectentry(fm, fm->entries[i], (ev->state & ControlMask) ? !fm->entries[i]->issel : 1);
+	if (!(ev->state & (ControlMask | ShiftMask)) && i != -1 &&
+	    i == lastent && ev->time - lasttime <= DOUBLECLICK) {
+		ent = fm->entries[i];
+		if (ent->isdir) {
+			snprintf(path, sizeof(path), "./%s", ent->name);
+			diropen(fm, path, 1);
+			setlastent = 0;
 		} else {
-			pfd[POLL_THUMB].fd = -1;
-			*thumbi = -1;
+			fileopen(ent);
 		}
 	}
-	while (XPending(dpy) && !XNextEvent(dpy, &ev)) {
-		setlastent = 1;
-		if (ev.type == ClientMessage && (Atom)ev.xclient.data.l[0] == atoms[WM_DELETE_WINDOW]) {
-			/* file manager window was closed */
-			running = 0;
-			break;
-		} else if (ev.type == Expose && ev.xexpose.count == 0) {
-			/* window was exposed; redraw its content */
-			commitdraw(fm);
-		} else if (ev.type == ConfigureNotify) {
-			/* file manager window was (possibly) resized */
-			calcsize(fm, ev.xconfigure.width, ev.xconfigure.height);
-			if (fm->row >= fm->maxrow)
-				fm->row = fm->maxrow - 1;
+	drawentries(fm);
+	commitdraw(fm);
+	lastent = (setlastent) ? i : -1;
+	lasttime = ev->time;
+}
+
+/* window is exposed; redraw its content */
+static void
+xeventexpose(struct FM *fm, XEvent *ev)
+{
+	if (ev->xexpose.count == 0) {
+		commitdraw(fm);
+	}
+}
+
+/* check if client message is window deletion; stop running if it is */
+static void
+xeventclientmessage(struct FM *fm, XEvent *ev)
+{
+	(void)fm;
+	if ((Atom)ev->xclient.data.l[0] == atoms[WM_DELETE_WINDOW]) {
+		stoprunning();
+	}
+}
+
+/* resize file manager window */
+static void
+xeventconfigurenotify(struct FM *fm, XEvent *ev)
+{
+	calcsize(fm, ev->xconfigure.width, ev->xconfigure.height);
+	if (fm->row >= fm->maxrow)
+		fm->row = fm->maxrow - 1;
+	drawentries(fm);
+	commitdraw(fm);
+}
+
+/* process mouse button press event */
+static void
+xeventbuttonpress(struct FM *fm, XEvent *e)
+{
+	XButtonPressedEvent *ev;
+
+	ev = &e->xbutton;
+	switch (ev->button) {
+	case Button1:
+		if (ev->x > fm->winw)   /* scrollbar was manipulated */
+			grabscroll(fm, ev->y);
+		else                    /* mouse left button was pressed */
+			mouseclick(fm, ev);
+		break;
+	case Button2:
+		// TODO
+		break;
+	case Button3:
+		// TODO
+		break;
+	case Button4:
+	case Button5:
+		/* mouse wheel was scrolled */
+		if (scroll(fm, fm->scrolly + fm->scrollh / 2 + (ev->button == Button4 ? -5 : +5)))
+			drawentries(fm);
+		commitdraw(fm);
+		break;
+	case BUTTON8:
+	case BUTTON9:
+		/* navigate through history with mouse back/forth buttons */
+		if (navhistory(fm, (ev->button == BUTTON8) ? BACK : FORTH)) {
 			drawentries(fm);
 			commitdraw(fm);
-		} else if (ev.type == ButtonPress && (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)) {
-			/* mouse wheel was scrolled */
-			if (scroll(fm, fm->scrolly + fm->scrollh / 2 + (ev.xbutton.button == Button4 ? -5 : +5)))
-				drawentries(fm);
-			commitdraw(fm);
-		} else if (ev.type == ButtonPress && (ev.xbutton.button == BUTTON8 || ev.xbutton.button == BUTTON9)) {
-			/* navigate through history with mouse back/forth buttons */
-			if (navhistory(fm, &pfd[POLL_THUMB].fd, thumbi, (ev.xbutton.button == BUTTON8) ? BACK : FORTH)) {
-				drawentries(fm);
-				commitdraw(fm);
-			}
-		} else if (ev.type == ButtonPress && ev.xbutton.button == Button1 && ev.xbutton.x > fm->winw) {
-			/* scrollbar was manipulated */
-			grabscroll(fm, ev.xbutton.y);
-		} else if (ev.type == ButtonPress && ev.xbutton.button == Button1) {
-			/* mouse left button was pressed */
-			if (!(ev.xbutton.state & (ControlMask | ShiftMask)))
-				while (fm->selected)
-					selectentry(fm, fm->selected, 0);
-			i = getentry(fm, ev.xbutton.x, ev.xbutton.y);
-			if (ev.xbutton.state & ShiftMask)
-				selectentries(fm, i, lastent, 1);
-			if (i != -1)
-				selectentry(fm, fm->entries[i], 1);
-			if (i != -1 && i == lastent && ev.xbutton.time - lasttime <= DOUBLECLICK) {
-				ent = fm->entries[i];
-				if (ent->isdir) {
-					snprintf(path, sizeof(path), "./%s", ent->name);
-					diropen(fm, path, &pfd[POLL_THUMB].fd, thumbi, 1);
-					setlastent = 0;
-				} else {
-					fileopen(ent);
-				}
-			}
-			drawentries(fm);
-			commitdraw(fm);
-			lastent = (setlastent) ? i : -1;
-			lasttime = ev.xbutton.time;
 		}
+		break;
+	default:
+		break;
 	}
 }
 
@@ -1349,11 +1535,15 @@ cleandc(void)
 int
 main(int argc, char *argv[])
 {
-	struct pollfd pfd[POLL_LAST];
 	struct FM fm;
-	int thumbi = -1;        /* index of current thumbnail, -1 if no thumbnail is being read */
+	XEvent ev;
+	void (*xevents[LASTEvent])(struct FM *, XEvent *) = {
+		[ButtonPress]      = xeventbuttonpress,
+		[ClientMessage]    = xeventclientmessage,
+		[ConfigureNotify]  = xeventconfigurenotify,
+		[Expose]           = xeventexpose,
+	};
 	char *path;
-	char *xrm;
 
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		warnx("warning: no locale support");
@@ -1364,6 +1554,7 @@ main(int argc, char *argv[])
 	depth = DefaultDepth(dpy, screen);
 	root = RootWindow(dpy, screen);
 	colormap = DefaultColormap(dpy, screen);
+	esetcloexec(XConnectionNumber(dpy));
 
 	XrmInitialize();
 	if ((xrm = XResourceManagerString(dpy)) != NULL && (xdb = XrmGetStringDatabase(xrm)) != NULL)
@@ -1383,20 +1574,14 @@ main(int argc, char *argv[])
 	initfm(&fm, argc, argv);
 	initellipsis();
 
-	memset(pfd, 0, sizeof pfd);
-	pfd[POLL_STDIN].fd = STDIN_FILENO;
-	pfd[POLL_X11].fd = XConnectionNumber(dpy);
-	pfd[POLL_THUMB].fd = -1;
-	pfd[POLL_STDIN].events = pfd[POLL_X11].events = pfd[POLL_THUMB].events = POLLIN;
-	esetcloexec(pfd[POLL_X11].fd);
-
-	diropen(&fm, path, &pfd[POLL_THUMB].fd, &thumbi, 1);
+	diropen(&fm, path, 1);
 	drawentries(&fm);
 
 	XMapWindow(dpy, fm.win);
 
-	while (running && (XPending(dpy) || poll(pfd, POLL_LAST, -1) != -1))
-		runevent(&fm, pfd, &thumbi);
+	while (running && !XNextEvent(dpy, &ev))
+		if (xevents[ev.type] != NULL)
+			(*xevents[ev.type])(&fm, &ev);
 
 	cleandc();
 
