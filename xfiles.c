@@ -84,11 +84,11 @@ struct Line {
 	int x, w;
 };
 
-/* TODO */
+/* entry of queue of thumbnail images to be rendered to their entries' pixmap */
 struct ThumbImg {
-	struct ThumbImg *next;
-	Imlib_Image img;
-	int index;
+	struct ThumbImg *next;          /* pointer to next entry */
+	Imlib_Image img;                /* image to be rendered */
+	int index;                      /* index of entry */
 };
 
 /* file manager */
@@ -99,8 +99,8 @@ struct FM {
 	struct Rect filerect;   /* size and position of default thumbnail for files */
 	struct Histent *hist;   /* cwd history; pointer to last cwd history entry */
 	struct Histent *curr;   /* current point in history */
-	struct ThumbImg *queue; /* TODO */
-	struct ThumbImg *last;  /* TODO */
+	struct ThumbImg *queue; /* first item on queue of thumbnail images */
+	struct ThumbImg *last;  /* last item on queue of thumbnail images */
 	Window win;             /* main window */
 	Pixmap main, scroll;    /* pixmap for main window and scroll bar */
 	Pixmap dir[PIX_LAST];   /* default pixmap for directories thumbnails */
@@ -811,7 +811,7 @@ drawthumb(struct FM *fm, Imlib_Image img, struct Rect *thumb, Pixmap *pix)
 	imlib_free_image();
 }
 
-/* TODO */
+/* fake expose event to force redrawing */
 static void
 sendevent(struct FM *fm)
 {
@@ -825,7 +825,7 @@ sendevent(struct FM *fm)
 	XFlush(dpy);
 }
 
-/* TODO */
+/* add thumbnail image to queue */
 static void
 addthumbimg(struct FM *fm, Imlib_Image img, int index)
 {
@@ -844,7 +844,7 @@ addthumbimg(struct FM *fm, Imlib_Image img, int index)
 	pthread_mutex_unlock(&queuelock);
 }
 
-/* TODO */
+/* delete thumbnail image from queue */
 static struct ThumbImg *
 delthumbimg(struct FM *fm)
 {
@@ -861,6 +861,23 @@ delthumbimg(struct FM *fm)
 	}
 	pthread_mutex_unlock(&queuelock);
 	return ret;
+}
+
+/* clear thumbnail image queue */
+static void
+clearqueue(struct FM *fm)
+{
+	struct ThumbImg *tmp;
+
+	pthread_mutex_lock(&queuelock);
+	while (fm->queue != NULL) {
+		tmp = fm->queue;
+		fm->queue = fm->queue->next;
+		imlib_context_set_image(tmp->img);
+		imlib_free_image();
+		free(tmp);
+	}
+	pthread_mutex_unlock(&queuelock);
 }
 
 /* call sigaction on sig */
@@ -1504,7 +1521,7 @@ selectentries(struct FM *fm, int a, int b, int select)
 	}
 }
 
-/* change directory, TODO */
+/* change directory */
 static void
 diropen(struct FM *fm, const char *path, int savecwd)
 {
@@ -1516,6 +1533,7 @@ diropen(struct FM *fm, const char *path, int savecwd)
 		etjoin(thumbt, NULL);
 		unsetthumbexit();
 
+		clearqueue(fm);
 		listentries(fm, savecwd);
 		calcsize(fm, -1, -1);
 		fm->row = 0;
