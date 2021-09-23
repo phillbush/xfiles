@@ -1370,10 +1370,14 @@ readpath(int fd, char *path)
 	int len;
 
 	*path = '\0';
-	if ((fp = fdopen(fd, "r")) == NULL)
+	if ((fp = fdopen(fd, "r")) == NULL) {
 		warn("fdopen");
-	if (fgets(path, PATH_MAX, fp) == NULL)
+		return;
+	}
+	if (fgets(path, PATH_MAX, fp) == NULL) {
 		fclose(fp);
+		return;
+	}
 	fclose(fp);
 	len = strlen(path);
 	if (path[len - 1] == '\n') {
