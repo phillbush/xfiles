@@ -33,5 +33,4 @@ the icons provided at compilation time by the files `file.xpm` and
 • Implement CLI commands.
 • Implement right-click context menu.
 • Implement drag-and-drop.
-• Reimplement thumbnails with threads.
 • Use kqueue/inotify to check for directory changes.
