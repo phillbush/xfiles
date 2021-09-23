@@ -3,11 +3,11 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <err.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
 #include <pthread.h>
-#include <semaphore.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,6 +84,13 @@ struct Line {
 	int x, w;
 };
 
+/* TODO */
+struct ThumbImg {
+	struct ThumbImg *next;
+	Imlib_Image img;
+	int index;
+};
+
 /* file manager */
 struct FM {
 	struct Entry **entries; /* array of pointer to entries */
@@ -92,6 +99,8 @@ struct FM {
 	struct Rect filerect;   /* size and position of default thumbnail for files */
 	struct Histent *hist;   /* cwd history; pointer to last cwd history entry */
 	struct Histent *curr;   /* current point in history */
+	struct ThumbImg *queue; /* TODO */
+	struct ThumbImg *last;  /* TODO */
 	Window win;             /* main window */
 	Pixmap main, scroll;    /* pixmap for main window and scroll bar */
 	Pixmap dir[PIX_LAST];   /* default pixmap for directories thumbnails */
@@ -182,8 +191,10 @@ static int depth;
 static char *xrm;
 
 /* threads */
-pthread_t thumbt;
-sem_t thumblock;
+static pthread_mutex_t thumblock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t queuelock  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t thumbt;
+static int thumbexit = 0;
 
 /* flags */
 static int running = 1;         /* whether xfiles is running */
@@ -261,13 +272,22 @@ egetcwd(char *path, size_t size)
 	}
 }
 
+/* call pipe checking for error; exit on error */
+static void
+epipe(int fd[])
+{
+	if (pipe(fd) == -1) {
+		err(1, "pipe");
+	}
+}
+
 /* call fork checking for error; exit on error */
 static pid_t
 efork(void)
 {
 	pid_t pid;
 
-	if ((pid = fork()) == -1)
+	if ((pid = fork()) < 0)
 		err(1, "fork");
 	return pid;
 }
@@ -305,6 +325,30 @@ ealloccolor(const char *s, XftColor *color)
 {
 	if(!XftColorAllocName(dpy, visual, colormap, s, color))
 		errx(1, "could not allocate color: %s", s);
+}
+
+/* call pthread_create checking for error */
+void
+etcreate(pthread_t *tid, void *(*thrfn)(void *), void *arg)
+{
+	int errn;
+
+	if ((errn = pthread_create(tid, NULL, thrfn, arg)) != 0) {
+		errno = errn;
+		err(1, "could not create thread");
+	}
+}
+
+/* call pthread_join checking for error */
+void
+etjoin(pthread_t tid, void **rval)
+{
+	int errn;
+
+	if ((errn = pthread_join(tid, rval)) != 0) {
+		errno = errn;
+		err(1, "could not join with thread");
+	}
 }
 
 /* call chdir checking for error; print warning on error */
@@ -749,6 +793,9 @@ drawthumb(struct FM *fm, Imlib_Image img, struct Rect *thumb, Pixmap *pix)
 	thumb->y = fm->thumby + max((config.thumbsize_pixels - thumb->h) / 2, 0);
 
 	/* draw border on sel pixmap around thumbnail */
+	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
+	XFillRectangle(dpy, pix[PIX_UNSEL], dc.gc, fm->thumbx, fm->thumby, config.thumbsize_pixels, config.thumbsize_pixels);
+	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, fm->thumbx - THUMBBORDER, fm->thumby - THUMBBORDER, config.thumbsize_pixels + 2 * THUMBBORDER, config.thumbsize_pixels + 2 * THUMBBORDER);
 	XSetForeground(dpy, dc.gc, dc.select[COLOR_BG].pixel);
 	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x - THUMBBORDER, thumb->y - THUMBBORDER, thumb->w + 2 * THUMBBORDER, thumb->h + 2 * THUMBBORDER);
 	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
@@ -761,9 +808,59 @@ drawthumb(struct FM *fm, Imlib_Image img, struct Rect *thumb, Pixmap *pix)
 	imlib_render_image_on_drawable(thumb->x, thumb->y);
 	imlib_context_set_drawable(pix[PIX_SEL]);
 	imlib_render_image_on_drawable(thumb->x, thumb->y);
-
-	/* free image */
 	imlib_free_image();
+}
+
+/* TODO */
+static void
+sendevent(struct FM *fm)
+{
+	XEvent ev;
+
+	ev.type = Expose;
+	ev.xexpose.window = fm->win;
+	ev.xexpose.count = 0;
+
+	XSendEvent(dpy, fm->win, False, NoEventMask, &ev);
+	XFlush(dpy);
+}
+
+/* TODO */
+static void
+addthumbimg(struct FM *fm, Imlib_Image img, int index)
+{
+	struct ThumbImg *ti;
+
+	ti = emalloc(sizeof(*ti));
+	ti->next = NULL;
+	ti->img = img;
+	ti->index = index;
+	pthread_mutex_lock(&queuelock);
+	if (fm->last != NULL)
+		fm->last->next = ti;
+	else
+		fm->queue = ti;
+	fm->last = ti;
+	pthread_mutex_unlock(&queuelock);
+}
+
+/* TODO */
+static struct ThumbImg *
+delthumbimg(struct FM *fm)
+{
+	struct ThumbImg *ret;
+
+	pthread_mutex_lock(&queuelock);
+	ret = fm->queue;
+	if (fm->queue != NULL) {
+		if (fm->last == fm->queue)
+			fm->last = NULL;
+		fm->queue = fm->queue->next;
+	} else {
+		fm->last = NULL;
+	}
+	pthread_mutex_unlock(&queuelock);
+	return ret;
 }
 
 /* call sigaction on sig */
@@ -868,6 +965,7 @@ initfm(struct FM *fm, int argc, char *argv[])
 	fm->hist = fm->curr = NULL;
 	fm->entries = NULL;
 	fm->selected = NULL;
+	fm->queue = fm->last = NULL;
 	fm->capacity = 0;
 	fm->nentries = 0;
 	fm->row = 0;
@@ -906,10 +1004,6 @@ initfm(struct FM *fm, int argc, char *argv[])
 	fm->dir[PIX_UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
 	fm->dir[PIX_SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
 	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, fm->file[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->file[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->dir[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->dir[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
 
 	/* clean pixmaps */
 	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
@@ -1246,6 +1340,100 @@ drawentries(struct FM *fm)
 	commitdraw(fm);
 }
 
+/* fork process that get thumbnail */
+static int
+forkthumb(const char *name)
+{
+	pid_t pid;
+	int fd[2];
+	char path[PATH_MAX];
+
+	snprintf(path, sizeof(path), "./%s", name);
+	epipe(fd);
+	if ((pid = efork()) > 0) {      /* parent */
+		close(fd[1]);
+		return fd[0];
+	} else {                        /* children */
+		close(fd[0]);
+		if (fd[1] != STDOUT_FILENO)
+			edup2(fd[1], STDOUT_FILENO);
+		eexec(config.thumbnailer, path);
+	}
+	return -1;                      /* unreachable */
+}
+
+/* read image path from file descriptor */
+static void
+readpath(int fd, char *path)
+{
+	FILE *fp;
+	int len;
+
+	*path = '\0';
+	if ((fp = fdopen(fd, "r")) == NULL)
+		warn("fdopen");
+	if (fgets(path, PATH_MAX, fp) == NULL)
+		fclose(fp);
+	fclose(fp);
+	len = strlen(path);
+	if (path[len - 1] == '\n') {
+		path[len - 1] = '\0';
+	}
+}
+
+/* set thumbexit */
+static void
+setthumbexit(void)
+{
+	pthread_mutex_lock(&thumblock);
+	thumbexit = 1;
+	pthread_mutex_unlock(&thumblock);
+}
+
+/* unset thumbexit */
+static void
+unsetthumbexit(void)
+{
+	pthread_mutex_lock(&thumblock);
+	thumbexit = 0;
+	pthread_mutex_unlock(&thumblock);
+}
+
+/* thumbnailer thread */
+static void *
+thumbnailer(void *arg)
+{
+	struct FM *fm;
+	struct Entry *ent;
+	Imlib_Image img;
+	int fd;
+	int ret;
+	int i;
+	char path[PATH_MAX];
+
+	ret = 0;
+	fm = (struct FM *)arg;
+	for (i = 0; i < fm->nentries; i++) {
+		pthread_mutex_lock(&thumblock);
+		if (thumbexit)
+			ret = 1;
+		pthread_mutex_unlock(&thumblock);
+		if (ret)
+			break;
+		ent = fm->entries[i];
+		fd = forkthumb(fm->entries[i]->name);
+		readpath(fd, path);
+		close(fd);
+		wait(NULL);
+		img = loadimg(path, config.thumbsize_pixels, &ent->thumb.w, &ent->thumb.h);
+		if (img != NULL) {
+			addthumbimg(fm, img, i);
+			sendevent(fm);
+		}
+	}
+	pthread_exit(0);
+}
+
 /* scroll list by manipulating scroll bar with pointer; return 1 if fm->row changes */
 static int
 scroll(struct FM *fm, int y)
@@ -1257,44 +1445,13 @@ scroll(struct FM *fm, int y)
 	half = fm->scrollh / 2;
 	y = max(half, min(y, fm->winh - half));
 	y -= half;
-	fm->row =  y * fm->maxrow / fm->winh;
+	fm->row = y * fm->maxrow / fm->winh;
 	fm->ydiff = (y - fm->row * fm->winh / fm->maxrow) * fm->entryh / fm->scrollh;
 	if (fm->row >= fm->maxrow - 1) {
 		fm->row = fm->maxrow - 1;
 		fm->ydiff = 0;
 	}
 	return prevrow != fm->row;
-}
-
-/* grab pointer and handle scrollbar dragging with the left mouse button */
-static void
-grabscroll(struct FM *fm, int y)
-{
-	XEvent ev;
-	int dy;
-
-	if (grabpointer(fm, Button1MotionMask) == -1)
-		return;
-	dy = between(y, fm->scrolly, fm->scrolly + fm->scrollh) ? fm->scrolly + fm->scrollh / 2 - y : 0;
-	if (scroll(fm, y + dy))
-		drawentries(fm);
-	commitdraw(fm);
-	while (!XMaskEvent(dpy, ButtonReleaseMask | Button1MotionMask | ExposureMask, &ev)) {
-		switch (ev.type) {
-		case Expose:
-			if (ev.xexpose.count == 0)
-				commitdraw(fm);
-			break;
-		case MotionNotify:
-			if (scroll(fm, ev.xbutton.y + dy))
-				drawentries(fm);
-			commitdraw(fm);
-			break;
-		case ButtonRelease:
-			ungrab();
-			return;
-		}
-	}
 }
 
 /* mark or unmark entry as selected */
@@ -1347,20 +1504,19 @@ selectentries(struct FM *fm, int a, int b, int select)
 static void
 diropen(struct FM *fm, const char *path, int savecwd)
 {
-	while (fm->selected)
+	while (fm->selected != NULL)            /* unselect entries */
 		selectentry(fm, fm->selected, 0);
 	if (path == NULL || wchdir(path) != -1) {
-		//if (*thumbi != -1 && *fd != -1) {       /* close current thumbnailer fd and wait for it */
-		//	close(*fd);
-		//	wait(NULL);
-		//	*thumbi = -1;
-		//}
+		/* close previous thumbnailer thread */
+		setthumbexit();
+		etjoin(thumbt, NULL);
+		unsetthumbexit();
+
 		listentries(fm, savecwd);
 		calcsize(fm, -1, -1);
 		fm->row = 0;
 		fm->ydiff = 0;
-		//*thumbi = 0;
-		//*fd = forkthumb(fm->entries[*thumbi]->name);
+		etcreate(&thumbt, thumbnailer, (void *)fm);
 	}
 }
 
@@ -1447,8 +1603,18 @@ mouseclick(struct FM *fm, XButtonPressedEvent *ev)
 static void
 xeventexpose(struct FM *fm, XEvent *ev)
 {
+	struct ThumbImg *ti;
+
 	if (ev->xexpose.count == 0) {
-		commitdraw(fm);
+		if ((ti = delthumbimg(fm)) != NULL) {
+			drawthumb(fm, ti->img, &fm->entries[ti->index]->thumb, fm->entries[ti->index]->pix);
+			copyentry(fm, ti->index);
+			if (ti->index >= fm->row * fm->ncol && ti->index < fm->row * fm->ncol + fm->nrow * fm->ncol) {
+				commitdraw(fm);
+			}
+		} else {
+			commitdraw(fm);
+		}
 	}
 }
 
@@ -1471,6 +1637,36 @@ xeventconfigurenotify(struct FM *fm, XEvent *ev)
 		fm->row = fm->maxrow - 1;
 	drawentries(fm);
 	commitdraw(fm);
+}
+
+/* grab pointer and handle scrollbar dragging with the left mouse button */
+static void
+grabscroll(struct FM *fm, int y)
+{
+	XEvent ev;
+	int dy;
+
+	if (grabpointer(fm, Button1MotionMask) == -1)
+		return;
+	dy = between(y, fm->scrolly, fm->scrolly + fm->scrollh) ? fm->scrolly + fm->scrollh / 2 - y : 0;
+	if (scroll(fm, y + dy))
+		drawentries(fm);
+	commitdraw(fm);
+	while (!XMaskEvent(dpy, ButtonReleaseMask | Button1MotionMask | ExposureMask, &ev)) {
+		switch (ev.type) {
+		case Expose:
+			xeventexpose(fm, &ev);
+			break;
+		case MotionNotify:
+			if (scroll(fm, ev.xbutton.y + dy))
+				drawentries(fm);
+			commitdraw(fm);
+			break;
+		case ButtonRelease:
+			ungrab();
+			return;
+		}
+	}
 }
 
 /* process mouse button press event */
@@ -1545,6 +1741,8 @@ main(int argc, char *argv[])
 	};
 	char *path;
 
+	if (!XInitThreads())
+		errx(1, "XInitThreads");
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		warnx("warning: no locale support");
 	if ((dpy = XOpenDisplay(NULL)) == NULL)
@@ -1574,6 +1772,7 @@ main(int argc, char *argv[])
 	initfm(&fm, argc, argv);
 	initellipsis();
 
+	etcreate(&thumbt, thumbnailer, (void *)&fm);
 	diropen(&fm, path, 1);
 	drawentries(&fm);
 

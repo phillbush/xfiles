@@ -1,8 +1,8 @@
                                  xfiles
 
 This is a still incomplete file manager for X11.  It can only navigate
-through directories, select files (and do nothing with them), and call
-a script to open files.
+through directories, select files (and do nothing with them), call a
+script to open files, and call a script to generate thumbnails.
 
 To run xfiles, do the following:
 • (1) First copy the script ./thumbnail to your $PATH.
