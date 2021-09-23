@@ -9,6 +9,15 @@ To run xfiles, do the following:
 • (2) Run make.
 • (3) Run ./xfiles, you can give it the path to any directory as argument.
 
+§ Dependencies
+
+The thumbnail script depends on ImageMagick to generate thumbnails.  It
+also depends on the following programs:
+• ffmpegthumbnail(1): to generate thumbnail for videos. 
+• rsvg-convert(1): to generate thumbnail for svg files. 
+• pdftoppm(1): to generate thumbnail for pdf. 
+• ffmpeg(1): to generate thumbnail for audio files. 
+
 § Customization
 
 You can edit ./config.h, to customize your build at compile time.
