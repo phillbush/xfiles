@@ -1293,7 +1293,10 @@ drawentry(struct FM *fm, struct Entry *ent)
 		for (; ent->name[len0] != '\0' && !isspace(ent->name[len0]) && !isbreakable(ent->name[len0]); len0++)
 			;
 		textw0 = drawtext(NULL, NULL, 0, 0, 0, ent->name, len0);
-		while (isspace(ent->name[len0]) || isbreakable(ent->name[len0]))
+		while (isbreakable(ent->name[len0]))
+			len0++;
+		textw0 = drawtext(NULL, NULL, 0, 0, 0, ent->name, len0);
+		while (isspace(ent->name[len0]))
 			len0++;
 	} while (textw0 < fm->textw && ent->name[len0] != '\0' && prevw != textw0);
 	if (textw0 >= fm->textw) {
