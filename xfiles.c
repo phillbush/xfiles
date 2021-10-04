@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
+#include <math.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -19,7 +20,10 @@
 #include <X11/Xutil.h>
 #include <X11/xpm.h>
 #include <X11/Xft/Xft.h>
-#include <Imlib2.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "stb_image_resize.h"
 #include "file.xpm"
 #include "folder.xpm"
 
@@ -84,13 +88,6 @@ struct Line {
 	int x, w;
 };
 
-/* entry of queue of thumbnail images to be rendered to their entries' pixmap */
-struct ThumbImg {
-	struct ThumbImg *next;          /* pointer to next entry */
-	Imlib_Image img;                /* image to be rendered */
-	int index;                      /* index of entry */
-};
-
 /* file manager */
 struct FM {
 	struct Entry **entries; /* array of pointer to entries */
@@ -99,8 +96,6 @@ struct FM {
 	struct Rect filerect;   /* size and position of default thumbnail for files */
 	struct Histent *hist;   /* cwd history; pointer to last cwd history entry */
 	struct Histent *curr;   /* current point in history */
-	struct ThumbImg *queue; /* first item on queue of thumbnail images */
-	struct ThumbImg *last;  /* last item on queue of thumbnail images */
 	Window win;             /* main window */
 	Pixmap main, scroll;    /* pixmap for main window and scroll bar */
 	Pixmap dir[PIX_LAST];   /* default pixmap for directories thumbnails */
@@ -192,7 +187,7 @@ static char *xrm;
 
 /* threads */
 static pthread_mutex_t thumblock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t queuelock  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t geomlock  = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t thumbt;
 static int thumbexit = 0;
 
@@ -554,6 +549,7 @@ parseoptions(int argc, char *argv[])
 static void
 calcsize(struct FM *fm, int w, int h)
 {
+	pthread_mutex_lock(&geomlock);
 	if (w >= 0 && h >= 0) {
 		fm->winw = max(w - config.scroll_pixels, 1);
 		fm->winh = h;
@@ -570,6 +566,7 @@ calcsize(struct FM *fm, int w, int h)
 	fm->maxrow = fm->nentries / fm->ncol - fm->winh / fm->entryh + 1 + (fm->nentries % fm->ncol != 0);
 	fm->maxrow = max(fm->maxrow, 1);
 	fm->scrollh = max(fm->winh / fm->maxrow, 1);
+	pthread_mutex_unlock(&geomlock);
 }
 
 /* get next utf8 char from s return its codepoint and set next_ret to pointer to end of character */
@@ -712,81 +709,63 @@ drawtext(XftDraw *draw, XftColor *color, int x, int y, int w, const char *text, 
 	return textwidth;
 }
 
-/* load image from file and scale it to size; return the image and its size */
-static Imlib_Image
-loadimg(const char *file, int size, int *width_ret, int *height_ret)
+/* load image from file, scale it, and draw into pix[PIX_SEL] and pix[PIX_UNSEL] */
+static int
+drawthumb(const char *file, struct FM *fm, struct Rect *thumb, Pixmap *pix)
 {
-	Imlib_Image img;
-	Imlib_Load_Error errcode;
-	const char *errstr;
-	int width;
-	int height;
+	XImage *image;
+	long isize, i;
+	int bpl, channels;
+	int width, height;
+	unsigned char *dataorig, *data;
 
-	img = imlib_load_image_with_error_return(file, &errcode);
-	if (*file == '\0') {
-		return NULL;
-	} else if (img == NULL) {
-		switch (errcode) {
-		case IMLIB_LOAD_ERROR_FILE_DOES_NOT_EXIST:
-			errstr = "file does not exist";
-			break;
-		case IMLIB_LOAD_ERROR_FILE_IS_DIRECTORY:
-			errstr = "file is directory";
-			break;
-		case IMLIB_LOAD_ERROR_PERMISSION_DENIED_TO_READ:
-		case IMLIB_LOAD_ERROR_PERMISSION_DENIED_TO_WRITE:
-			errstr = "permission denied";
-			break;
-		case IMLIB_LOAD_ERROR_NO_LOADER_FOR_FILE_FORMAT:
-			errstr = "unknown file format";
-			break;
-		case IMLIB_LOAD_ERROR_PATH_TOO_LONG:
-			errstr = "path too long";
-			break;
-		case IMLIB_LOAD_ERROR_PATH_COMPONENT_NON_EXISTANT:
-		case IMLIB_LOAD_ERROR_PATH_COMPONENT_NOT_DIRECTORY:
-		case IMLIB_LOAD_ERROR_PATH_POINTS_OUTSIDE_ADDRESS_SPACE:
-			errstr = "improper path";
-			break;
-		case IMLIB_LOAD_ERROR_TOO_MANY_SYMBOLIC_LINKS:
-			errstr = "too many symbolic links";
-			break;
-		case IMLIB_LOAD_ERROR_OUT_OF_MEMORY:
-			errstr = "out of memory";
-			break;
-		case IMLIB_LOAD_ERROR_OUT_OF_FILE_DESCRIPTORS:
-			errstr = "out of file descriptors";
-			break;
-		default:
-			errstr = "unknown error";
-			break;
-		}
-		warnx("could not load image (%s): %s", errstr, file);
-		return NULL;
-	}
-	imlib_context_set_image(img);
-	width = imlib_image_get_width();
-	height = imlib_image_get_height();
+	if ((dataorig = stbi_load(file, &width, &height, &channels, 0)) == NULL)
+		return 0;
 	if (width > height) {
-		*width_ret = size;
-		*height_ret = (height * size) / width;
+		thumb->w = config.thumbsize_pixels;
+		thumb->h = (height * config.thumbsize_pixels) / width;
 	} else {
-		*width_ret = (width * size) / height;
-		*height_ret = size;
+		thumb->w = (width * config.thumbsize_pixels) / height;
+		thumb->h = config.thumbsize_pixels;
 	}
-	img = imlib_create_cropped_scaled_image(0, 0, width, height,
-	                                         *width_ret, *height_ret);
-	return img;
-}
-
-/* draw thumbnail image on pixmaps; then free image */
-static void
-drawthumb(struct FM *fm, Imlib_Image img, struct Rect *thumb, Pixmap *pix)
-{
-	thumb->x = 0;
-	thumb->y = 0;
-	if (img == NULL)
-		return;
+	data = malloc(thumb->w * thumb->h * 4);
+	stbir_resize_uint8(dataorig, width, height, 0, data, thumb->w, thumb->h, 0, channels);
+	if (data == NULL)
+		return 0;
+	stbi_image_free(dataorig);
+	bpl = channels;
+	switch (depth){
+		case 24:
+			bpl = 4;
+		break;
+		case 16:
+		case 15:
+			bpl = 2;
+		break;
+		default:
+			bpl = 1;
+		break;
+	}
+	
+	/* rgba to bgra */
+	if (channels >= 3){
+		isize = thumb->w * thumb->h * channels;
+		for (i=0; i < isize; i += channels) {
+			if (channels == 4) {    /* alpha compositing */
+				data[i + 0] = (dc.normal[COLOR_BG].color.red * 255 / USHRT_MAX) + ((data[i + 0] - (dc.normal[COLOR_BG].color.red * 255 / USHRT_MAX)) * data[i + 3]) / 255;
+				data[i + 1] = (dc.normal[COLOR_BG].color.green * 255 / USHRT_MAX) + ((data[i + 1] - (dc.normal[COLOR_BG].color.green * 255 / USHRT_MAX)) * data[i + 3]) / 255;
+				data[i + 2] = (dc.normal[COLOR_BG].color.blue * 255 / USHRT_MAX) + ((data[i + 2] - (dc.normal[COLOR_BG].color.blue * 255 / USHRT_MAX)) * data[i + 3]) / 255;
+				data[i + 3] = 0;
+			}
+			unsigned char red  = data[i + 2];
+			unsigned char blue = data[i];
+			data[i]   = red;
+			data[i + 2] = blue;
+		}
+	}
+	image = XCreateImage(dpy, CopyFromParent, depth, ZPixmap, 0, (char *)data, thumb->w, thumb->h, bpl * 8, thumb->w * bpl);
+	if (image == NULL)
+		return 0;
 
 	/* compute position of thumbnails */
 	thumb->x = fm->thumbx + max((config.thumbsize_pixels - thumb->w) / 2, 0);
@@ -802,82 +781,10 @@ drawthumb(struct FM *fm, Imlib_Image img, struct Rect *thumb, Pixmap *pix)
 	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x, thumb->y, thumb->w, thumb->h);
 
 	/* draw thumbnail on both pixmaps */
-	imlib_context_set_image(img);
-	imlib_image_set_changes_on_disk();
-	imlib_context_set_drawable(pix[PIX_UNSEL]);
-	imlib_render_image_on_drawable(thumb->x, thumb->y);
-	imlib_context_set_drawable(pix[PIX_SEL]);
-	imlib_render_image_on_drawable(thumb->x, thumb->y);
-	imlib_free_image();
-}
-
-/* fake expose event to force redrawing */
-static void
-sendevent(struct FM *fm)
-{
-	XEvent ev;
-
-	ev.type = Expose;
-	ev.xexpose.window = fm->win;
-	ev.xexpose.count = 0;
-
-	XSendEvent(dpy, fm->win, False, NoEventMask, &ev);
-	XFlush(dpy);
-}
-
-/* add thumbnail image to queue */
-static void
-addthumbimg(struct FM *fm, Imlib_Image img, int index)
-{
-	struct ThumbImg *ti;
-
-	ti = emalloc(sizeof(*ti));
-	ti->next = NULL;
-	ti->img = img;
-	ti->index = index;
-	pthread_mutex_lock(&queuelock);
-	if (fm->last != NULL)
-		fm->last->next = ti;
-	else
-		fm->queue = ti;
-	fm->last = ti;
-	pthread_mutex_unlock(&queuelock);
-}
-
-/* delete thumbnail image from queue */
-static struct ThumbImg *
-delthumbimg(struct FM *fm)
-{
-	struct ThumbImg *ret;
-
-	pthread_mutex_lock(&queuelock);
-	ret = fm->queue;
-	if (fm->queue != NULL) {
-		if (fm->last == fm->queue)
-			fm->last = NULL;
-		fm->queue = fm->queue->next;
-	} else {
-		fm->last = NULL;
-	}
-	pthread_mutex_unlock(&queuelock);
-	return ret;
-}
-
-/* clear thumbnail image queue */
-static void
-clearqueue(struct FM *fm)
-{
-	struct ThumbImg *tmp;
-
-	pthread_mutex_lock(&queuelock);
-	while (fm->queue != NULL) {
-		tmp = fm->queue;
-		fm->queue = fm->queue->next;
-		imlib_context_set_image(tmp->img);
-		imlib_free_image();
-		free(tmp);
-	}
-	pthread_mutex_unlock(&queuelock);
+	XPutImage(dpy, pix[PIX_UNSEL], dc.gc, image, 0, 0, thumb->x, thumb->y, thumb->w, thumb->h);
+	XPutImage(dpy, pix[PIX_SEL], dc.gc, image, 0, 0, thumb->x, thumb->y, thumb->w, thumb->h);
+	XDestroyImage(image);
+	return 1;
 }
 
 /* call sigaction on sig */
@@ -973,8 +880,6 @@ initfm(struct FM *fm, int argc, char *argv[])
 {
 	XSetWindowAttributes swa;
 	XClassHint classh;
-	Imlib_Image fileimg;
-	Imlib_Image dirimg;
 	pid_t pid;
 
 	fm->main = None;
@@ -982,7 +887,6 @@ initfm(struct FM *fm, int argc, char *argv[])
 	fm->hist = fm->curr = NULL;
 	fm->entries = NULL;
 	fm->selected = NULL;
-	fm->queue = fm->last = NULL;
 	fm->capacity = 0;
 	fm->nentries = 0;
 	fm->row = 0;
@@ -1031,15 +935,13 @@ initfm(struct FM *fm, int argc, char *argv[])
 
 	/* draw default thumbnails */
 	if (config.filethumb_path != NULL && config.filethumb_path[0] != '\0') {
-		fileimg = loadimg(config.filethumb_path, config.thumbsize_pixels, &fm->filerect.w, &fm->filerect.h);
-		drawthumb(fm, fileimg, &fm->filerect, fm->file);
+		drawthumb(config.filethumb_path, fm, &fm->filerect, fm->file);
 	} else {
 		warnx("could not find icon for files; using default icon");
 		xpmread(fm, &fm->filerect, fm->file, file);
 	}
 	if (config.dirthumb_path != NULL && config.dirthumb_path[0] != '\0') {
-		dirimg = loadimg(config.dirthumb_path, config.thumbsize_pixels, &fm->dirrect.w, &fm->dirrect.h);
-		drawthumb(fm, dirimg, &fm->dirrect, fm->dir);
+		drawthumb(config.dirthumb_path, fm, &fm->dirrect, fm->dir);
 	} else {
 		warnx("could not find icon for directories; using default icon");
 		xpmread(fm, &fm->dirrect, fm->dir, folder);
@@ -1414,6 +1316,15 @@ setthumbexit(void)
 	pthread_mutex_unlock(&thumblock);
 }
 
+/* set fm->row locking geomlock */
+static void
+setrow(struct FM *fm, int row)
+{
+	pthread_mutex_lock(&geomlock);
+	fm->row = row;
+	pthread_mutex_unlock(&geomlock);
+}
+
 /* unset thumbexit */
 static void
 unsetthumbexit(void)
@@ -1429,7 +1340,6 @@ thumbnailer(void *arg)
 {
 	struct FM *fm;
 	struct Entry *ent;
-	Imlib_Image img;
 	int fd;
 	int ret;
 	int i;
@@ -1449,10 +1359,12 @@ thumbnailer(void *arg)
 		readpath(fd, path);
 		close(fd);
 		wait(NULL);
-		img = loadimg(path, config.thumbsize_pixels, &ent->thumb.w, &ent->thumb.h);
-		if (img != NULL) {
-			addthumbimg(fm, img, i);
-			sendevent(fm);
+		if (*path != '\0' && drawthumb(path, fm, &ent->thumb, ent->pix)) {
+			copyentry(fm, i);
+			pthread_mutex_lock(&geomlock);
+			if (i >= fm->row * fm->ncol && i < fm->row * fm->ncol + fm->nrow * fm->ncol)
+				commitdraw(fm);
+			pthread_mutex_unlock(&geomlock);
 		}
 	}
 	pthread_exit(0);
@@ -1469,10 +1381,10 @@ scroll(struct FM *fm, int y)
 	half = fm->scrollh / 2;
 	y = max(half, min(y, fm->winh - half));
 	y -= half;
-	fm->row = y * fm->maxrow / fm->winh;
+	setrow(fm, y * fm->maxrow / fm->winh);
 	fm->ydiff = (y - fm->row * fm->winh / fm->maxrow) * fm->entryh / fm->scrollh;
 	if (fm->row >= fm->maxrow - 1) {
-		fm->row = fm->maxrow - 1;
+		setrow(fm, fm->maxrow - 1);
 		fm->ydiff = 0;
 	}
 	return prevrow != fm->row;
@@ -1536,10 +1448,9 @@ diropen(struct FM *fm, const char *path, int savecwd)
 		etjoin(thumbt, NULL);
 		unsetthumbexit();
 
-		clearqueue(fm);
 		listentries(fm, savecwd);
 		calcsize(fm, -1, -1);
-		fm->row = 0;
+		setrow(fm, 0);
 		fm->ydiff = 0;
 		etcreate(&thumbt, thumbnailer, (void *)fm);
 	}
@@ -1628,18 +1539,8 @@ mouseclick(struct FM *fm, XButtonPressedEvent *ev)
 static void
 xeventexpose(struct FM *fm, XEvent *ev)
 {
-	struct ThumbImg *ti;
-
 	if (ev->xexpose.count == 0) {
-		if ((ti = delthumbimg(fm)) != NULL) {
-			drawthumb(fm, ti->img, &fm->entries[ti->index]->thumb, fm->entries[ti->index]->pix);
-			copyentry(fm, ti->index);
-			if (ti->index >= fm->row * fm->ncol && ti->index < fm->row * fm->ncol + fm->nrow * fm->ncol) {
-				commitdraw(fm);
-			}
-		} else {
-			commitdraw(fm);
-		}
+		commitdraw(fm);
 	}
 }
 
@@ -1659,7 +1560,7 @@ xeventconfigurenotify(struct FM *fm, XEvent *ev)
 {
 	calcsize(fm, ev->xconfigure.width, ev->xconfigure.height);
 	if (fm->row >= fm->maxrow)
-		fm->row = fm->maxrow - 1;
+		setrow(fm, fm->maxrow - 1);
 	drawentries(fm);
 	commitdraw(fm);
 }
@@ -1784,12 +1685,6 @@ main(int argc, char *argv[])
 		parseresources();
 	parseenviron();
 	path = parseoptions(argc, argv);
-
-	imlib_set_cache_size(2048 * 1024);
-	imlib_context_set_dither(1);
-	imlib_context_set_display(dpy);
-	imlib_context_set_visual(visual);
-	imlib_context_set_colormap(colormap);
 
 	initsignal(SIGCHLD, SIG_IGN);
 	initatoms();

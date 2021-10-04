@@ -13,7 +13,7 @@ FREETYPEINCOBSD = ${X11INC}/freetype2
 
 # includes and libs
 INCS = -I${LOCALINC} -I${X11INC} -I${FREETYPEINC} -I${FREETYPEINCOBSD}
-LIBS = -L${LOCALLIB} -L${X11LIB} -lfontconfig -lXft -lX11 -lXpm -lImlib2 -lpthread
+LIBS = -L${LOCALLIB} -L${X11LIB} -lm -lfontconfig -lXft -lX11 -lXpm -lpthread
 
 # flags
 CFLAGS = -g -O0 -Wall -Wextra ${INCS} ${CPPFLAGS}
