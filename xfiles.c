@@ -719,7 +719,7 @@ drawthumb(const char *file, struct FM *fm, struct Rect *thumb, Pixmap *pix)
 	int width, height;
 	unsigned char *dataorig, *data;
 
-	if ((dataorig = stbi_load(file, &width, &height, &channels, 0)) == NULL)
+	if ((dataorig = stbi_load(file, &width, &height, &channels, 4)) == NULL)
 		return 0;
 	if (width > height) {
 		thumb->w = config.thumbsize_pixels;
@@ -728,25 +728,18 @@ drawthumb(const char *file, struct FM *fm, struct Rect *thumb, Pixmap *pix)
 		thumb->w = (width * config.thumbsize_pixels) / height;
 		thumb->h = config.thumbsize_pixels;
 	}
+	bpl = channels;
+	if (depth >= 24)
+		bpl = 4;
+	else if (depth >= 16)
+		bpl = 2;
+	else
+		bpl = 1;
 	data = malloc(thumb->w * thumb->h * 4);
-	stbir_resize_uint8(dataorig, width, height, 0, data, thumb->w, thumb->h, 0, channels);
+	stbir_resize_uint8(dataorig, width, height, 0, data, thumb->w, thumb->h, 0, bpl);
 	if (data == NULL)
 		return 0;
 	stbi_image_free(dataorig);
-	bpl = channels;
-	switch (depth){
-		case 24:
-			bpl = 4;
-		break;
-		case 16:
-		case 15:
-			bpl = 2;
-		break;
-		default:
-			bpl = 1;
-		break;
-	}
-	
 	/* rgba to bgra */
 	if (channels >= 3){
 		isize = thumb->w * thumb->h * channels;

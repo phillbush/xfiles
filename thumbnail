@@ -26,23 +26,23 @@ genthumb() {
 	existthumb && return 0
 	case "$extension" in
 	png|jpg|gif)
-		convert "${canonpath}[0]" -format png -set "Thumb::MTime" "$mtime" -thumbnail "${thumbsize}x${thumbsize}" "$thumbfile"
+		convert "${canonpath}[0]" -format png -set "Thumb::MTime" "$mtime" -thumbnail "${thumbsize}x${thumbsize}" PNG32:"$thumbfile"
 		;;
 	webm|mp4|mkv)
 		ffmpegthumbnailer -i "$canonpath" -o "$thumbfile" -s "$thumbsize" &&\
-		mogrify -set "Thumb::MTime" "$mtime" "$thumbfile"
+		mogrify -set "Thumb::MTime" "$mtime" PNG32:"$thumbfile"
 		;;
 	svg)
 		rsvg-convert -h "$thumbsize" "$canonpath" >"$thumbfile" &&\
-		mogrify -set "Thumb::MTime" "$mtime" "$thumbfile"
+		mogrify -set "Thumb::MTime" "$mtime" PNG32:"$thumbfile"
 		;;
 	pdf)
 		pdftoppm -f 1 -l 1 -scale-to-y "$thumbsize" -scale-to-x -1 -singlefile -png "$canonpath" "${thumbfile%.png}" &&\
-		mogrify -set "Thumb::MTime" "$mtime" "$thumbfile"
+		mogrify -set "Thumb::MTime" "$mtime" PNG32:"$thumbfile"
 		;;
 	mp3)
 		ffmpeg -y -i "$canonpath" -f image2 -s "${thumbsize}x${thumbsize}" "$thumbfile" 2>/dev/null &&\
-		mogrify -set "Thumb::MTime" "$mtime" "$thumbfile"
+		mogrify -set "Thumb::MTime" "$mtime" PNG32:"$thumbfile"
 		;;
 	*)
 		return 1
