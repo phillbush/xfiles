@@ -346,6 +346,30 @@ etjoin(pthread_t tid, void **rval)
 	}
 }
 
+/* call pthread_mutex_lock checking for error */
+void
+etlock(pthread_mutex_t *mutex)
+{
+	int errn;
+
+	if ((errn = pthread_mutex_lock(mutex)) != 0) {
+		errno = errn;
+		err(1, "could not lock mutex");
+	}
+}
+
+/* call pthread_mutex_lock checking for error */
+void
+etunlock(pthread_mutex_t *mutex)
+{
+	int errn;
+
+	if ((errn = pthread_mutex_unlock(mutex)) != 0) {
+		errno = errn;
+		err(1, "could not unlock mutex");
+	}
+}
+
 /* call chdir checking for error; print warning on error */
 static int
 wchdir(const char *path)
@@ -549,7 +573,7 @@ parseoptions(int argc, char *argv[])
 static void
 calcsize(struct FM *fm, int w, int h)
 {
-	pthread_mutex_lock(&geomlock);
+	etlock(&geomlock);
 	if (w >= 0 && h >= 0) {
 		fm->winw = max(w - config.scroll_pixels, 1);
 		fm->winh = h;
@@ -566,7 +590,7 @@ calcsize(struct FM *fm, int w, int h)
 	fm->maxrow = fm->nentries / fm->ncol - fm->winh / fm->entryh + 1 + (fm->nentries % fm->ncol != 0);
 	fm->maxrow = max(fm->maxrow, 1);
 	fm->scrollh = max(fm->winh / fm->maxrow, 1);
-	pthread_mutex_unlock(&geomlock);
+	etunlock(&geomlock);
 }
 
 /* get next utf8 char from s return its codepoint and set next_ret to pointer to end of character */
@@ -1300,31 +1324,13 @@ readpath(int fd, char *path)
 	}
 }
 
-/* set thumbexit */
-static void
-setthumbexit(void)
-{
-	pthread_mutex_lock(&thumblock);
-	thumbexit = 1;
-	pthread_mutex_unlock(&thumblock);
-}
-
 /* set fm->row locking geomlock */
 static void
 setrow(struct FM *fm, int row)
 {
-	pthread_mutex_lock(&geomlock);
+	etlock(&geomlock);
 	fm->row = row;
-	pthread_mutex_unlock(&geomlock);
-}
-
-/* unset thumbexit */
-static void
-unsetthumbexit(void)
-{
-	pthread_mutex_lock(&thumblock);
-	thumbexit = 0;
-	pthread_mutex_unlock(&thumblock);
+	etunlock(&geomlock);
 }
 
 /* thumbnailer thread */
@@ -1341,10 +1347,10 @@ thumbnailer(void *arg)
 	ret = 0;
 	fm = (struct FM *)arg;
 	for (i = 0; i < fm->nentries; i++) {
-		pthread_mutex_lock(&thumblock);
+		etlock(&thumblock);
 		if (thumbexit)
 			ret = 1;
-		pthread_mutex_unlock(&thumblock);
+		etunlock(&thumblock);
 		if (ret)
 			break;
 		ent = fm->entries[i];
@@ -1352,12 +1358,16 @@ thumbnailer(void *arg)
 		readpath(fd, path);
 		close(fd);
 		wait(NULL);
-		if (*path != '\0' && drawthumb(path, fm, &ent->thumb, ent->pix)) {
+		if (*path != '\0' &&
+		    drawthumb(path, fm, &ent->thumb, ent->pix)) {
 			copyentry(fm, i);
-			pthread_mutex_lock(&geomlock);
-			if (i >= fm->row * fm->ncol && i < fm->row * fm->ncol + fm->nrow * fm->ncol)
+			etlock(&geomlock);
+			if (i >= fm->row * fm->ncol &&
+			    i < fm->row * fm->ncol + fm->nrow * fm->ncol) {
 				commitdraw(fm);
-			pthread_mutex_unlock(&geomlock);
+				XFlush(dpy);
+			}
+			etunlock(&geomlock);
 		}
 	}
 	pthread_exit(0);
@@ -1437,10 +1447,15 @@ diropen(struct FM *fm, const char *path, int savecwd)
 		selectentry(fm, fm->selected, 0);
 	if (path == NULL || wchdir(path) != -1) {
 		/* close previous thumbnailer thread */
-		setthumbexit();
+		etlock(&thumblock);
+		thumbexit = 1;
+		etunlock(&thumblock);
 		etjoin(thumbt, NULL);
-		unsetthumbexit();
+		etlock(&thumblock);
+		thumbexit = 0;
+		etunlock(&thumblock);
 
+		/* prepare for new directory */
 		listentries(fm, savecwd);
 		calcsize(fm, -1, -1);
 		setrow(fm, 0);
