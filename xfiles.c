@@ -1097,7 +1097,7 @@ getentry(struct FM *fm, int x, int y)
 	x -= w * fm->entryw;
 	y -= h * fm->entryh;
 	ent = fm->entries[i];
-	if ((x >= ent->thumb.x && x < ent->thumb.x + ent->thumb.w && y >= ent->thumb.y && y < ent->thumb.y + ent->thumb.h) ||
+	if ((x >= ent->thumb.x && x < ent->thumb.x + ent->thumb.w && y >= ent->thumb.y) ||
 	    (x >= ent->line[0].x && x < ent->line[0].x + ent->line[0].w && y >= fm->texty0 && y < fm->texty0 + dc.fonth) ||
 	    (x >= ent->line[1].x && x < ent->line[1].x + ent->line[1].w && y >= fm->texty1 && y < fm->texty1 + dc.fonth))
 		return i;
