@@ -27,6 +27,7 @@
 #include "file.xpm"
 #include "folder.xpm"
 
+#define LEN(x)       (sizeof(x) / sizeof((x)[0]))
 #define ELLIPSIS     "…"
 #define CLASS        "XFiles"
 #define TITLE        "XFiles"
@@ -46,6 +47,7 @@ enum {
 enum {
 	UTF8_STRING,
 	WM_DELETE_WINDOW,
+	_NET_WM_ICON,
 	_NET_WM_NAME,
 	_NET_WM_PID,
 	_NET_WM_WINDOW_TYPE,
@@ -135,9 +137,7 @@ struct DC {
 	XftColor normal[COLOR_LAST];
 	XftColor select[COLOR_LAST];
 	XftColor scroll[COLOR_LAST];
-	FcPattern *pattern;
-	XftFont **fonts;
-	size_t nfonts;
+	XftFont *font;
 	int fonth;
 };
 
@@ -169,7 +169,6 @@ struct Ellipsis {
 	char *s;
 	size_t len;     /* length of s */
 	int width;      /* size of ellipsis string */
-	XftFont *font;  /* font containing ellipsis */
 };
 
 /* X11 constant values */
@@ -195,6 +194,7 @@ static int thumbexit = 0;
 static int running = 1;         /* whether xfiles is running */
 
 #include "config.h"
+#include "icons.h"
 
 /* show usage and exit */
 static void
@@ -323,7 +323,7 @@ ealloccolor(const char *s, XftColor *color)
 }
 
 /* call pthread_create checking for error */
-void
+static void
 etcreate(pthread_t *tid, void *(*thrfn)(void *), void *arg)
 {
 	int errn;
@@ -335,7 +335,7 @@ etcreate(pthread_t *tid, void *(*thrfn)(void *), void *arg)
 }
 
 /* call pthread_join checking for error */
-void
+static void
 etjoin(pthread_t tid, void **rval)
 {
 	int errn;
@@ -347,7 +347,7 @@ etjoin(pthread_t tid, void **rval)
 }
 
 /* call pthread_mutex_lock checking for error */
-void
+static void
 etlock(pthread_mutex_t *mutex)
 {
 	int errn;
@@ -359,7 +359,7 @@ etlock(pthread_mutex_t *mutex)
 }
 
 /* call pthread_mutex_lock checking for error */
-void
+static void
 etunlock(pthread_mutex_t *mutex)
 {
 	int errn;
@@ -368,6 +368,17 @@ etunlock(pthread_mutex_t *mutex)
 		errno = errn;
 		err(1, "could not unlock mutex");
 	}
+}
+
+/* call scandir(3) checking for error */
+static int
+escandir(const char *dirname, struct dirent ***namelist, int (*select)(const struct dirent *), int (*compar)(const struct dirent **, const struct dirent **))
+{
+	int ret;
+
+	if ((ret = scandir(dirname, namelist, select, compar)) == -1)
+		err(1, "scandir");
+	return ret;
 }
 
 /* call chdir checking for error; print warning on error */
@@ -395,45 +406,6 @@ static void
 ungrab(void)
 {
 	XUngrabPointer(dpy, CurrentTime);
-}
-
-/* parse color string */
-static void
-parsefonts(const char *s)
-{
-	const char *p;
-	char buf[1024];
-	size_t nfont = 0;
-
-	dc.nfonts = 1;
-	for (p = s; *p; p++)
-		if (*p == ',')
-			dc.nfonts++;
-
-	if ((dc.fonts = calloc(dc.nfonts, sizeof *dc.fonts)) == NULL)
-		err(1, "calloc");
-
-	p = s;
-	while (*p != '\0') {
-		size_t i;
-
-		i = 0;
-		while (isspace(*p))
-			p++;
-		while (i < sizeof buf && *p != '\0' && *p != ',')
-			buf[i++] = *p++;
-		if (i >= sizeof buf)
-			errx(1, "font name too long");
-		if (*p == ',')
-			p++;
-		buf[i] = '\0';
-		if (nfont == 0)
-			if ((dc.pattern = FcNameParse((FcChar8 *)buf)) == NULL)
-				errx(1, "the first font in the cache must be loaded from a font string");
-		if ((dc.fonts[nfont++] = XftFontOpenName(dpy, screen, buf)) == NULL)
-			errx(1, "could not load font");
-	}
-	dc.fonth = dc.fonts[0]->height;
 }
 
 /* parse geometry string, return *width and *height */
@@ -594,7 +566,7 @@ calcsize(struct FM *fm, int w, int h)
 }
 
 /* get next utf8 char from s return its codepoint and set next_ret to pointer to end of character */
-static FcChar32
+static void
 getnextutf8char(const char *s, const char **next_ret)
 {
 	static const unsigned char utfbyte[] = {0x80, 0x00, 0xC0, 0xE0, 0xF0};
@@ -602,7 +574,6 @@ getnextutf8char(const char *s, const char **next_ret)
 	static const FcChar32 utfmin[] = {0, 0x00,  0x80,  0x800,  0x10000};
 	static const FcChar32 utfmax[] = {0, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF};
 	/* 0xFFFD is the replacement character, used to represent unknown characters */
-	static const FcChar32 unknown = 0xFFFD;
 	FcChar32 ucode;         /* FcChar32 type holds 32 bits */
 	size_t usize = 0;       /* n' of bytes of the utf8 character */
 	size_t i;
@@ -618,17 +589,17 @@ getnextutf8char(const char *s, const char **next_ret)
 		}
 	}
 
-	/* if first byte is a continuation byte or is not allowed, return unknown */
+	/* if first byte is a continuation byte or is not allowed */
 	if (i == sizeof utfmask || usize == 0)
-		return unknown;
+		return;
 
 	/* check the other usize-1 bytes */
 	s++;
 	for (i = 1; i < usize; i++) {
 		*next_ret = s+1;
-		/* if byte is nul or is not a continuation byte, return unknown */
+		/* if byte is nul or is not a continuation byte */
 		if (*s == '\0' || ((unsigned char)*s & utfmask[0]) != utfbyte[0])
-			return unknown;
+			return;
 		/* 6 is the number of relevant bits in the continuation byte */
 		ucode = (ucode << 6) | ((unsigned char)*s & ~utfmask[0]);
 		s++;
@@ -636,67 +607,14 @@ getnextutf8char(const char *s, const char **next_ret)
 
 	/* check if ucode is invalid or in utf-16 surrogate halves */
 	if (!between(ucode, utfmin[usize], utfmax[usize]) || between(ucode, 0xD800, 0xDFFF))
-		return unknown;
-
-	return ucode;
-}
-
-/* get which font contains a given code point */
-static XftFont *
-getfontucode(FcChar32 ucode)
-{
-	FcCharSet *fccharset = NULL;
-	FcPattern *fcpattern = NULL;
-	FcPattern *match = NULL;
-	XftFont *retfont = NULL;
-	XftResult result;
-	size_t i;
-
-	for (i = 0; i < dc.nfonts; i++)
-		if (XftCharExists(dpy, dc.fonts[i], ucode) == FcTrue)
-			return dc.fonts[i];
-
-	/* create a charset containing our code point */
-	fccharset = FcCharSetCreate();
-	FcCharSetAddChar(fccharset, ucode);
-
-	/* create a pattern akin to the dc.pattern but containing our charset */
-	if (fccharset) {
-		fcpattern = FcPatternDuplicate(dc.pattern);
-		FcPatternAddCharSet(fcpattern, FC_CHARSET, fccharset);
-	}
-
-	/* find pattern matching fcpattern */
-	if (fcpattern) {
-		FcConfigSubstitute(NULL, fcpattern, FcMatchPattern);
-		FcDefaultSubstitute(fcpattern);
-		match = XftFontMatch(dpy, screen, fcpattern, &result);
-	}
-
-	/* if found a pattern, open its font */
-	if (match) {
-		retfont = XftFontOpenPattern(dpy, match);
-		if (retfont && XftCharExists(dpy, retfont, ucode) == FcTrue) {
-			if ((dc.fonts = realloc(dc.fonts, dc.nfonts+1)) == NULL)
-				err(1, "realloc");
-			dc.fonts[dc.nfonts] = retfont;
-			return dc.fonts[dc.nfonts++];
-		} else {
-			XftFontClose(dpy, retfont);
-		}
-	}
-
-	/* in case no fount was found, return the first one */
-	return dc.fonts[0];
+		return;
 }
 
 /* return width of *s in pixels; draw *s into draw if draw != NULL */
 static int
 drawtext(XftDraw *draw, XftColor *color, int x, int y, int w, const char *text, size_t maxlen)
 {
-	XftFont *currfont;
 	XGlyphInfo ext;
-	FcChar32 ucode;
 	const char *next, *origtext, *t;
 	size_t len;
 	int textwidth = 0;
@@ -704,18 +622,15 @@ drawtext(XftDraw *draw, XftColor *color, int x, int y, int w, const char *text, 
 
 	origtext = text;
 	while (text < origtext + maxlen) {
-		/* get the next unicode character and the first font that supports it */
-		ucode = getnextutf8char(text, &next);
-		currfont = getfontucode(ucode);
+		getnextutf8char(text, &next);
 
 		/* compute the width of the glyph for that character on that font */
 		len = next - text;
-		XftTextExtentsUtf8(dpy, currfont, (XftChar8 *)text, len, &ext);
+		XftTextExtentsUtf8(dpy, dc.font, (XftChar8 *)text, len, &ext);
 		t = text;
 		if (w && textwidth + ext.xOff > w) {
 			t = ellipsis.s;
 			len = ellipsis.len;
-			currfont = ellipsis.font;
 			while (*next)
 				next++;
 			textwidth += ellipsis.width;
@@ -723,8 +638,8 @@ drawtext(XftDraw *draw, XftColor *color, int x, int y, int w, const char *text, 
 		textwidth += ext.xOff;
 
 		if (draw) {
-			texty = y + (dc.fonth - (currfont->ascent + currfont->descent))/2 + currfont->ascent;
-			XftDrawStringUtf8(draw, color, currfont, x, texty, (XftChar8 *)t, len);
+			texty = y + (dc.fonth - (dc.font->ascent + dc.font->descent))/2 + dc.font->ascent;
+			XftDrawStringUtf8(draw, color, dc.font, x, texty, (XftChar8 *)t, len);
 			x += ext.xOff;
 		}
 
@@ -765,10 +680,10 @@ drawthumb(const char *file, struct FM *fm, struct Rect *thumb, Pixmap *pix)
 		return 0;
 	stbi_image_free(dataorig);
 	/* rgba to bgra */
-	if (channels >= 3){
-		isize = thumb->w * thumb->h * channels;
-		for (i=0; i < isize; i += channels) {
-			if (channels == 4) {    /* alpha compositing */
+	if (bpl >= 3){
+		isize = thumb->w * thumb->h * bpl;
+		for (i=0; i < isize; i += bpl) {
+			if (bpl == 4) {    /* alpha compositing */
 				data[i + 0] = (dc.normal[COLOR_BG].color.red * 255 / USHRT_MAX) + ((data[i + 0] - (dc.normal[COLOR_BG].color.red * 255 / USHRT_MAX)) * data[i + 3]) / 255;
 				data[i + 1] = (dc.normal[COLOR_BG].color.green * 255 / USHRT_MAX) + ((data[i + 1] - (dc.normal[COLOR_BG].color.green * 255 / USHRT_MAX)) * data[i + 3]) / 255;
 				data[i + 2] = (dc.normal[COLOR_BG].color.blue * 255 / USHRT_MAX) + ((data[i + 2] - (dc.normal[COLOR_BG].color.blue * 255 / USHRT_MAX)) * data[i + 3]) / 255;
@@ -825,6 +740,7 @@ initatoms(void)
 	char *atomnames[ATOM_LAST] = {
 		[UTF8_STRING]                = "UTF8_STRING",
 		[WM_DELETE_WINDOW]           = "WM_DELETE_WINDOW",
+		[_NET_WM_ICON]               = "_NET_WM_ICON",
 		[_NET_WM_NAME]               = "_NET_WM_NAME",
 		[_NET_WM_PID]                = "_NET_WM_PID",
 		[_NET_WM_WINDOW_TYPE]        = "_NET_WM_WINDOW_TYPE",
@@ -845,7 +761,14 @@ initdc(void)
 	ealloccolor(config.selforeground_color, &dc.select[COLOR_FG]);
 	ealloccolor(config.scrollbackground_color, &dc.scroll[COLOR_BG]);
 	ealloccolor(config.scrollforeground_color, &dc.scroll[COLOR_FG]);
-	parsefonts(config.font);
+	dc.font = XftFontOpenXlfd(dpy, screen, config.font);
+	if (dc.font == NULL) {
+		dc.font = XftFontOpenName(dpy, screen, config.font);
+		if (dc.font == NULL) {
+			errx(1, "could not open font: %s", config.font);
+		}
+	}
+	dc.fonth = dc.font->height;
 }
 
 /* draw fallback icons from .xpm files */
@@ -898,6 +821,9 @@ initfm(struct FM *fm, int argc, char *argv[])
 	XSetWindowAttributes swa;
 	XClassHint classh;
 	pid_t pid;
+	size_t i, j;
+	unsigned long *icon_data;
+	int c, n;
 
 	fm->main = None;
 	fm->scroll = None;
@@ -925,6 +851,7 @@ initfm(struct FM *fm, int argc, char *argv[])
 	                        CopyFromParent, CopyFromParent, CopyFromParent,
 	                        CWBackPixel | CWEventMask, &swa);
 
+	/* set window hints, properties and protocols */
 	classh.res_class = CLASS;
 	classh.res_name = NULL;
 	pid = getpid();
@@ -935,6 +862,24 @@ initfm(struct FM *fm, int argc, char *argv[])
 	XChangeProperty(dpy, fm->win, atoms[_NET_WM_PID], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&pid, 1);
 
 	calcsize(fm, config.width_pixels, config.height_pixels);
+
+	/* set window icon */
+	n = icons[LEN(icons)-1].size;
+	icon_data = emalloc((n * n + 2) * sizeof(*icon_data));
+	for (i = 0; i < LEN(icons); i++) {
+		n = 0;
+		icon_data[n++] = icons[i].size;
+		icon_data[n++] = icons[i].size;
+
+		for (j = 0; j < icons[i].cnt; j++) {
+			for (c = icons[i].data[j] >> 4; c >= 0; c--)
+				icon_data[n++] = icon_colors[icons[i].data[j] & 0x0F];
+		}
+		XChangeProperty(dpy, fm->win, atoms[_NET_WM_ICON], XA_CARDINAL, 32,
+		                i == 0 ? PropModeReplace : PropModeAppend,
+		                (unsigned char *) icon_data, n);
+	}
+	free(icon_data);
 
 	/* create and clean default thumbnails */
 	fm->file[PIX_UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
@@ -970,14 +915,10 @@ static void
 initellipsis(void)
 {
 	XGlyphInfo ext;
-	FcChar32 ucode;
-	const char *s;
 
 	ellipsis.s = ELLIPSIS;
 	ellipsis.len = strlen(ellipsis.s);
-	ucode = getnextutf8char(ellipsis.s, &s);
-	ellipsis.font = getfontucode(ucode);
-	XftTextExtentsUtf8(dpy, ellipsis.font, (XftChar8 *)ellipsis.s, ellipsis.len, &ext);
+	XftTextExtentsUtf8(dpy, dc.font, (XftChar8 *)ellipsis.s, ellipsis.len, &ext);
 	ellipsis.width = ext.xOff;
 }
 
@@ -1108,8 +1049,7 @@ listentries(struct FM *fm, int savecwd)
 	egetcwd(path, sizeof(path));
 	if (savecwd)
 		addcwd(fm, path);
-	if ((n = scandir(path, &array, direntselect, NULL)) == -1)
-		err(1, "scandir");
+	n = escandir(path, &array, direntselect, NULL);
 	freeentries(fm);
 	if (n > fm->capacity) {
 		fm->entries = ereallocarray(fm->entries, n, sizeof(*fm->entries));
@@ -1445,23 +1385,23 @@ diropen(struct FM *fm, const char *path, int savecwd)
 {
 	while (fm->selected != NULL)            /* unselect entries */
 		selectentry(fm, fm->selected, 0);
-	if (path == NULL || wchdir(path) != -1) {
-		/* close previous thumbnailer thread */
-		etlock(&thumblock);
-		thumbexit = 1;
-		etunlock(&thumblock);
-		etjoin(thumbt, NULL);
-		etlock(&thumblock);
-		thumbexit = 0;
-		etunlock(&thumblock);
+	if (path != NULL && wchdir(path) == -1)
+		return;
+	/* close previous thumbnailer thread */
+	etlock(&thumblock);
+	thumbexit = 1;
+	etunlock(&thumblock);
+	etjoin(thumbt, NULL);
+	etlock(&thumblock);
+	thumbexit = 0;
+	etunlock(&thumblock);
 
-		/* prepare for new directory */
-		listentries(fm, savecwd);
-		calcsize(fm, -1, -1);
-		setrow(fm, 0);
-		fm->ydiff = 0;
-		etcreate(&thumbt, thumbnailer, (void *)fm);
-	}
+	/* prepare for new directory */
+	listentries(fm, savecwd);
+	calcsize(fm, -1, -1);
+	setrow(fm, 0);
+	fm->ydiff = 0;
+	etcreate(&thumbt, thumbnailer, (void *)fm);
 }
 
 /* open file using config.opener */
@@ -1647,8 +1587,6 @@ xeventbuttonpress(struct FM *fm, XEvent *e)
 static void
 cleandc(void)
 {
-	size_t i;
-
 	XftColorFree(dpy, visual, colormap, &dc.normal[COLOR_BG]);
 	XftColorFree(dpy, visual, colormap, &dc.normal[COLOR_FG]);
 	XftColorFree(dpy, visual, colormap, &dc.select[COLOR_BG]);
@@ -1656,9 +1594,7 @@ cleandc(void)
 	XftColorFree(dpy, visual, colormap, &dc.scroll[COLOR_BG]);
 	XftColorFree(dpy, visual, colormap, &dc.scroll[COLOR_FG]);
 	XFreeGC(dpy, dc.gc);
-	for (i = 0; i < dc.nfonts; i++)
-		XftFontClose(dpy, dc.fonts[i]);
-	free(dc.fonts);
+	XftFontClose(dpy, dc.font);
 }
 
 /* xfiles: X11 file manager */
