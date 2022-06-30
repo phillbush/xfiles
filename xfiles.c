@@ -29,6 +29,7 @@
 
 #define LEN(x)       (sizeof(x) / sizeof((x)[0]))
 #define ELLIPSIS     "…"
+#define HOME         "HOME"
 #define CLASS        "XFiles"
 #define TITLE        "XFiles"
 #define THUMBBORDER  3          /* thumbnail border (for highlighting) */
@@ -116,6 +117,8 @@ struct FM {
 	int texty0, texty1;     /* position of each line from entry top left corner */
 	int ncol, nrow;         /* number of columns and rows visible at a time */
 	int maxrow;             /* maximum value fm->row can scroll */
+	char *home;             /* value of $HOME environment variable */
+	size_t homelen;
 };
 
 /* directory entry */
@@ -834,6 +837,8 @@ initfm(struct FM *fm, int argc, char *argv[])
 	fm->nentries = 0;
 	fm->row = 0;
 	fm->ydiff = 0;
+	fm->home = getenv(HOME);
+	fm->homelen = (fm->home != NULL) ? strlen(fm->home) : 0;
 	fm->entryw = config.thumbsize_pixels * 2;
 	fm->entryh = config.thumbsize_pixels + 3 * dc.fonth + 2 * THUMBBORDER;
 	fm->thumbx = config.thumbsize_pixels / 2;
@@ -1379,6 +1384,36 @@ selectentries(struct FM *fm, int a, int b, int select)
 	}
 }
 
+static void
+settitle(struct FM *fm)
+{
+	char path[PATH_MAX];
+	char *s;
+
+	if (fm->curr->cwd == NULL || fm->homelen == 0)
+		return;
+	if (strstr(fm->curr->cwd, fm->home) == fm->curr->cwd) {
+		if (strlen(fm->curr->cwd) == fm->homelen)
+			snprintf(path, sizeof(path), "~/");
+		else
+			snprintf(path, sizeof(path), "~%s", fm->curr->cwd + fm->homelen);
+		s = path;
+	} else {
+		s = fm->curr->cwd;
+	}
+	XmbSetWMProperties(dpy, fm->win, s, s, NULL, 0, NULL, NULL, NULL);
+	XChangeProperty(
+		dpy,
+		fm->win,
+		atoms[_NET_WM_NAME],
+		atoms[UTF8_STRING],
+		8,
+		PropModeReplace,
+		s,
+		strlen(s)
+	);
+}
+
 /* change directory */
 static void
 diropen(struct FM *fm, const char *path, int savecwd)
@@ -1402,6 +1437,9 @@ diropen(struct FM *fm, const char *path, int savecwd)
 	setrow(fm, 0);
 	fm->ydiff = 0;
 	etcreate(&thumbt, thumbnailer, (void *)fm);
+
+	/* set window title */
+	settitle(fm);
 }
 
 /* open file using config.opener */
