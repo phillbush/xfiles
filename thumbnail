@@ -1,82 +1,42 @@
 #!/bin/sh
 
-usage() {
-	echo "usage: thumbnail filename" >&2
-	exit 1
-}
-
-err() {
-	echo "thumbnail:" "$@" >&2
-	exit 1
-}
-
-mkthumbdir() {
-	mkdir -p "$thumbdir"
-}
-
-existthumb() {
-	[ -f "$thumbfile" ] && [ "$mtime" -eq "$(identify -format "%[Thumb::MTime]" "$thumbfile")" ]
-}
-
-getextension() {
-	echo "${1#*.}" | tr '[:upper:]' '[:lower:]'
-}
-
-genthumb() {
-	existthumb && return 0
-	case "$extension" in
-	png|jpg|gif)
-		convert "${canonpath}[0]" -format png -set "Thumb::MTime" "$mtime" -thumbnail "${thumbsize}x${thumbsize}" PNG32:"$thumbfile"
-		;;
-	webm|mp4|mkv)
-		ffmpegthumbnailer -i "$canonpath" -o "$thumbfile" -s "$thumbsize" &&\
-		mogrify -set "Thumb::MTime" "$mtime" PNG32:"$thumbfile"
-		;;
-	svg)
-		rsvg-convert -h "$thumbsize" "$canonpath" >"$thumbfile" &&\
-		mogrify -set "Thumb::MTime" "$mtime" PNG32:"$thumbfile"
-		;;
-	pdf)
-		pdftoppm -f 1 -l 1 -scale-to-y "$thumbsize" -scale-to-x -1 -singlefile -png "$canonpath" "${thumbfile%.png}" &&\
-		mogrify -set "Thumb::MTime" "$mtime" PNG32:"$thumbfile"
-		;;
-	mp3)
-		ffmpeg -y -i "$canonpath" -f image2 -s "${thumbsize}x${thumbsize}" "$thumbfile" 2>/dev/null &&\
-		mogrify -set "Thumb::MTime" "$mtime" PNG32:"$thumbfile"
-		;;
-	*)
-		return 1
-		;;
-	esac
-}
-
-case "$#" in
-1) ;;
-*) usage ;;
-esac
-
+THUMBSIZE=64
 umask 077
 
-if type md5 >/dev/null
-then
-	md5cmd="md5"
-elif type md5sum >/dev/null
-then
-	md5cmd="md5sum"
-else
-	err "could not find md5sum command"
-fi
-origfile="$1"
-thumbsize=128
-thumbdir="${THUMBDIR:-"${CACHEDIR:-${XDG_CACHE_HOME:-"$HOME/.cache"}}/thumbnails/normal"}"
-canonpath="$(readlink -f "$origfile" 2>/dev/null)" || geticonpng error
-hash="$(echo "$canonpath" | "$md5cmd")"
-mtime="$(stat -f %m "$canonpath")"
-thumbfile="$thumbdir/$hash.png"
-extension="$(getextension "$canonpath")"
+case "$#" in
+(2)
+	;;
+(*)
+	echo "usage: thumbnail from to" >&2
+	exit 1
+	;;
+esac
 
-mkthumbdir
-if genthumb
-then
-	echo "$thumbfile"
-fi
+case "$2" in
+(*/*)
+	mkdir -p "${2%/*}"
+	;;
+(*)
+	;;
+esac
+
+case "${1##*.}" in
+png|jpg|jpeg|gif|xpm|ppm)
+	convert "${1}[0]" -define filename:literal=true -format ppm -thumbnail "${THUMBSIZE}x${THUMBSIZE}" "${2}"
+	;;
+webm|mp4|mkv|ogv)
+	ffmpegthumbnailer -c png -i "${1}" -o - -s "${THUMBSIZE}" | convert - -define filename:literal=true -format ppm "${2}"
+	;;
+svg)
+	rsvg-convert -h "${THUMBSIZE}" "${1}" | convert - -format ppm "${2}"
+	;;
+pdf)
+	pdftoppm -f 1 -l 1 -scale-to "${THUMBSIZE}" -singlefile "${1}" "${2%.ppm}"
+	;;
+mp3)
+	ffmpeg -v quiet -y -i "${1}" -f image2 -s "${THUMBSIZE}x${THUMBSIZE}" "${2}"
+	;;
+*)
+	exit 1
+	;;
+esac

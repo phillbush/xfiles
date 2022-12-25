@@ -1,6 +1,7 @@
 PROG = xfiles
-SRCS = ${PROG}.c
-OBJS = ${SRCS:.c=.o}
+OBJS = ${PROG:=.o} widget.o util.o
+SRCS = ${OBJS:.o=.c}
+MANS = ${PROG:=.1}
 
 PREFIX ?= /usr/local
 MANPREFIX ?= ${PREFIX}/share/man
@@ -10,17 +11,18 @@ X11INC ?= /usr/X11R6/include
 X11LIB ?= /usr/X11R6/lib
 
 INCS = -I${LOCALINC} -I${X11INC} -I/usr/include/freetype2 -I${X11INC}/freetype2
-LIBS = -L${LOCALLIB} -L${X11LIB} -lm -lfontconfig -lXft -lX11 -lXpm -lpthread
+LIBS = -L${LOCALLIB} -L${X11LIB} -lfontconfig -lXft -lX11 -lXpm -lpthread
 
 all: ${PROG}
 
 ${PROG}: ${OBJS}
-	${CC} -o $@ ${OBJS} ${LIBS} ${LDFLAGS}
-
-${OBJS}: config.h
+	${CC} ${LIBS} ${LDFLAGS} -o $@ ${OBJS}
 
 .c.o:
 	${CC} ${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
+
+xfiles.o: util.h widget.h winicon.data
+widget.o: util.h widget.h fileicon.xpm
 
 tags: ${SRCS}
 	ctags ${SRCS}
@@ -28,14 +30,14 @@ tags: ${SRCS}
 clean:
 	rm -f ${OBJS} ${PROG} ${PROG:=.core} tags
 
-install: all
-	install -d ${DESTDIR}${PREFIX}/bin
-	install -d ${DESTDIR}${MANPREFIX}/man1
-	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
-	install -m 644 ${PROG}.1 ${DESTDIR}${MANPREFIX}/man1/${PROG}.1
-
-uninstall:
-	rm ${DESTDIR}${PREFIX}/bin/${PROG}
-	rm ${DESTDIR}${MANPREFIX}/man1/${PROG}.1
+#install: all
+#	install -d ${DESTDIR}${PREFIX}/bin
+#	install -d ${DESTDIR}${MANPREFIX}/man1
+#	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
+#	install -m 644 ${MANS} ${DESTDIR}${MANPREFIX}/man1/${MANS}
+#
+#uninstall:
+#	rm ${DESTDIR}${PREFIX}/bin/${PROG}
+#	rm ${DESTDIR}${MANPREFIX}/man1/${MANS}
 
 .PHONY: all tags clean install uninstall

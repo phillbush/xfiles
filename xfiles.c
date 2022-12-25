@@ -1,390 +1,99 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <ctype.h>
-#include <dirent.h>
+
+#include <fnmatch.h>
 #include <err.h>
-#include <errno.h>
-#include <fcntl.h>
+#include <grp.h>
 #include <limits.h>
-#include <locale.h>
-#include <math.h>
-#include <pthread.h>
-#include <signal.h>
-#include <stdio.h>
+#include <pwd.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
-#include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xatom.h>
-#include <X11/Xresource.h>
-#include <X11/Xutil.h>
-#include <X11/xpm.h>
-#include <X11/Xft/Xft.h>
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include "stb_image_resize.h"
-#include "file.xpm"
-#include "folder.xpm"
 
-#define LEN(x)       (sizeof(x) / sizeof((x)[0]))
-#define ELLIPSIS     "…"
-#define HOME         "HOME"
-#define CLASS        "XFiles"
-#define TITLE        "XFiles"
-#define THUMBBORDER  3          /* thumbnail border (for highlighting) */
-#define DOUBLECLICK  250
-#define DEV_NULL     "/dev/null"
-#define DOTDOT       ".."
+#include "util.h"
+#include "widget.h"
+#include "winicon.data"
 
-/* fg and bg colors */
+#define HOME            "HOME"
+#define FILE_ICONS      "FILE_ICONS"
+#define APPCLASS        "XFiles"
+#define DEF_APPNAME     "xfiles"
+#define DEF_OPENER      "xdg-open"
+#define THUMBNAILER     "THUMBNAILER"
+#define THUMBNAILDIR    "THUMBNAILDIR"
+#define DOTDOT          ".."
+#define UNIT_LAST       7
+#define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
+#define TIME_BUFSIZE    128
+
 enum {
-	COLOR_FG,
-	COLOR_BG,
-	COLOR_LAST
+	STATE_NAME,
+	STATE_PATH,
+	STATE_SIZE,
+	STATE_TIME,
+	STATE_MODE,
+	STATE_OWNER,
+	STATE_LAST,
 };
 
-/* atoms */
-enum {
-	UTF8_STRING,
-	WM_DELETE_WINDOW,
-	_NET_WM_ICON,
-	_NET_WM_NAME,
-	_NET_WM_PID,
-	_NET_WM_WINDOW_TYPE,
-	_NET_WM_WINDOW_TYPE_NORMAL,
-	ATOM_LAST,
+struct IconPattern {
+	struct IconPattern *next;
+	struct Pattern {
+		struct Pattern *next;
+		char *s;
+	} *patt;
+	char *path;
+	char mode;
 };
 
-/* unselected and selected pixmaps */
-enum {
-	PIX_UNSEL = 0,
-	PIX_SEL = 1,
-	PIX_LAST = 2,
-};
-
-/* history navigation direction */
-enum {
-	BACK,
-	FORTH,
-};
-
-/* extra mouse buttons, not covered by XLIB */
-enum {
-	BUTTON8 = 8,
-	BUTTON9 = 9,
-};
-
-/* working directory history entry */
-struct Histent {
-	struct Histent *prev, *next;
-	char *cwd;
-};
-
-/* position and size of a rectangle */
-struct Rect {
-	int x, y, w, h;
-};
-
-/* horizontal position and size of a line segment */
-struct Line {
-	int x, w;
-};
-
-/* file manager */
 struct FM {
-	struct Entry **entries; /* array of pointer to entries */
-	struct Entry *selected; /* list of selected entries */
-	struct Rect dirrect;    /* size and position of default thumbnail for directories */
-	struct Rect filerect;   /* size and position of default thumbnail for files */
-	struct Histent *hist;   /* cwd history; pointer to last cwd history entry */
-	struct Histent *curr;   /* current point in history */
-	Window win;             /* main window */
-	Pixmap main, scroll;    /* pixmap for main window and scroll bar */
-	Pixmap dir[PIX_LAST];   /* default pixmap for directories thumbnails */
-	Pixmap file[PIX_LAST];  /* default pixmap for file thumbnails */
+	Widget wid;
+	char ***entries;
+	int *foundicons;
 	int capacity;           /* capacity of entries */
 	int nentries;           /* number of entries */
-	int row;                /* index of first visible column */
-	int ydiff;              /* how much the icons are scrolled up */
-	int winw, winh;         /* size of main window */
-	int thumbx, thumby;     /* position of thumbnail from entry top left corner */
-	int x0;                 /* position of first entry */
-	int entryw, entryh;     /* size of each entry */
-	int scrollh, scrolly;   /* size and position of scroll bar handle */
-	int textw;              /* width of each file name */
-	int textx;              /* position of each name from entry top left corner */
-	int texty0, texty1;     /* position of each line from entry top left corner */
-	int ncol, nrow;         /* number of columns and rows visible at a time */
-	int maxrow;             /* maximum value fm->row can scroll */
-	char *home;             /* value of $HOME environment variable */
+	char path[PATH_MAX];
+	char here[PATH_MAX];
+	char *home;
 	size_t homelen;
+	struct IconPattern *icons;
+
+	pthread_mutex_t thumblock;
+	pthread_t thumbthread;
+	int thumbexit;
+	char *thumbnailer;
+	char *thumbnaildir;
+	size_t thumbnaildirlen;
 };
 
-/* directory entry */
-struct Entry {
-	struct Entry *sprev;    /* for the linked list of selected entries */
-	struct Entry *snext;    /* for the linked list of selected entries */
-	struct Rect thumb;      /* position and size of the thumbnail */
-	struct Line line[2];    /* position and size of both text lines */
-	Pixmap pix[PIX_LAST];   /* unselected and selected content of the widget */
-	int issel;              /* whether entry is selected */
-	int isdir;              /* whether entry is a directory */
-	int drawn;              /* whether unsel and sel pixmaps were drawn */
-	char *name;             /* file name */
+static int hide = 1;
+static const char *states[STATE_LAST] = {
+	"name",
+	"size",
+	"time",
+	"mode",
+	"owner",
+};
+static struct {
+	char u;
+	long long int n;
+} units[UNIT_LAST] = {
+	{ 'B', 1LL },
+	{ 'K', 1024LL },
+	{ 'M', 1024LL * 1024 },
+	{ 'G', 1024LL * 1024 * 1024 },
+	{ 'T', 1024LL * 1024 * 1024 * 1024 },
+	{ 'P', 1024LL * 1024 * 1024 * 1024 * 1024 },
+	{ 'E', 1024LL * 1024 * 1024 * 1024 * 1024 * 1024 },
 };
 
-/* draw context */
-struct DC {
-	GC gc;
-	XftColor normal[COLOR_LAST];
-	XftColor select[COLOR_LAST];
-	XftColor scroll[COLOR_LAST];
-	XftFont *font;
-	int fonth;
-};
-
-/* configuration */
-struct Config {
-	const char *thumbnailer;
-	const char *opener;
-
-	const char *dirthumb_path;
-	const char *filethumb_path;
-
-	const char *font;
-	const char *background_color;
-	const char *foreground_color;
-	const char *selbackground_color;
-	const char *selforeground_color;
-	const char *scrollbackground_color;
-	const char *scrollforeground_color;
-
-	int thumbsize_pixels;   /* size of icons and thumbnails */
-	int scroll_pixels;      /* scroll bar width */
-	int width_pixels;       /* initial window width */
-	int height_pixels;      /* initial window height */
-	int hide;               /* whether to hide .* entries */
-};
-
-/* ellipsis size and font structure */
-struct Ellipsis {
-	char *s;
-	size_t len;     /* length of s */
-	int width;      /* size of ellipsis string */
-};
-
-/* X11 constant values */
-static struct DC dc;
-static struct Ellipsis ellipsis;
-static Display *dpy;
-static Visual *visual;
-static Window root;
-static Colormap colormap;
-static Atom atoms[ATOM_LAST];
-static XrmDatabase xdb;
-static int screen;
-static int depth;
-static char *xrm;
-
-/* threads */
-static pthread_mutex_t thumblock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t geomlock  = PTHREAD_MUTEX_INITIALIZER;
-static pthread_t thumbt;
-static int thumbexit = 0;
-
-/* flags */
-static int running = 1;         /* whether xfiles is running */
-
-#include "config.h"
-#include "icons.h"
-
-/* show usage and exit */
 static void
 usage(void)
 {
-	(void)fprintf(stderr, "usage: xfiles [-a] [-g geometry] [path]\n");
+	(void)fprintf(stderr, "usage: xfiles [-a] [-g geometry] [-n name] [path]\n");
 	exit(1);
 }
 
-/* check whether x is between a and b */
-static int
-between(int x, int a, int b)
-{
-	return a <= x && x <= b;
-}
-
-/* get maximum */
-static int
-max(int x, int y)
-{
-	return x > y ? x : y;
-}
-
-/* get minimum */
-static int
-min(int x, int y)
-{
-	return x < y ? x : y;
-}
-
-/* call strdup checking for error; exit on error */
-static char *
-estrdup(const char *s)
-{
-	char *t;
-
-	if ((t = strdup(s)) == NULL)
-		err(1, "strdup");
-	return t;
-}
-
-/* call malloc checking for error; exit on error */
-static void *
-emalloc(size_t size)
-{
-	void *p;
-
-	if ((p = malloc(size)) == NULL)
-		err(1, "malloc");
-	return p;
-}
-
-/* call reallocarray checking for error; exit on error */
-static void *
-ereallocarray(void *ptr, size_t nmemb, size_t size)
-{
-	void *p;
-
-	if ((p = reallocarray(ptr, nmemb, size)) == NULL)
-		err(1, "reallocarray");
-	return p;
-}
-
-/* call getcwd checking for error; exit on error */
-static void
-egetcwd(char *path, size_t size)
-{
-	if (getcwd(path, size) == NULL) {
-		err(1, "getcwd");
-	}
-}
-
-/* call pipe checking for error; exit on error */
-static void
-epipe(int fd[])
-{
-	if (pipe(fd) == -1) {
-		err(1, "pipe");
-	}
-}
-
-/* call fork checking for error; exit on error */
-static pid_t
-efork(void)
-{
-	pid_t pid;
-
-	if ((pid = fork()) < 0)
-		err(1, "fork");
-	return pid;
-}
-
-/* call dup2 checking for error; exit on error */
-static void
-edup2(int fd1, int fd2)
-{
-	if (dup2(fd1, fd2) == -1)
-		err(1, "dup2");
-	close(fd1);
-}
-
-/* call execlp checking for error; exit on error */
-static void
-eexec(const char *cmd, const char *arg)
-{
-	if (execlp(cmd, cmd, arg, NULL) == -1) {
-		err(1, "%s", cmd);
-	}
-}
-
-/* set FD_CLOEXEC on file descriptor; exit on error */
-static void
-esetcloexec(int fd)
-{
-	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
-		err(1, "fcntl");
-	}
-}
-
-/* get color from color string */
-static void
-ealloccolor(const char *s, XftColor *color)
-{
-	if(!XftColorAllocName(dpy, visual, colormap, s, color))
-		errx(1, "could not allocate color: %s", s);
-}
-
-/* call pthread_create checking for error */
-static void
-etcreate(pthread_t *tid, void *(*thrfn)(void *), void *arg)
-{
-	int errn;
-
-	if ((errn = pthread_create(tid, NULL, thrfn, arg)) != 0) {
-		errno = errn;
-		err(1, "could not create thread");
-	}
-}
-
-/* call pthread_join checking for error */
-static void
-etjoin(pthread_t tid, void **rval)
-{
-	int errn;
-
-	if ((errn = pthread_join(tid, rval)) != 0) {
-		errno = errn;
-		err(1, "could not join with thread");
-	}
-}
-
-/* call pthread_mutex_lock checking for error */
-static void
-etlock(pthread_mutex_t *mutex)
-{
-	int errn;
-
-	if ((errn = pthread_mutex_lock(mutex)) != 0) {
-		errno = errn;
-		err(1, "could not lock mutex");
-	}
-}
-
-/* call pthread_mutex_lock checking for error */
-static void
-etunlock(pthread_mutex_t *mutex)
-{
-	int errn;
-
-	if ((errn = pthread_mutex_unlock(mutex)) != 0) {
-		errno = errn;
-		err(1, "could not unlock mutex");
-	}
-}
-
-/* call scandir(3) checking for error */
-static int
-escandir(const char *dirname, struct dirent ***namelist, int (*select)(const struct dirent *), int (*compar)(const struct dirent **, const struct dirent **))
-{
-	int ret;
-
-	if ((ret = scandir(dirname, namelist, select, compar)) == -1)
-		err(1, "scandir");
-	return ret;
-}
-
-/* call chdir checking for error; print warning on error */
 static int
 wchdir(const char *path)
 {
@@ -395,140 +104,491 @@ wchdir(const char *path)
 	return 0;
 }
 
-/* wrapper around XGrabPointer; e.g., used to grab pointer when scrolling */
 static int
-grabpointer(struct FM *fm, unsigned int evmask)
+direntselect(const struct dirent *dp)
 {
-	return XGrabPointer(dpy, fm->win, True, evmask | ButtonReleaseMask,
-		         GrabModeAsync, GrabModeAsync, None,
-		         None, CurrentTime) == GrabSuccess ? 0 : -1;
+	if (strcmp(dp->d_name, ".") == 0)
+		return 0;
+	if (strcmp(dp->d_name, "..") == 0)
+		return 1;
+	if (hide && dp->d_name[0] == '.')
+		return 0;
+	return 1;
 }
 
-/* ungrab pointer */
 static void
-ungrab(void)
+freeentries(struct FM *fm)
 {
-	XUngrabPointer(dpy, CurrentTime);
-}
+	int i, j;
 
-/* parse geometry string, return *width and *height */
-static void
-parsegeometry(const char *str, int *width, int *height)
-{
-	int w, h;
-	char *end;
-	const char *s;
-
-	s = str;
-	w = strtol(s, &end, 10);
-	if (w < 1 || w > INT_MAX || *s == '\0' || *end != 'x')
-		goto error;
-	s = end + 1;
-	h = strtol(s, &end, 10);
-	if (h < 1 || h > INT_MAX || *s == '\0' || *end != '\0')
-		goto error;
-	*width = w;
-	*height = h;
-error:
-	return;
-}
-
-/* parse icon size string, return *size */
-static void
-parseiconsize(const char *str, int *size)
-{
-	int m, n;
-	char *end;
-	const char *s;
-
-	s = str;
-	m = strtol(s, &end, 10);
-	if (m < 1 || m > INT_MAX || *s == '\0' || *end != 'x')
-		goto error;
-	s = end + 1;
-	n = strtol(s, &end, 10);
-	if (n < 1 || n > INT_MAX || *s == '\0' || *end != '\0')
-		goto error;
-	if (m != n)
-		goto error;
-	*size = m;
-error:
-	return;
-}
-
-/* parse path for directory and file icons */
-static void
-parseiconpath(const char *s, int size, const char **dir, const char **file)
-{
-	static char dirpath[PATH_MAX];
-	static char filepath[PATH_MAX];
-
-	if (s != NULL) {
-		snprintf(dirpath, sizeof(dirpath), "%s/%dx%d/places/folder.png", s, size, size);
-		snprintf(filepath, sizeof(filepath), "%s/%dx%d/mimetypes/unknown.png", s, size, size);
+	for (i = 0; i < fm->nentries; i++) {
+		for (j = 0; j < STATE_LAST; j++)
+			free(fm->entries[i][j]);
+		free(fm->entries[i]);
 	}
-	*dir = dirpath;
-	*file = filepath;
 }
 
-/* get configuration from environment variables */
-static void
-parseenviron(void)
+static char *
+fullpath(char *dir, char *file)
 {
+	char buf[PATH_MAX];
+
+	(void)snprintf(buf, sizeof(buf), "%s/%s", dir, file);
+	return estrdup(buf);
+}
+
+static char *
+sizefmt(off_t size)
+{
+	int i;
+	char buf[SIZE_BUFSIZE] = "0B";
+	long long int number, fract;
+
+	if (size <= 0)
+		return estrdup("0B");
+	for (i = 0; i < UNIT_LAST; i++)
+		if (size < units[i + 1].n)
+			break;
+	if (i == UNIT_LAST)
+		return estrdup("inf");
+	fract = (i == 0) ? 0 : size % units[i].n;
+	fract /= (i == 0) ? 1 : units[i - 1].n;
+	fract = (10 * fract + 512) / 1024;
+	number = size / units[i].n;
+	if (number <= 0)
+		return estrdup("0B");
+	if (fract >= 10 || (fract >= 5 && number >= 100)) {
+		number++;
+		fract = 0;
+	} else if (fract < 0) {
+		fract = 0;
+	}
+	if (number == 0)
+		return estrdup("0B");
+	if (number >= 100)
+		(void)snprintf(buf, sizeof(buf), "%4lld%c", number, units[i].u);
+	else
+		(void)snprintf(buf, sizeof(buf), "%2lld.%1lld%c", number, fract, units[i].u);
+	return estrdup(buf);
+}
+
+static char *
+timefmt(time_t time)
+{
+	struct tm *tm;
+	char buf[TIME_BUFSIZE];
+
+	tm = localtime(&time);
+	(void)strftime(buf, sizeof(buf), "%F %R", tm);
+	return estrdup(buf);
+}
+
+static char *
+modefmt(mode_t m)
+{
+	enum {
+		MODE_TYPE = 0,
+		MODE_RUSR = 1,
+		MODE_WUSR = 2,
+		MODE_XUSR = 3,
+		MODE_RGRP = 4,
+		MODE_WGRP = 5,
+		MODE_XGRP = 6,
+		MODE_ROTH = 7,
+		MODE_WOTH = 8,
+		MODE_XOTH = 9,
+	};
+
+	char buf[] = "----------";
+	if (S_ISBLK(m))
+		buf[MODE_TYPE] = 'b';
+	else if (S_ISCHR(m))
+		buf[MODE_TYPE] = 'c';
+	else if (S_ISDIR(m))
+		buf[MODE_TYPE] = 'd';
+	else if (S_ISLNK(m))
+		buf[MODE_TYPE] = 'l';
+	else if (S_ISFIFO(m))
+		buf[MODE_TYPE] = 'p';
+	else if (S_ISSOCK(m))
+		buf[MODE_TYPE] = 's';
+
+	if (m & S_IRUSR)
+		buf[MODE_RUSR] = 'r';
+	if (m & S_IWUSR)
+		buf[MODE_WUSR] = 'w';
+	if ((m & S_IXUSR) && (m & S_ISUID))
+		buf[MODE_XUSR] = 's';
+	else if (m & S_ISUID)
+		buf[MODE_XUSR] = 'S';
+	else if (m & S_IXUSR)
+		buf[MODE_XUSR] = 'x';
+
+	if (m & S_IRGRP)
+		buf[MODE_RGRP] = 'r';
+	if (m & S_IWGRP)
+		buf[MODE_WGRP] = 'w';
+	if ((m & S_IXGRP) && (m & S_ISGID))
+		buf[MODE_XGRP] = 's';
+	else if (m & S_ISUID)
+		buf[MODE_XGRP] = 'S';
+	else if (m & S_IXGRP)
+		buf[MODE_XGRP] = 'x';
+
+	if (m & S_IROTH)
+		buf[MODE_ROTH] = 'r';
+	if (m & S_IWOTH)
+		buf[MODE_WOTH] = 'w';
+	if ((m & S_IXOTH) && (m & S_ISVTX))
+		buf[MODE_XOTH] = 't';
+	else if (m & S_ISUID)
+		buf[MODE_XOTH] = 'T';
+	else if (m & S_IXOTH)
+		buf[MODE_XOTH] = 'x';
+
+	return estrdup(buf);
+}
+
+static char *
+ownerfmt(uid_t uid, gid_t gid)
+{
+	struct passwd *pw;
+	struct group *gr;
+	char buf[128];
+
+	pw = NULL;
+	if ((pw = getpwuid(uid)) == NULL)
+		goto error;
+	if ((gr = getgrgid(gid)) == NULL)
+		goto error;
+	(void)snprintf(buf, sizeof(buf), "%s:%s", pw->pw_name, gr->gr_name);
+	return estrdup(buf);
+error:
+	return estrdup("");
+}
+
+static int
+entrycompar(const void *ap, const void *bp)
+{
+	char **a, **b;
+	a = *(char ***)ap;
+	b = *(char ***)bp;
+	/* dotdot (parent directory) first */
+	if (strcmp(a[STATE_NAME], "..") == 0)
+		return -1;
+	if (strcmp(b[STATE_NAME], "..") == 0)
+		return 1;
+
+	/* directories first */
+	if (a[STATE_MODE][0] == 'd' && b[STATE_NAME][0] != 'd')
+		return -1;
+	if (b[STATE_MODE][0] == 'd' && a[STATE_MODE][0] != 'd')
+		return 1;
+
+	/* dotentries (hidden entries) first */
+	if (a[STATE_NAME][0] == '.' && b[STATE_NAME][0] != '.')
+		return -1;
+	if (b[STATE_NAME][0] == '.' && a[STATE_NAME][0] != '.')
+		return 1;
+	return strcoll(a[STATE_NAME], b[STATE_NAME]);
+}
+
+static void
+setthumbpath(struct FM *fm, char *orig, char *thumb)
+{
+	char buf[PATH_MAX];
+	int i;
+
+	snprintf(buf, PATH_MAX, "%s", orig);
+	for (i = 0; buf[i] != '\0'; i++)
+		if (buf[i] == '/')
+			buf[i] = '%';
+	snprintf(thumb, PATH_MAX, "%s/%s.ppm", fm->thumbnaildir, buf);
+}
+
+static int
+thumbexit(struct FM *fm)
+{
+	int ret;
+
+	ret = 0;
+	etlock(&fm->thumblock);
+	if (fm->thumbexit)
+		ret = 1;
+	etunlock(&fm->thumblock);
+	return ret;
+}
+
+static void
+forkthumb(struct FM *fm, char *orig, char *thumb)
+{
+	pid_t pid;
+
+	if ((pid = efork()) == 0) {     /* children */
+		close(STDOUT_FILENO);
+		close(STDIN_FILENO);
+		eexec(fm->thumbnailer, orig, thumb);
+		exit(EXIT_FAILURE);
+	}
+}
+
+static int
+thumbexists(char *orig, char *mime)
+{
+	struct stat sb;
+	struct timespec origt, mimet;
+
+	if (stat(mime, &sb) == -1)
+		return 0;
+	mimet = sb.st_mtim;
+	if (stat(orig, &sb) == -1)
+		return 0;
+	origt = sb.st_mtim;
+	if (origt.tv_sec == mimet.tv_sec)
+		return origt.tv_nsec < mimet.tv_nsec;
+	return origt.tv_sec < mimet.tv_sec;
+}
+
+static void *
+thumbnailer(void *arg)
+{
+	struct FM *fm;
+	int i;
+	char path[PATH_MAX];
+
+	fm = (struct FM *)arg;
+	for (i = 0; i < fm->nentries; i++) {
+		if (thumbexit(fm))
+			break;
+		if (fm->entries[i][STATE_PATH] == NULL)
+			continue;
+		//printf("%s, %s\n", fm->thumbnaildir, fm->entries[i][STATE_PATH]);
+		if (strncmp(fm->entries[i][STATE_PATH], fm->thumbnaildir, fm->thumbnaildirlen) == 0)
+			continue;
+		setthumbpath(fm, fm->entries[i][STATE_PATH], path);
+		if (!thumbexists(fm->entries[i][STATE_PATH], path)) {
+			forkthumb(fm, fm->entries[i][STATE_PATH], path);
+			wait(NULL);
+		}
+		setthumbnail(fm->wid, path, i);
+		// TODO
+	}
+	pthread_exit(0);
+}
+
+static void
+closethumbthread(struct FM *fm)
+{
+	if (fm->thumbnailer == NULL || fm->thumbnaildir == NULL)
+		return;
+	etlock(&fm->thumblock);
+	fm->thumbexit = 1;
+	etunlock(&fm->thumblock);
+	etjoin(fm->thumbthread, NULL);
+	etlock(&fm->thumblock);
+	fm->thumbexit = 0;
+	etunlock(&fm->thumblock);
+}
+
+static void
+createthumbthread(struct FM *fm)
+{
+	if (fm->thumbnailer == NULL || fm->thumbnaildir == NULL)
+		return;
+	etcreate(&fm->thumbthread, thumbnailer, (void *)fm);
+}
+
+static void
+diropen(struct FM *fm, const char *path, int savecwd)
+{
+	struct IconPattern *icon;
+	struct Pattern *patt;
+	struct dirent **array;
+	struct stat sb;
+	int flags, i, j;
 	char *s;
 
-	if ((s = getenv("ICONSIZE")) != NULL)
-		parseiconsize(s, &config.thumbsize_pixels);
-	if ((s = getenv("ICONPATH")) != NULL)
-		parseiconpath(s, config.thumbsize_pixels, &config.dirthumb_path, &config.filethumb_path);
-	if ((s = getenv("OPENER")) != NULL)
-		config.opener = s;
-	if ((s = getenv("THUMBNAILER")) != NULL)
-		config.thumbnailer = s;
+	if (path != NULL && wchdir(path) == -1)
+		return;
+	closethumbthread(fm);
+	egetcwd(fm->path, sizeof(fm->path));
+	(void)savecwd;                  // XXX: delete-me
+	freeentries(fm);
+	fm->nentries = escandir(fm->path, &array, direntselect, NULL);
+	if (fm->nentries > fm->capacity) {
+		fm->foundicons = ereallocarray(fm->foundicons, fm->nentries, sizeof(*fm->foundicons));
+		fm->entries = ereallocarray(fm->entries, fm->nentries, sizeof(*fm->entries));
+		fm->capacity = fm->nentries;
+	}
+	for (i = 0; i < fm->nentries; i++) {
+		fm->entries[i] = emalloc(sizeof(*fm->entries[i]) * STATE_LAST);
+		fm->entries[i][STATE_NAME] = estrdup(array[i]->d_name);
+		if (strcmp(fm->entries[i][STATE_NAME], DOTDOT) == 0)
+			fm->entries[i][STATE_PATH] = NULL;
+		else
+			fm->entries[i][STATE_PATH] = fullpath(fm->path, array[i]->d_name);
+		if (stat(array[i]->d_name, &sb) == -1) {
+			warn("%s", fm->path);
+			fm->entries[i][STATE_SIZE] = NULL;
+			fm->entries[i][STATE_TIME] = NULL;
+			fm->entries[i][STATE_MODE] = NULL;
+			fm->entries[i][STATE_OWNER] = NULL;
+		} else {
+			fm->entries[i][STATE_SIZE] = sizefmt(sb.st_size);
+			fm->entries[i][STATE_TIME] = timefmt(sb.st_mtim.tv_sec);
+			fm->entries[i][STATE_MODE] = modefmt(sb.st_mode);
+			fm->entries[i][STATE_OWNER] = ownerfmt(sb.st_uid, sb.st_gid);
+		}
+		fm->foundicons[i] = -1;
+		free(array[i]);
+	}
+	free(array);
+	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycompar);
+	for (i = 0; i < fm->nentries; i++) {
+		for (j = 0, icon = fm->icons; fm->foundicons[i] == -1 && icon != NULL; icon = icon->next, j++) {
+			if (icon->mode != '\0' && (fm->entries[i][STATE_MODE] == NULL || fm->entries[i][STATE_MODE][0] != icon->mode))
+				continue;
+			for (patt = icon->patt; patt != NULL; patt = patt->next) {
+				if (strchr(patt->s, '/') != NULL) {
+					flags = FNM_CASEFOLD | FNM_PATHNAME;
+					s = fm->entries[i][STATE_PATH];
+				} else {
+					flags = FNM_CASEFOLD;
+					s = fm->entries[i][STATE_NAME];
+				}
+				if (s != NULL && !fnmatch(patt->s, s, flags)) {
+					fm->foundicons[i] = j;
+					break;
+				}
+			}
+		}
+	}
+	if (strstr(fm->path, fm->home) == fm->path) {
+		if (strlen(fm->path) == fm->homelen) {
+			snprintf(fm->here, PATH_MAX, "~/");
+		} else {
+			snprintf(fm->here, PATH_MAX, "~%s", fm->path + fm->homelen);
+		}
+	} else {
+		(void)memcpy(fm->here, fm->path, strlen(fm->path) + 1);
+	}
+	createthumbthread(fm);
 }
 
-/* get configuration from X resources */
-static void
-parseresources(void)
+static char **
+parseicons(struct FM *fm, const char *s, size_t *nicons)
 {
-	XrmValue xval;
-	long n;
-	char *type;
+	struct IconPattern *icon, *picon;
+	struct Pattern *patt, *ppatt;
+	size_t i;
+	char *str, *p, *q, *path;
+	char *out, *in;
+	char **tab;
 
-	if (XrmGetResource(xdb, "xfiles.faceName", "*", &type, &xval) == True)
-		config.font = xval.addr;
-	if (XrmGetResource(xdb, "xfiles.background", "*", &type, &xval) == True)
-		config.background_color = xval.addr;
-	if (XrmGetResource(xdb, "xfiles.foreground", "*", &type, &xval) == True)
-		config.foreground_color = xval.addr;
-	if (XrmGetResource(xdb, "xfiles.geometry", "*", &type, &xval) == True)
-		parsegeometry(xval.addr, &config.width_pixels, &config.height_pixels);
-	if (XrmGetResource(xdb, "xfiles.scrollbar.background", "XFiles.Scrollbar.background", &type, &xval) == True)
-		config.scrollbackground_color = xval.addr;
-	if (XrmGetResource(xdb, "xfiles.scrollbar.foreground", "XFiles.Scrollbar.foreground", &type, &xval) == True)
-		config.scrollforeground_color = xval.addr;
-	if (XrmGetResource(xdb, "xfiles.scrollbar.thickness", "XFiles.Scrollbar.thickness", &type, &xval) == True)
-		if ((n = strtol(xval.addr, NULL, 10)) > 0)
-			config.scroll_pixels = n;
-	if (XrmGetResource(xdb, "xfiles.selbackground", "*", &type, &xval) == True)
-		config.selbackground_color = xval.addr;
-	if (XrmGetResource(xdb, "xfiles.selforeground", "*", &type, &xval) == True)
-		config.selforeground_color = xval.addr;
+	*nicons = 0;
+	if (s == NULL)
+		return NULL;
+	str = estrdup(s);
+	picon = icon = NULL;
+	for (p = strtok_r(str, "\n", &out); p != NULL; p = strtok_r(NULL, "\n", &out)) {
+		ppatt = patt = NULL;
+		if (*p == '\0')
+			continue;
+		path = strchr(p, '=');
+		if (path == NULL)
+			continue;
+		if (p == path)
+			continue;
+		if (path[1] == '\0')
+			continue;
+		*(path++) = '\0';
+		icon = emalloc(sizeof(*icon));
+		*icon = (struct IconPattern){
+			.next = NULL,
+			.patt = NULL,
+			.path = estrdup(path),
+			.mode = '\0',
+		};
+		if (p[0] != '\0' && p[1] == ':') {
+			icon->mode = p[0];
+			p += 2;
+		}
+		for (q = strtok_r(p, "|", &in); q != NULL; q = strtok_r(NULL, "|", &in)) {
+			patt = emalloc(sizeof(*patt));
+			*patt = (struct Pattern){
+				.next = NULL,
+				.s = estrdup(q),
+			};
+			if (ppatt != NULL)
+				ppatt->next = patt;
+			else
+				icon->patt = patt;
+			ppatt = patt;
+		}
+		if (picon != NULL)
+			picon->next = icon;
+		else
+			fm->icons = icon;
+		picon = icon;
+		(*nicons)++;
+	}
+	if (*nicons == 0)
+		return NULL;
+	tab = ecalloc(*nicons, sizeof(*tab));
+	for (i = 0, icon = fm->icons; icon != NULL; icon = icon->next, i++)
+		tab[i] = icon->path;
+	return tab;
 }
 
-/* parse options; return argument (if given) or NULL */
-static char *
-parseoptions(int argc, char *argv[])
+static int
+initthumbnailer(struct FM *fm)
 {
-	int ch;
+	fm->thumbnailer = getenv(THUMBNAILER);
+	if ((fm->thumbnaildir = getenv(THUMBNAILDIR)) != NULL)
+		fm->thumbnaildirlen = strlen(fm->thumbnaildir);
+	else
+		fm->thumbnaildirlen = 0;
+	createthumbthread(fm);
+	return fm->thumbnailer != NULL && fm->thumbnaildir != NULL;
+}
 
-	while ((ch = getopt(argc, argv, "ag:")) != -1) {
+int
+main(int argc, char *argv[])
+{
+	struct FM fm;
+	size_t nicons;
+	int hasthumb, ch;
+	char *geom, *name, *path, *home, *iconpatts;
+	char **entry, **icons;
+
+	iconpatts = getenv(FILE_ICONS);
+	home = getenv(HOME);
+	geom = NULL;
+	path = NULL;
+	name = DEF_APPNAME;
+	fm = (struct FM){
+		.capacity = 0,
+		.nentries = 0,
+		.entries = NULL,
+		.foundicons = NULL,
+		.home = home,
+		.homelen = ((home != NULL) ? strlen(home) : 0),
+
+		.thumblock = PTHREAD_MUTEX_INITIALIZER,
+		.thumbexit = 0,
+		.thumbnailer = NULL,
+		.thumbnaildir = NULL,
+	};
+	while ((ch = getopt(argc, argv, "ag:n:")) != -1) {
 		switch (ch) {
 		case 'a':
-			config.hide = !config.hide;
+			hide = 0;
 			break;
 		case 'g':
-			parsegeometry(optarg, &config.width_pixels, &config.height_pixels);
+			geom = optarg;
+			break;
+		case 'n':
+			name = optarg;
 			break;
 		default:
 			usage();
@@ -540,1153 +600,22 @@ parseoptions(int argc, char *argv[])
 	if (argc > 1)
 		usage();
 	else if (argc == 1)
-		return *argv;
-	return NULL;
-}
-
-/* compute number of rows and columns for visible entries */
-static void
-calcsize(struct FM *fm, int w, int h)
-{
-	etlock(&geomlock);
-	if (w >= 0 && h >= 0) {
-		fm->winw = max(w - config.scroll_pixels, 1);
-		fm->winh = h;
-	}
-	fm->ncol = max(fm->winw / fm->entryw, 1);
-	fm->nrow = fm->winh / fm->entryh + (fm->winh % fm->entryh ? 2 : 1);
-	fm->x0 = max((fm->winw - fm->ncol * fm->entryw) / 2, 0);
-	if (fm->main != None)
-		XFreePixmap(dpy, fm->main);
-	fm->main = XCreatePixmap(dpy, fm->win, fm->winw, fm->nrow * fm->entryh, depth);
-	if (fm->scroll != None)
-		XFreePixmap(dpy, fm->scroll);
-	fm->scroll = XCreatePixmap(dpy, fm->win, config.scroll_pixels, fm->winh, depth);
-	fm->maxrow = fm->nentries / fm->ncol - fm->winh / fm->entryh + 1 + (fm->nentries % fm->ncol != 0);
-	fm->maxrow = max(fm->maxrow, 1);
-	fm->scrollh = max(fm->winh / fm->maxrow, 1);
-	etunlock(&geomlock);
-}
-
-/* get next utf8 char from s return its codepoint and set next_ret to pointer to end of character */
-static void
-getnextutf8char(const char *s, const char **next_ret)
-{
-	static const unsigned char utfbyte[] = {0x80, 0x00, 0xC0, 0xE0, 0xF0};
-	static const unsigned char utfmask[] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
-	static const FcChar32 utfmin[] = {0, 0x00,  0x80,  0x800,  0x10000};
-	static const FcChar32 utfmax[] = {0, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF};
-	/* 0xFFFD is the replacement character, used to represent unknown characters */
-	FcChar32 ucode;         /* FcChar32 type holds 32 bits */
-	size_t usize = 0;       /* n' of bytes of the utf8 character */
-	size_t i;
-
-	*next_ret = s+1;
-
-	/* get code of first byte of utf8 character */
-	for (i = 0; i < sizeof utfmask; i++) {
-		if (((unsigned char)*s & utfmask[i]) == utfbyte[i]) {
-			usize = i;
-			ucode = (unsigned char)*s & ~utfmask[i];
-			break;
-		}
-	}
-
-	/* if first byte is a continuation byte or is not allowed */
-	if (i == sizeof utfmask || usize == 0)
-		return;
-
-	/* check the other usize-1 bytes */
-	s++;
-	for (i = 1; i < usize; i++) {
-		*next_ret = s+1;
-		/* if byte is nul or is not a continuation byte */
-		if (*s == '\0' || ((unsigned char)*s & utfmask[0]) != utfbyte[0])
-			return;
-		/* 6 is the number of relevant bits in the continuation byte */
-		ucode = (ucode << 6) | ((unsigned char)*s & ~utfmask[0]);
-		s++;
-	}
-
-	/* check if ucode is invalid or in utf-16 surrogate halves */
-	if (!between(ucode, utfmin[usize], utfmax[usize]) || between(ucode, 0xD800, 0xDFFF))
-		return;
-}
-
-/* return width of *s in pixels; draw *s into draw if draw != NULL */
-static int
-drawtext(XftDraw *draw, XftColor *color, int x, int y, int w, const char *text, size_t maxlen)
-{
-	XGlyphInfo ext;
-	const char *next, *origtext, *t;
-	size_t len;
-	int textwidth = 0;
-	int texty;
-
-	origtext = text;
-	while (text < origtext + maxlen) {
-		getnextutf8char(text, &next);
-
-		/* compute the width of the glyph for that character on that font */
-		len = next - text;
-		XftTextExtentsUtf8(dpy, dc.font, (XftChar8 *)text, len, &ext);
-		t = text;
-		if (w && textwidth + ext.xOff > w) {
-			t = ellipsis.s;
-			len = ellipsis.len;
-			while (*next)
-				next++;
-			textwidth += ellipsis.width;
-		}
-		textwidth += ext.xOff;
-
-		if (draw) {
-			texty = y + (dc.fonth - (dc.font->ascent + dc.font->descent))/2 + dc.font->ascent;
-			XftDrawStringUtf8(draw, color, dc.font, x, texty, (XftChar8 *)t, len);
-			x += ext.xOff;
-		}
-
-		text = next;
-	}
-	return textwidth;
-}
-
-/* load image from file, scale it, and draw into pix[PIX_SEL] and pix[PIX_UNSEL] */
-static int
-drawthumb(const char *file, struct FM *fm, struct Rect *thumb, Pixmap *pix)
-{
-	XImage *image;
-	long isize, i;
-	int bpl, channels;
-	int width, height;
-	unsigned char *dataorig, *data;
-
-	if ((dataorig = stbi_load(file, &width, &height, &channels, 4)) == NULL)
-		return 0;
-	if (width > height) {
-		thumb->w = config.thumbsize_pixels;
-		thumb->h = (height * config.thumbsize_pixels) / width;
-	} else {
-		thumb->w = (width * config.thumbsize_pixels) / height;
-		thumb->h = config.thumbsize_pixels;
-	}
-	bpl = channels;
-	if (depth >= 24)
-		bpl = 4;
-	else if (depth >= 16)
-		bpl = 2;
-	else
-		bpl = 1;
-	data = malloc(thumb->w * thumb->h * 4);
-	stbir_resize_uint8(dataorig, width, height, 0, data, thumb->w, thumb->h, 0, bpl);
-	if (data == NULL)
-		return 0;
-	stbi_image_free(dataorig);
-	/* rgba to bgra */
-	if (bpl >= 3){
-		isize = thumb->w * thumb->h * bpl;
-		for (i=0; i < isize; i += bpl) {
-			if (bpl == 4) {    /* alpha compositing */
-				data[i + 0] = (dc.normal[COLOR_BG].color.red * 255 / USHRT_MAX) + ((data[i + 0] - (dc.normal[COLOR_BG].color.red * 255 / USHRT_MAX)) * data[i + 3]) / 255;
-				data[i + 1] = (dc.normal[COLOR_BG].color.green * 255 / USHRT_MAX) + ((data[i + 1] - (dc.normal[COLOR_BG].color.green * 255 / USHRT_MAX)) * data[i + 3]) / 255;
-				data[i + 2] = (dc.normal[COLOR_BG].color.blue * 255 / USHRT_MAX) + ((data[i + 2] - (dc.normal[COLOR_BG].color.blue * 255 / USHRT_MAX)) * data[i + 3]) / 255;
-				data[i + 3] = 0;
-			}
-			unsigned char red  = data[i + 2];
-			unsigned char blue = data[i];
-			data[i]   = red;
-			data[i + 2] = blue;
-		}
-	}
-	image = XCreateImage(dpy, CopyFromParent, depth, ZPixmap, 0, (char *)data, thumb->w, thumb->h, bpl * 8, thumb->w * bpl);
-	if (image == NULL)
-		return 0;
-
-	/* compute position of thumbnails */
-	thumb->x = fm->thumbx + max((config.thumbsize_pixels - thumb->w) / 2, 0);
-	thumb->y = fm->thumby + max((config.thumbsize_pixels - thumb->h) / 2, 0);
-
-	/* draw border on sel pixmap around thumbnail */
-	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[PIX_UNSEL], dc.gc, fm->thumbx, fm->thumby, config.thumbsize_pixels, config.thumbsize_pixels);
-	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, fm->thumbx - THUMBBORDER, fm->thumby - THUMBBORDER, config.thumbsize_pixels + 2 * THUMBBORDER, config.thumbsize_pixels + 2 * THUMBBORDER);
-	XSetForeground(dpy, dc.gc, dc.select[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x - THUMBBORDER, thumb->y - THUMBBORDER, thumb->w + 2 * THUMBBORDER, thumb->h + 2 * THUMBBORDER);
-	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x, thumb->y, thumb->w, thumb->h);
-
-	/* draw thumbnail on both pixmaps */
-	XPutImage(dpy, pix[PIX_UNSEL], dc.gc, image, 0, 0, thumb->x, thumb->y, thumb->w, thumb->h);
-	XPutImage(dpy, pix[PIX_SEL], dc.gc, image, 0, 0, thumb->x, thumb->y, thumb->w, thumb->h);
-	XDestroyImage(image);
-	return 1;
-}
-
-/* call sigaction on sig */
-static void
-initsignal(int sig, void (*handler)(int sig))
-{
-	struct sigaction sa;
-
-	sa.sa_handler = handler;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-	if (sigaction(sig, &sa, 0) == -1) {
-		err(1, "signal %d", sig);
-	}
-}
-
-/* intern atoms */
-static void
-initatoms(void)
-{
-	char *atomnames[ATOM_LAST] = {
-		[UTF8_STRING]                = "UTF8_STRING",
-		[WM_DELETE_WINDOW]           = "WM_DELETE_WINDOW",
-		[_NET_WM_ICON]               = "_NET_WM_ICON",
-		[_NET_WM_NAME]               = "_NET_WM_NAME",
-		[_NET_WM_PID]                = "_NET_WM_PID",
-		[_NET_WM_WINDOW_TYPE]        = "_NET_WM_WINDOW_TYPE",
-		[_NET_WM_WINDOW_TYPE_NORMAL] = "_NET_WM_WINDOW_TYPE_NORMAL",
-	};
-
-	XInternAtoms(dpy, atomnames, ATOM_LAST, False, atoms);
-}
-
-/* initialize drawing context (colors and graphics context) */
-static void
-initdc(void)
-{
-	dc.gc = XCreateGC(dpy, root, 0, NULL);
-	ealloccolor(config.background_color, &dc.normal[COLOR_BG]);
-	ealloccolor(config.foreground_color, &dc.normal[COLOR_FG]);
-	ealloccolor(config.selbackground_color, &dc.select[COLOR_BG]);
-	ealloccolor(config.selforeground_color, &dc.select[COLOR_FG]);
-	ealloccolor(config.scrollbackground_color, &dc.scroll[COLOR_BG]);
-	ealloccolor(config.scrollforeground_color, &dc.scroll[COLOR_FG]);
-	dc.font = XftFontOpenXlfd(dpy, screen, config.font);
-	if (dc.font == NULL) {
-		dc.font = XftFontOpenName(dpy, screen, config.font);
-		if (dc.font == NULL) {
-			errx(1, "could not open font: %s", config.font);
-		}
-	}
-	dc.fonth = dc.font->height;
-}
-
-/* draw fallback icons from .xpm files */
-static void
-xpmread(struct FM *fm, struct Rect *thumb, Pixmap *pix, const char **data)
-{
-	XGCValues val;
-	XpmAttributes xa;
-	XImage *img;
-	Pixmap orig;
-	int status;
-
-	memset(&xa, 0, sizeof xa);
-	status = XpmCreateImageFromData(dpy, (char **)data, &img, NULL, &xa);
-	if (status != XpmSuccess)
-		errx(1, "could not load default icon");
-
-	/* create Pixmap from XImage */
-	orig = XCreatePixmap(dpy, fm->win, config.thumbsize_pixels, config.thumbsize_pixels, img->depth);
-	if (!(xa.valuemask & (XpmSize | XpmHotspot)))
-		errx(1, "could not load default icon");
-	val.foreground = 1;
-	val.background = 0;
-	XChangeGC(dpy, dc.gc, GCForeground | GCBackground, &val);
-	XPutImage(dpy, orig, dc.gc, img, 0, 0, 0, 0, img->width, img->height);
-
-	/* compute size and position of thumbnails */
-	thumb->w = xa.width;
-	thumb->h = xa.height;
-	thumb->x = fm->thumbx + max((config.thumbsize_pixels - thumb->w) / 2, 0);
-	thumb->y = fm->thumby + max((config.thumbsize_pixels - thumb->h) / 2, 0);
-
-	/* draw border on sel pixmap around thumbnail */
-	XSetForeground(dpy, dc.gc, dc.select[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x - THUMBBORDER, thumb->y - THUMBBORDER, thumb->w + 2 * THUMBBORDER, thumb->h + 2 * THUMBBORDER);
-	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, pix[PIX_SEL], dc.gc, thumb->x, thumb->y, thumb->w, thumb->h);
-
-	XCopyArea(dpy, orig, pix[PIX_UNSEL], dc.gc, 0, 0, thumb->w, thumb->h, thumb->x, thumb->y);
-	XCopyArea(dpy, orig, pix[PIX_SEL], dc.gc, 0, 0, thumb->w, thumb->h, thumb->x, thumb->y);
-
-	XDestroyImage(img);
-	XFreePixmap(dpy, orig);
-}
-
-/* create window and set its properties */
-static void
-initfm(struct FM *fm, int argc, char *argv[])
-{
-	XSetWindowAttributes swa;
-	XClassHint classh;
-	pid_t pid;
-	size_t i, j;
-	unsigned long *icon_data;
-	int c, n;
-
-	fm->main = None;
-	fm->scroll = None;
-	fm->hist = fm->curr = NULL;
-	fm->entries = NULL;
-	fm->selected = NULL;
-	fm->capacity = 0;
-	fm->nentries = 0;
-	fm->row = 0;
-	fm->ydiff = 0;
-	fm->home = getenv(HOME);
-	fm->homelen = (fm->home != NULL) ? strlen(fm->home) : 0;
-	fm->entryw = config.thumbsize_pixels * 2;
-	fm->entryh = config.thumbsize_pixels + 3 * dc.fonth + 2 * THUMBBORDER;
-	fm->thumbx = config.thumbsize_pixels / 2;
-	fm->thumby = dc.fonth / 2;
-	fm->textw = fm->entryw - dc.fonth;
-	fm->textx = dc.fonth / 2;
-	fm->texty0 = dc.fonth / 2 + config.thumbsize_pixels + 2 * THUMBBORDER;
-	fm->texty1 = fm->texty0 + dc.fonth;
-	memset(&fm->dirrect, 0, sizeof(fm->dirrect));
-	memset(&fm->filerect, 0, sizeof(fm->filerect));
-
-	swa.background_pixel = dc.normal[COLOR_BG].pixel;
-	swa.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask | ButtonPressMask;
-	fm->win = XCreateWindow(dpy, root, 0, 0, config.width_pixels, config.height_pixels, 0,
-	                        CopyFromParent, CopyFromParent, CopyFromParent,
-	                        CWBackPixel | CWEventMask, &swa);
-
-	/* set window hints, properties and protocols */
-	classh.res_class = CLASS;
-	classh.res_name = NULL;
-	pid = getpid();
-	XmbSetWMProperties(dpy, fm->win, TITLE, TITLE, argv, argc, NULL, NULL, &classh);
-	XSetWMProtocols(dpy, fm->win, &atoms[WM_DELETE_WINDOW], 1);
-	XChangeProperty(dpy, fm->win, atoms[_NET_WM_WINDOW_TYPE], XA_ATOM, 32,
-	                PropModeReplace, (unsigned char *)&atoms[_NET_WM_WINDOW_TYPE_NORMAL], 1);
-	XChangeProperty(dpy, fm->win, atoms[_NET_WM_PID], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&pid, 1);
-
-	calcsize(fm, config.width_pixels, config.height_pixels);
-
-	/* set window icon */
-	n = icons[LEN(icons)-1].size;
-	icon_data = emalloc((n * n + 2) * sizeof(*icon_data));
-	for (i = 0; i < LEN(icons); i++) {
-		n = 0;
-		icon_data[n++] = icons[i].size;
-		icon_data[n++] = icons[i].size;
-
-		for (j = 0; j < icons[i].cnt; j++) {
-			for (c = icons[i].data[j] >> 4; c >= 0; c--)
-				icon_data[n++] = icon_colors[icons[i].data[j] & 0x0F];
-		}
-		XChangeProperty(dpy, fm->win, atoms[_NET_WM_ICON], XA_CARDINAL, 32,
-		                i == 0 ? PropModeReplace : PropModeAppend,
-		                (unsigned char *) icon_data, n);
-	}
-	free(icon_data);
-
-	/* create and clean default thumbnails */
-	fm->file[PIX_UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	fm->file[PIX_SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	fm->dir[PIX_UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	fm->dir[PIX_SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-
-	/* clean pixmaps */
-	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, fm->file[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->file[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->dir[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-	XFillRectangle(dpy, fm->dir[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh);
-
-	/* draw default thumbnails */
-	if (config.filethumb_path != NULL && config.filethumb_path[0] != '\0') {
-		drawthumb(config.filethumb_path, fm, &fm->filerect, fm->file);
-	} else {
-		warnx("could not find icon for files; using default icon");
-		xpmread(fm, &fm->filerect, fm->file, file);
-	}
-	if (config.dirthumb_path != NULL && config.dirthumb_path[0] != '\0') {
-		drawthumb(config.dirthumb_path, fm, &fm->dirrect, fm->dir);
-	} else {
-		warnx("could not find icon for directories; using default icon");
-		xpmread(fm, &fm->dirrect, fm->dir, folder);
-	}
-}
-
-/* compute width of ellipsis string */
-static void
-initellipsis(void)
-{
-	XGlyphInfo ext;
-
-	ellipsis.s = ELLIPSIS;
-	ellipsis.len = strlen(ellipsis.s);
-	XftTextExtentsUtf8(dpy, dc.font, (XftChar8 *)ellipsis.s, ellipsis.len, &ext);
-	ellipsis.width = ext.xOff;
-}
-
-/* delete current cwd and previous from working directory history */
-static void
-delcwd(struct FM *fm)
-{
-	struct Histent *h, *tmp;
-
-	if (fm->curr == NULL)
-		return;
-	h = fm->curr->next;
-	while (h != NULL) {
-		tmp = h;
-		h = h->next;
-		free(tmp->cwd);
-		free(tmp);
-	}
-	fm->curr->next = NULL;
-	fm->hist = fm->curr;
-}
-
-/* insert cwd into working directory history */
-static void
-addcwd(struct FM *fm, char *path) {
-	struct Histent *h;
-
-	delcwd(fm);
-	h = emalloc(sizeof(*h));
-	h->cwd = estrdup(path);
-	h->next = NULL;
-	h->prev = fm->hist;
-	if (fm->hist)
-		fm->hist->next = h;
-	fm->curr = fm->hist = h;
-}
-
-/* select entries according to config.hide */
-static int
-direntselect(const struct dirent *dp)
-{
-	if (strcmp(dp->d_name, ".") == 0)
-		return 0;
-	if (strcmp(dp->d_name, "..") == 0)
-		return 1;
-	if (config.hide && dp->d_name[0] == '.')
-		return 0;
-	return 1;
-}
-
-/* compare entries with strcoll, directories first */
-static int
-entrycompar(const void *ap, const void *bp)
-{
-	struct Entry *a, *b;
-	a = *(struct Entry **)ap;
-	b = *(struct Entry **)bp;
-	/* dotdot (parent directory) first */
-	if (strcmp(a->name, "..") == 0)
-		return -1;
-	if (strcmp(b->name, "..") == 0)
-		return 1;
-
-	/* directories first */
-	if (a->isdir && !b->isdir)
-		return -1;
-	if (b->isdir && !a->isdir)
-		return 1;
-
-	/* dotentries (hidden entries) first */
-	if (a->name[0] == '.' && b->name[0] != '.')
-		return -1;
-	if (b->name[0] == '.' && a->name[0] != '.')
-		return 1;
-	return strcoll(a->name, b->name);
-}
-
-/* allocate entry */
-static struct Entry *
-allocentry(struct FM *fm, const char *name, int isdir)
-{
-	struct Entry *ent;
-
-	ent = emalloc(sizeof *ent);
-	ent->sprev = ent->snext = NULL;
-	ent->pix[PIX_UNSEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	ent->pix[PIX_SEL] = XCreatePixmap(dpy, fm->win, fm->entryw, fm->entryh, depth);
-	ent->issel = 0;
-	ent->isdir = isdir;
-	ent->drawn = 0;
-	ent->name = estrdup(name);
-	memset(ent->line, 0, sizeof(ent->line));
-	if (ent->isdir) {
-		ent->thumb = fm->dirrect;
-		XCopyArea(dpy, fm->dir[PIX_UNSEL], ent->pix[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
-		XCopyArea(dpy, fm->dir[PIX_SEL], ent->pix[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
-	} else {
-		ent->thumb = fm->filerect;
-		XCopyArea(dpy, fm->file[PIX_UNSEL], ent->pix[PIX_UNSEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
-		XCopyArea(dpy, fm->file[PIX_SEL], ent->pix[PIX_SEL], dc.gc, 0, 0, fm->entryw, fm->entryh, 0, 0);
-	}
-	return ent;
-}
-
-/* destroy entry */
-static void
-freeentries(struct FM *fm)
-{
-	int i;
-
-	for (i = 0; i < fm->nentries; i++) {
-		XFreePixmap(dpy, fm->entries[i]->pix[PIX_UNSEL]);
-		XFreePixmap(dpy, fm->entries[i]->pix[PIX_SEL]);
-		free(fm->entries[i]->name);
-		free(fm->entries[i]);
-	}
-}
-
-/* populate list of entries on fm; return -1 on error */
-static void
-listentries(struct FM *fm, int savecwd)
-{
-	struct dirent **array;
-	struct stat sb;
-	int i, n, isdir;
-	char path[PATH_MAX];
-
-	egetcwd(path, sizeof(path));
-	if (savecwd)
-		addcwd(fm, path);
-	n = escandir(path, &array, direntselect, NULL);
-	freeentries(fm);
-	if (n > fm->capacity) {
-		fm->entries = ereallocarray(fm->entries, n, sizeof(*fm->entries));
-		fm->capacity = n;
-	}
-	fm->nentries = n;
-	for (i = 0; i < fm->nentries; i++) {
-		if (stat(array[i]->d_name, &sb) == -1) {
-			warn("%s", path);
-			isdir = 0;
-		} else {
-			isdir = S_ISDIR(sb.st_mode);
-		}
-		fm->entries[i] = allocentry(fm, array[i]->d_name, isdir);
-		free(array[i]);
-	}
-	free(array);
-	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycompar);
-}
-
-/* get index of entry from pointer position; return -1 if not found */
-static int
-getentry(struct FM *fm, int x, int y)
-{
-	struct Entry *ent;
-	int i, n, w, h;
-
-	if (x < fm->x0 || x >= fm->x0 + fm->ncol * fm->entryw)
-		return -1;
-	if (y < 0 || y >= fm->winh)
-		return -1;
-	x -= fm->x0;
-	y += fm->ydiff;
-	w = x / fm->entryw;
-	h = y / fm->entryh;
-	i = fm->row * fm->ncol + h * fm->ncol + w;
-	n = min(fm->nentries, fm->row * fm->ncol + fm->nrow * fm->ncol);
-	if (i < fm->row * fm->ncol || i >= n)
-		return -1;
-	x -= w * fm->entryw;
-	y -= h * fm->entryh;
-	ent = fm->entries[i];
-	if ((x >= ent->thumb.x && x < ent->thumb.x + ent->thumb.w && y >= ent->thumb.y) ||
-	    (x >= ent->line[0].x && x < ent->line[0].x + ent->line[0].w && y >= fm->texty0 && y < fm->texty0 + dc.fonth) ||
-	    (x >= ent->line[1].x && x < ent->line[1].x + ent->line[1].w && y >= fm->texty1 && y < fm->texty1 + dc.fonth))
-		return i;
-	return -1;
-}
-
-/* copy entry pixmap into fm pixmap */
-static void
-copyentry(struct FM *fm, int i)
-{
-	Pixmap pix;
-	int x, y;
-
-	if (i < fm->row * fm->ncol || i >= fm->row * fm->ncol + fm->nrow * fm->ncol)
-		return;
-	pix = (fm->entries[i]->issel ? fm->entries[i]->pix[PIX_SEL] : fm->entries[i]->pix[PIX_UNSEL]);
-	i -= fm->row * fm->ncol;
-	x = i % fm->ncol;
-	y = (i / fm->ncol) % fm->nrow;
-	x *= fm->entryw;
-	y *= fm->entryh;
-	XCopyArea(dpy, pix, fm->main, dc.gc, 0, 0, fm->entryw, fm->entryh, fm->x0 + x, y);
-}
-
-/* commit pixmap into window */
-static void
-commitdraw(struct FM *fm)
-{
-	fm->scrolly = fm->row * fm->winh / fm->maxrow + fm->ydiff * fm->scrollh / fm->entryh;
-	XSetForeground(dpy, dc.gc, dc.scroll[COLOR_BG].pixel);
-	XFillRectangle(dpy, fm->scroll, dc.gc, 0, 0, config.scroll_pixels, fm->winh);
-	XSetForeground(dpy, dc.gc, dc.scroll[COLOR_FG].pixel);
-	XFillRectangle(dpy, fm->scroll, dc.gc, 0, fm->scrolly, config.scroll_pixels, fm->scrollh);
-
-	XCopyArea(dpy, fm->main, fm->win, dc.gc, 0, fm->ydiff, fm->winw, fm->winh, 0, 0);
-	XCopyArea(dpy, fm->scroll, fm->win, dc.gc, 0, 0, config.scroll_pixels, fm->winh, fm->winw, 0);
-}
-
-/* check if we can break line at the given character (is space, hyphen, etc) */
-static int
-isbreakable(char c)
-{
-	return c == '.' || c == '-' || c == '_';
-}
-
-/* draw names below thumbnail on its pixmaps */
-static void
-drawentry(struct FM *fm, struct Entry *ent)
-{
-	XftDraw *draw;
-	int x0, x1, prevw, textw0, textw1, prevlen, len0, len1, i;
-
-	textw1 = textw0 = len0 = len1 = 0;
-	do {
-		prevw = textw0;
-		prevlen = len0;
-		for (; ent->name[len0] != '\0' && !isspace(ent->name[len0]) && !isbreakable(ent->name[len0]); len0++)
-			;
-		textw0 = drawtext(NULL, NULL, 0, 0, 0, ent->name, len0);
-		while (isbreakable(ent->name[len0]))
-			len0++;
-		textw0 = drawtext(NULL, NULL, 0, 0, 0, ent->name, len0);
-		while (isspace(ent->name[len0]))
-			len0++;
-	} while (textw0 < fm->textw && ent->name[len0] != '\0' && prevw != textw0);
-	if (textw0 >= fm->textw) {
-		len0 = prevlen;
-		textw0 = prevw;
-	}
-	while (len0 > 0 && isbreakable(ent->name[len0 - 1]))
-		len0--;
-	i = len0;
-	while (len0 > 0 && isspace(ent->name[len0 - 1]))
-		len0--;
-	if (i > 0 && ent->name[i] != '\0') {
-		len1 = strlen(ent->name+i);
-		textw1 = drawtext(NULL, NULL, 0, 0, 0, ent->name + i, len1);
-	} else {
-		len0 = strlen(ent->name);
-		textw0 = drawtext(NULL, NULL, 0, 0, 0, ent->name, len0);
-	}
-
-	x0 = fm->textx + max(0, (fm->textw - textw0) / 2);
-	x1 = fm->textx + max(0, (fm->textw - textw1) / 2);
-
-	draw = XftDrawCreate(dpy, ent->pix[PIX_UNSEL], visual, colormap);
-	drawtext(draw, &dc.normal[COLOR_FG], x0, fm->texty0, fm->textw, ent->name, len0);
-	if (i > 0 && ent->name[i] != '\0')
-		drawtext(draw, &dc.normal[COLOR_FG], x1, fm->texty1, fm->textw, ent->name + i, len1);
-	XftDrawDestroy(draw);
-	ent->line[0].x = x0;
-	ent->line[0].w = textw0;
-
-	XSetForeground(dpy, dc.gc, dc.select[COLOR_BG].pixel);
-	XFillRectangle(dpy, ent->pix[PIX_SEL], dc.gc, x0, fm->texty0, textw0, dc.fonth);
-	draw = XftDrawCreate(dpy, ent->pix[PIX_SEL], visual, colormap);
-	drawtext(draw, &dc.select[COLOR_FG], x0, fm->texty0, fm->textw, ent->name, len0);
-	if (i > 0 && ent->name[i] != '\0') {
-		XFillRectangle(dpy, ent->pix[PIX_SEL], dc.gc, x1, fm->texty1, textw1, dc.fonth);
-		drawtext(draw, &dc.select[COLOR_FG], x1, fm->texty1, fm->textw, ent->name + i, len1);
-	}
-	ent->line[1].x = x1;
-	ent->line[1].w = textw1;
-
-	XftDrawDestroy(draw);
-
-	ent->drawn = 1;
-}
-
-/* draw entries on main window */
-static void
-drawentries(struct FM *fm)
-{
-	int i, n;
-
-	XSetForeground(dpy, dc.gc, dc.normal[COLOR_BG].pixel);
-	XFillRectangle(dpy, fm->main, dc.gc, 0, 0, fm->winw, fm->nrow * fm->entryh);
-	n = min(fm->nentries, fm->row * fm->ncol + fm->nrow * fm->ncol);
-	for (i = fm->row * fm->ncol; i < n; i++) {
-		if (!fm->entries[i]->drawn)
-			drawentry(fm, fm->entries[i]);
-		copyentry(fm, i);
-	}
-	commitdraw(fm);
-}
-
-/* fork process that get thumbnail */
-static int
-forkthumb(const char *name)
-{
-	pid_t pid;
-	int fd[2];
-	char path[PATH_MAX];
-
-	snprintf(path, sizeof(path), "./%s", name);
-	epipe(fd);
-	if ((pid = efork()) > 0) {      /* parent */
-		close(fd[1]);
-		return fd[0];
-	} else {                        /* children */
-		close(fd[0]);
-		if (fd[1] != STDOUT_FILENO)
-			edup2(fd[1], STDOUT_FILENO);
-		eexec(config.thumbnailer, path);
-	}
-	return -1;                      /* unreachable */
-}
-
-/* read image path from file descriptor */
-static void
-readpath(int fd, char *path)
-{
-	FILE *fp;
-	int len;
-
-	*path = '\0';
-	if ((fp = fdopen(fd, "r")) == NULL) {
-		warn("fdopen");
-		return;
-	}
-	if (fgets(path, PATH_MAX, fp) == NULL) {
-		fclose(fp);
-		return;
-	}
-	fclose(fp);
-	len = strlen(path);
-	if (path[len - 1] == '\n') {
-		path[len - 1] = '\0';
-	}
-}
-
-/* set fm->row locking geomlock */
-static void
-setrow(struct FM *fm, int row)
-{
-	etlock(&geomlock);
-	fm->row = row;
-	etunlock(&geomlock);
-}
-
-/* thumbnailer thread */
-static void *
-thumbnailer(void *arg)
-{
-	struct FM *fm;
-	struct Entry *ent;
-	int fd;
-	int ret;
-	int i;
-	char path[PATH_MAX];
-
-	ret = 0;
-	fm = (struct FM *)arg;
-	for (i = 0; i < fm->nentries; i++) {
-		etlock(&thumblock);
-		if (thumbexit)
-			ret = 1;
-		etunlock(&thumblock);
-		if (ret)
-			break;
-		ent = fm->entries[i];
-		fd = forkthumb(fm->entries[i]->name);
-		readpath(fd, path);
-		close(fd);
-		wait(NULL);
-		if (*path != '\0' &&
-		    drawthumb(path, fm, &ent->thumb, ent->pix)) {
-			copyentry(fm, i);
-			etlock(&geomlock);
-			if (i >= fm->row * fm->ncol &&
-			    i < fm->row * fm->ncol + fm->nrow * fm->ncol) {
-				commitdraw(fm);
-				XFlush(dpy);
-			}
-			etunlock(&geomlock);
-		}
-	}
-	pthread_exit(0);
-}
-
-/* scroll list by manipulating scroll bar with pointer; return 1 if fm->row changes */
-static int
-scroll(struct FM *fm, int y)
-{
-	int prevrow;
-	int half;
-
-	prevrow = fm->row;
-	half = fm->scrollh / 2;
-	y = max(half, min(y, fm->winh - half));
-	y -= half;
-	setrow(fm, y * fm->maxrow / fm->winh);
-	fm->ydiff = (y - fm->row * fm->winh / fm->maxrow) * fm->entryh / fm->scrollh;
-	if (fm->row >= fm->maxrow - 1) {
-		setrow(fm, fm->maxrow - 1);
-		fm->ydiff = 0;
-	}
-	return prevrow != fm->row;
-}
-
-/* mark or unmark entry as selected */
-static void
-selectentry(struct FM *fm, struct Entry *ent, int select)
-{
-	if ((ent->issel != 0) == (select != 0))
-		return;
-	if (select) {
-		ent->snext = fm->selected;
-		ent->sprev = NULL;
-		if (fm->selected)
-			fm->selected->sprev = ent;
-		fm->selected = ent;
-	} else {
-		if (ent->snext)
-			ent->snext->sprev = ent->sprev;
-		if (ent->sprev)
-			ent->sprev->snext = ent->snext;
-		else if (fm->selected == ent)
-			fm->selected = ent->snext;
-		ent->sprev = ent->snext = NULL;
-	}
-	ent->issel = select;
-}
-
-/* mark or unmark entry as selected */
-static void
-selectentries(struct FM *fm, int a, int b, int select)
-{
-	int min;
-	int max;
-	int i;
-
-	if (a == -1 || b == -1)
-		return;
-	if (a < b) {
-		min = a;
-		max = b;
-	} else {
-		min = b;
-		max = a;
-	}
-	for (i = min; i >= 0 && i <= max; i++) {
-		selectentry(fm, fm->entries[i], select);
-	}
-}
-
-static void
-settitle(struct FM *fm)
-{
-	char path[PATH_MAX];
-	char *s;
-
-	if (fm->curr->cwd == NULL || fm->homelen == 0)
-		return;
-	if (strstr(fm->curr->cwd, fm->home) == fm->curr->cwd) {
-		if (strlen(fm->curr->cwd) == fm->homelen)
-			snprintf(path, sizeof(path), "~/");
-		else
-			snprintf(path, sizeof(path), "~%s", fm->curr->cwd + fm->homelen);
-		s = path;
-	} else {
-		s = fm->curr->cwd;
-	}
-	XmbSetWMProperties(dpy, fm->win, s, s, NULL, 0, NULL, NULL, NULL);
-	XChangeProperty(
-		dpy,
-		fm->win,
-		atoms[_NET_WM_NAME],
-		atoms[UTF8_STRING],
-		8,
-		PropModeReplace,
-		s,
-		strlen(s)
-	);
-}
-
-/* change directory */
-static void
-diropen(struct FM *fm, const char *path, int savecwd)
-{
-	while (fm->selected != NULL)            /* unselect entries */
-		selectentry(fm, fm->selected, 0);
-	if (path != NULL && wchdir(path) == -1)
-		return;
-	/* close previous thumbnailer thread */
-	etlock(&thumblock);
-	thumbexit = 1;
-	etunlock(&thumblock);
-	etjoin(thumbt, NULL);
-	etlock(&thumblock);
-	thumbexit = 0;
-	etunlock(&thumblock);
-
-	/* prepare for new directory */
-	listentries(fm, savecwd);
-	calcsize(fm, -1, -1);
-	setrow(fm, 0);
-	fm->ydiff = 0;
-	etcreate(&thumbt, thumbnailer, (void *)fm);
-
-	/* set window title */
-	settitle(fm);
-}
-
-/* open file using config.opener */
-static void
-fileopen(struct Entry *ent)
-{
-	pid_t pid1, pid2;
-	int fd;
-	char path[PATH_MAX];
-
-	snprintf(path, sizeof(path), "./%s", ent->name);
-	if ((pid1 = efork()) == 0) {
-		if ((pid2 = efork()) == 0) {
-			close(STDOUT_FILENO);
-			fd = open(DEV_NULL, O_RDWR);
-			edup2(STDOUT_FILENO, fd);
-			eexec(config.opener, path);
-		}
-		exit(0);
-	}
-	waitpid(pid1, NULL, 0);
-}
-
-/* go back (< 0) in cwd history; return nonzero when changing directory */
-static int
-navhistory(struct FM *fm, int dir)
-{
-	struct Histent *h;
-
-	h = (dir == BACK) ? fm->curr->prev : fm->curr->next;
-	if (h == NULL)
-		return 0;
-	diropen(fm, h->cwd, 0);
-	fm->curr = h;
-	return 1;
-}
-
-/* stop running */
-static void
-stoprunning(void)
-{
-	running = 0;
-}
-
-/* handle left mouse button click */
-static void
-mouseclick(struct FM *fm, XButtonPressedEvent *ev)
-{
-	static int lastent = -1;        /* index of last clicked entry; -1 if none */
-	static Time lasttime = 0;       /* time of last click action */
-	struct Entry *ent;
-	int setlastent;
-	int i;
-	char path[PATH_MAX];
-
-	setlastent = 1;
-	if (!(ev->state & (ControlMask | ShiftMask)))
-		while (fm->selected)
-			selectentry(fm, fm->selected, 0);
-	i = getentry(fm, ev->x, ev->y);
-	if (ev->state & ShiftMask)
-		selectentries(fm, i, lastent, 1);
-	else if (i != -1)
-		selectentry(fm, fm->entries[i], (ev->state & ControlMask) ? !fm->entries[i]->issel : 1);
-	if (!(ev->state & (ControlMask | ShiftMask)) && i != -1 &&
-	    i == lastent && ev->time - lasttime <= DOUBLECLICK) {
-		ent = fm->entries[i];
-		if (ent->isdir) {
-			snprintf(path, sizeof(path), "./%s", ent->name);
-			diropen(fm, path, 1);
-			setlastent = 0;
-		} else {
-			fileopen(ent);
-		}
-	}
-	drawentries(fm);
-	commitdraw(fm);
-	lastent = (setlastent) ? i : -1;
-	lasttime = ev->time;
-}
-
-/* window is exposed; redraw its content */
-static void
-xeventexpose(struct FM *fm, XEvent *ev)
-{
-	if (ev->xexpose.count == 0) {
-		commitdraw(fm);
-	}
-}
-
-/* check if client message is window deletion; stop running if it is */
-static void
-xeventclientmessage(struct FM *fm, XEvent *ev)
-{
-	(void)fm;
-	if ((Atom)ev->xclient.data.l[0] == atoms[WM_DELETE_WINDOW]) {
-		stoprunning();
-	}
-}
-
-/* resize file manager window */
-static void
-xeventconfigurenotify(struct FM *fm, XEvent *ev)
-{
-	calcsize(fm, ev->xconfigure.width, ev->xconfigure.height);
-	if (fm->row >= fm->maxrow)
-		setrow(fm, fm->maxrow - 1);
-	drawentries(fm);
-	commitdraw(fm);
-}
-
-/* grab pointer and handle scrollbar dragging with the left mouse button */
-static void
-grabscroll(struct FM *fm, int y)
-{
-	XEvent ev;
-	int dy;
-
-	if (grabpointer(fm, Button1MotionMask) == -1)
-		return;
-	dy = between(y, fm->scrolly, fm->scrolly + fm->scrollh) ? fm->scrolly + fm->scrollh / 2 - y : 0;
-	if (scroll(fm, y + dy))
-		drawentries(fm);
-	commitdraw(fm);
-	while (!XMaskEvent(dpy, ButtonReleaseMask | Button1MotionMask | ExposureMask, &ev)) {
-		switch (ev.type) {
-		case Expose:
-			xeventexpose(fm, &ev);
-			break;
-		case MotionNotify:
-			if (scroll(fm, ev.xbutton.y + dy))
-				drawentries(fm);
-			commitdraw(fm);
-			break;
-		case ButtonRelease:
-			ungrab();
-			return;
-		}
-	}
-}
-
-/* process mouse button press event */
-static void
-xeventbuttonpress(struct FM *fm, XEvent *e)
-{
-	XButtonPressedEvent *ev;
-
-	ev = &e->xbutton;
-	switch (ev->button) {
-	case Button1:
-		if (ev->x > fm->winw)   /* scrollbar was manipulated */
-			grabscroll(fm, ev->y);
-		else                    /* mouse left button was pressed */
-			mouseclick(fm, ev);
-		break;
-	case Button2:
-		// TODO
-		break;
-	case Button3:
-		// TODO
-		break;
-	case Button4:
-	case Button5:
-		/* mouse wheel was scrolled */
-		if (scroll(fm, fm->scrolly + fm->scrollh / 2 + (ev->button == Button4 ? -5 : +5)))
-			drawentries(fm);
-		commitdraw(fm);
-		break;
-	case BUTTON8:
-	case BUTTON9:
-		/* navigate through history with mouse back/forth buttons */
-		if (navhistory(fm, (ev->button == BUTTON8) ? BACK : FORTH)) {
-			drawentries(fm);
-			commitdraw(fm);
-		}
-		break;
-	default:
-		break;
-	}
-}
-
-/* clean up drawing context */
-static void
-cleandc(void)
-{
-	XftColorFree(dpy, visual, colormap, &dc.normal[COLOR_BG]);
-	XftColorFree(dpy, visual, colormap, &dc.normal[COLOR_FG]);
-	XftColorFree(dpy, visual, colormap, &dc.select[COLOR_BG]);
-	XftColorFree(dpy, visual, colormap, &dc.select[COLOR_FG]);
-	XftColorFree(dpy, visual, colormap, &dc.scroll[COLOR_BG]);
-	XftColorFree(dpy, visual, colormap, &dc.scroll[COLOR_FG]);
-	XFreeGC(dpy, dc.gc);
-	XftFontClose(dpy, dc.font);
-}
-
-/* xfiles: X11 file manager */
-int
-main(int argc, char *argv[])
-{
-	struct FM fm;
-	XEvent ev;
-	void (*xevents[LASTEvent])(struct FM *, XEvent *) = {
-		[ButtonPress]      = xeventbuttonpress,
-		[ClientMessage]    = xeventclientmessage,
-		[ConfigureNotify]  = xeventconfigurenotify,
-		[Expose]           = xeventexpose,
-	};
-	char *path;
-
-	if (!XInitThreads())
-		errx(1, "XInitThreads");
-	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
-		warnx("warning: no locale support");
-	if ((dpy = XOpenDisplay(NULL)) == NULL)
-		errx(1, "could not open display");
-	screen = DefaultScreen(dpy);
-	visual = DefaultVisual(dpy, screen);
-	depth = DefaultDepth(dpy, screen);
-	root = RootWindow(dpy, screen);
-	colormap = DefaultColormap(dpy, screen);
-	esetcloexec(XConnectionNumber(dpy));
-
-	XrmInitialize();
-	if ((xrm = XResourceManagerString(dpy)) != NULL && (xdb = XrmGetStringDatabase(xrm)) != NULL)
-		parseresources();
-	parseenviron();
-	path = parseoptions(argc, argv);
-
-	initsignal(SIGCHLD, SIG_IGN);
-	initatoms();
-	initdc();
-	initfm(&fm, argc, argv);
-	initellipsis();
-
-	etcreate(&thumbt, thumbnailer, (void *)&fm);
+		path = *argv;
+	icons = parseicons(&fm, iconpatts, &nicons);
+	hasthumb = initthumbnailer(&fm);
+	if ((fm.wid = initwidget(APPCLASS, name, geom, states, STATE_LAST, argc, argv, winicon_data, winicon_size, hasthumb)) == NULL)
+		errx(EXIT_FAILURE, "could not initialize X widget");
+	openicons(fm.wid, icons, nicons);
+	free(icons);
 	diropen(&fm, path, 1);
-	drawentries(&fm);
-
-	XMapWindow(dpy, fm.win);
-
-	while (running && !XNextEvent(dpy, &ev))
-		if (xevents[ev.type] != NULL)
-			(*xevents[ev.type])(&fm, &ev);
-
-	cleandc();
-
-	XCloseDisplay(dpy);
-
-	return 0;
+	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
+	mapwidget(fm.wid);
+	while (pollwidget(fm.wid, &entry) != WIDGET_CLOSE) {
+		;
+	}
+	freeentries(&fm);
+	free(fm.entries);
+	free(fm.foundicons);
+	closewidget(fm.wid);
+	return EXIT_SUCCESS;
 }

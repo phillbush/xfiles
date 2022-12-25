@@ -1,272 +1,113 @@
-.TH XFILES 1
-.SH NAME
-xfiles \- X file manager
-.SH SYNOPSIS
-.B xfiles
-.RB [ \-a ]
-.RB [ \-g
-.IR geometry ]
-.RI [ path ]
-.SH DESCRIPTION
-.B xfiles
+.Dd December 25, 2022
+.Dt XFILEs 1
+.Os
+.Sh NAME
+.Nm xfiles
+.Nd X11 file manager
+.Sh SYNOPSIS
+.Nm prog
+.Op Fl a
+.Op Fl g Ar geometry
+.Op Fl n Ar name
+.Op Ar directory
+.Sh DESCRIPTION
+.Nm
 is a file manager for X11.
-It can be controlled with the mouse, with the keyboard,
-or with commands interpreted from the standard input.
-.B xfiles
-uses other programs to perform several tasks,
-such as open a file, copy a file, or get the path to the thumbnail of a file.
-.PP
+.Nm
+uses other programs to perform several tasks, such as open a file or generate thumbnails.
+.Pp
 The options are as follows:
-.TP
-.B \-a
-Include directory entries whose names begin with a dot (\(aq.\(aq).
-.TP
-.BI \-g " geometry"
-Set window size to
-.IR geometry ,
-which is a string of the form
-.IR NxN .
-For example,
-.B 600x480
-creates a window 600 pixels wide and 480 pixels tall.
-.SH USAGE
-.B xfiles
-is controlled with the mouse, with the keyboard, or with commands interpreted from the standard input.
-.SS Mouse
-A single click with mouse button 1 (left button) selects a single file and mark it;
-or (if the pointer is over an empty area), unmarks the marked files.
-A single click with mouse button 1 while the Control key is pressed adds an file to the list of marked files.
-A single click with mouse button 1 while the Shift key is pressed adds a range of files to the list of marked files.
-Selecting a region with mouse button 1 marks all the files under the selected region.
-.PP
-A double click with mouse button 1 opens a directory with
-.B xfiles
-or opens a file with the program set by the
-.B $OPENER
-environment variable.
-.PP
-Drag-and-dropping with the mouse button 1 moves the dragged files.
-.PP
-A single click with the mouse button 3 (right button) on a empty region
-opens the menu for the current directory.
-A single click with the mouse button 3 on marked files opens the menu for those files.
-See the options on the menu below.
-.PP
-The mouse scroll wheel (buttons 4 and 5) can be used to scroll up or down the file list.
-.SS Menu
-The menu items, from the rightmost one, counterclockwise, are listed below.
-.PP
-The menu for the current directory contains the following items.
-.IP \(bu 2
-Toggle show hidden files.
-.IP \(bu 2
-Create a new file.
-.IP \(bu 2
-Create a new directory.
-.IP \(bu 2
-Paste copied or moved files.
-.PP
-The menu for entries contain the following items.
-.IP \(bu 2
-Call the
-.B $XFILES_MENU
-program to generate a menu for the selected or marked entries.
-.IP \(bu 2
-Move the file.
-.IP \(bu 2
-Copy the file.
-.IP \(bu 2
-Open the entry.
-.IP \(bu 2
-Call the
-.B $TRASH
-program on the entries to move them to the trash can.
-.IP \(bu 2
-Call the
-.B $XSTAT
-program on the entries to show their properties.
-.SS Keyboard
-The Arrow keys move the selection through the entries.
-.PP
-The Enter key opens a directory or a file.
-.PP
-The PageUp and PageDown keys scroll the entries up or down.
-.PP
-The Home or End keys select the first entry or last entry.
-.PP 
-The Space key adds a entry to the list of marked entries.
-.PP
-Typing any string moves the selection to the entry matching it.
-.SS Commands
-.TP
-.B cd PATH
-Change directory.
-.TP
-.B copy
-Set selection for copy.
-.TP
-.B echo STRING
-Echo string to stdout.
-.TP
-.B exit
-Exit
-.BR xfiles .
-.TP
-.B find STRING
-Find files on the current directory.
-.TP
-.B invert
-Invert selection.
-.TP
-.B move
-Set selection for moving.
-.TP
-.B open PATH
-Open file with
-.BR $OPENER .
-.TP
-.B paste
-Paste files set for copying or moving.
-.TP
-.B redraw
-Redraw thumbnails.
-.TP
-.B reload
-Reload entry list.
-.TP
-.B scroll MOVEMENT
-Scroll the screen.
-The argument can be
-.BR top ,
-.BR bottom ,
-.BR up ,
-.BR half-up ,
-.BR page-up ,
-.BR down ,
-.BR half-down ,
-or
-.BR page-down .
-.TP
-.B select ENTRIES...
-Select one or more entries in the current directory.
-.TP
-.B trash
-Move selected entries to trash.
-.TP
-.B unselect ENTRIES...
-Unselect one or more entries in the current directory.
-.SH ENVIRONMENT
+.Bl -tag -width Ds
+.It Fl a
+Include directory entries whose name begin with a dot.
+.It Fl g Ar geometry
+Set window size and position as specified in
+.Xr XParseGeometry 3 .
+.It Fl n Ar name
+Specify the
+.Ic res_name
+member of the
+.Xr XClassHint 3
+property.
+.Ar name
+is used to retrieve resources.
+If not specified, defaults to
+.Qq "xfiles" .
+.El
+.Pp
+If no
+.Ar directory
+is given as argument,
+.Nm
+opens at user's
+.Ev HOME
+directory.
+Otherwise, it opens at the given directory.
+.Sh ENVIRONMENT
 The following environment variables affect the execution of
-.B xfiles
-.TP
-.B HOME
-The user's home directory.
-.TP
-.B ICONSIZE
-Icon size in the form
-.IR NxN ,
+.Nm Ns .
+.Bl -tag -width Ds
+.It Ev DISPLAY
+The display to start
+.Nm
+on.
+.It Ev HOME
+Home directory.
+.It FILE_ICONS
+Newline-separated list of icon specifications.
+Each linemust have the following format:
+.Ic "[TYPE:][GLOB1|GLOB2|...|GLOBN]=PATH"
+.Bl -bullet
+.It
+.Ic "TYPE"
+is a character that must match the file's type.  For example, the
+TYPE
+.Qq "d*"
+matches a directory whose, and
+.Qq "-"
+matches any regular file.
+.It
+.Ic "GLOB1"
+until
+.Ic "GLOBN"
+are bar-delimited glob strings that must match the entry being displayed by XFiles,
 for example,
-.BR 64x64 .
-This should be a subdirectory in the directory pointed to by the
-.B ICONPATH
-environment variable.
-.TP
-.B ICONPATH
-The directory containing icons.
-See the section
-.B FILES
-for more information on its structure.
-.TP
-.B OPENER
-Program used to open files.
-If not set, the program
-.B xdg-open
-is used instead, if found.
-.TP
-.B PATH
-Where to look for programs.
-.TP
-.B TERMCMD
-Command used to invoke the terminal emulator.
-.TP
-.B THUMBNAILER
-Command used to get the path to the thumbnail of a file given as argument.
-If not set, the program
-.B thumbnail
-is used instead, if found.
-.TP
-.B TRASH
-Program used to send files to the trash can.
-If not set, the program
-.B trash
-is used instead, if found.
-.TP
-.B XFILES_COMMANDS
-A semicolon-separated list of commands that can be run from
-.B xfiles
-stdin as a intern command.
-Each entry in the list is a colon-delimited name-value pair.
-The name is the name of the command as interpreted by
-.B xfiles.
-The value is the command that will be run with execve;
-this command will be run on the current directory of
-.B xfiles
-and will be given the list of marked files as arguments.
-See the
-.B EXAMPLE
-section for an example of a value for this environment variable.
-.SH FILES
-.B xfiles
-expects two icons to exist.
-.TP
-.B $ICONPATH/$ICONSIZE/places/folder.png
-The image for the icon of directory entries.
-.TP
-.B $ICONPATH/$ICONSIZE/mimetypes/unknown.png
-The image for the icon of non-directory (regular file) entries.
-.SH RESOURCES
-.B xfiles
-understands the following X resources.
-.TP
-.B xfiles.faceName
-The font for the names of directory entries.
-.TP
-.B xfiles.background
-The color for the background of the main window.
-.TP
-.B xfiles.foreground
-The color for the names of non-selected entries.
-.TP
-.B xfiles.geometry
-The default size of XFiles window.
-It must be in the form WxH; for example, 600x460.
-.TP
-.BR xfiles.scrollbar.background " or " XFiles.Scrollbar.background
-The background color of the scroll bar.
-The second form is for compatibility with Athena widgets.
-.TP
-.BR xfiles.scrollbar.foreground " or " XFiles.Scrollbar.foreground
-The color of the scroll bar handler.
-The second form is for compatibility with Athena widgets.
-.TP
-.BR xfiles.scrollbar.thickness " or " XFiles.Scrollbar.thickness
-The thickness of the scroll bar, in pixels.
-The second form is for compatibility with Athena widgets.
-.TP
-.B xfiles.selbackground
-The background color of selected entries.
-.TP
-.B xfiles.selforeground
-The color for the names of selected entries.
-.SH EXAMPLES
-TODO
-.SH SEE ALSO
-.IR control (1),
-.IR progress (1),
-.IR xstat (1)
-.SH BUGS
-Scrolling with the scrollbar stops thumbnail loading.
-.PP
-.B xfiles
-is a work in progress.
-Not everything described in this manual is implemented yet.
+.Qq "*.png|*.jpg"
+matches files with png or jpg extension.
+Globing matching is case insensitive.
+.It
+.Ic "PATH"
+is the path to the icon in X Pixmap (xpm) format.
+.El
+.It Ev OPENER
+Program to be called to open files.
+Defaults to
+.Xr xdg-open 1 .
+.It Ev THUMBNAILER
+Program to be called to generate thumbnails.
+The first argument passed to such program is the path to the existent file or directory.
+The second argument is the path to the thumbnail image to be created in the PPM format.
+.It Ev THUMBNAILDIR
+Path to the directory where thumbnails must be saved.
+.El
+.Sh RESOURCEs
+.Nm understands the following X resources.
+They must be prefixed with either the
+.Qq "XFiles."
+class, or the name given with the
+.Fl n
+command-line option.
+.Bl -tag -width Ds
+.It Ic faceName
+Font for drawing text.
+.It Ic background
+Background color.
+.It Ic foreground
+Text color.
+.It Ic selbackground
+Background color for selected entries.
+.It Ic selforeground
+Text color for selected entries.
+.El
+.Sh BUGS
+Yes.

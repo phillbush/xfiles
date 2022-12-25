@@ -1,43 +1,98 @@
-                                 xfiles
+                                 XFiles
 
 This is a still incomplete file manager for X11.  It can only navigate
 through directories, select files (and do nothing with them), call a
 script to open files, and call a script to generate thumbnails.
 
-To run xfiles, do the following:
-• (1) First copy the script ./thumbnail to your $PATH.
-• (2) Run make.
-• (3) Run ./xfiles, you can give it the path to any directory as argument.
+XFiles depends on a few environment variables to be usable:
+• HOME: You probably already have `$HOME` set on your system.
+• FILE_ICONS: Newline-separated list of icon specifications (see below).
+• OPENER: Program to be called to open files.  Defaults to `xdg-open`.
+• THUMBNAILER: Program to be called for generating thumbnails.
+• THUMBNAILDIR: Path to directory where thumbnails must be cached.
 
-§ Dependencies
+XFiles can be customized by setting the following X resources:
+• XFiles.faceName:      Font for drawing text.
+• XFiles.background:    Background color.
+• XFiles.foreground:    Text color.
+• XFiles.selbackground: Background color for selected entries.
+• XFiles.selforeground: Text color for selected entries.
 
-The thumbnail script depends on ImageMagick to generate thumbnails.  It
-also depends on the following programs:
-• ffmpegthumbnail(1): to generate thumbnail for videos. 
-• rsvg-convert(1): to generate thumbnail for svg files. 
-• pdftoppm(1): to generate thumbnail for pdf. 
-• ffmpeg(1): to generate thumbnail for audio files. 
 
-§ Customization
+§ Icons
 
-You can edit ./config.h, to customize your build at compile time.
-You can also set some environment variables and X resources to customize
-XFiles at runtime.
+Each line of the `$FILE_ICONS` environment variable must have the
+following format:
 
-You can set the `opener` field of the `config` structure (in the
-`config.h` file) to the name of the opener script (or its complete
-path).  Set `thumbnailer` to the thumbnailer script.  You can also
-set the environment variables `OPENER` and `THUMBNAILER` to the names
-(or absolute paths) of those programs.
+{
+	[TYPE:][GLOB1|GLOB2|...|GLOBN]=PATH
+}
 
-You can set `dirthumb_path` to the path a png image of a folder icon
-(this should be provided by your icon theme); and set `filethumb_path`
-to the path of a file icon.  If these are not provided, xfiles will use
-the icons provided at compilation time by the files `file.xpm` and
-`folder.xpm`.
+TYPE is a character that must match the file's type.  For example, the
+TYPE "d*" matches a directory whose, and "-" matches any regular file.
 
-§ TODO.
+GLOB1 til GLOBN are bar-delimited glob strings that must match the entry
+being displayed by XFiles, for example, "*.png|*.jpg" matches files with
+png or jpg extension.  Globing matching is case insensitive.
 
+PATH is the path to the icon in .xpm format.
+
+The following is how I set my FILE_ICONS.  It sets an icon for the
+directory up (dot-dot) entry, my $HOME, and for arbitrary directories;
+and also icons for some file types and other files.
+
+{
+	export FILE_ICONS="
+	d*:..=$ICONPATH/64x64/folder-up.xpm
+	d*:$HOME=$ICONPATH/64x64/folder-home.xpm
+	d*:*=$ICONPATH/64x64/folder.xpm
+	-*:*.zip|*.tar.*|*.tar|*.gz|*.rar=$ICONPATH/64x64/file-archive.xpm
+	-*:*.mp4|*.webm|*.mkv|*.mov=$ICONPATH/64x64/file-video.xpm
+	-*:*.xpm|*.xbm|*.png|*.jpg|*.ppm|*.jpeg|*.gif=$ICONPATH/64x64/file-image.xpm
+	-*:*.mp[23]|*.ogg|*.opus|*.flac=$ICONPATH/64x64/file-music.xpm
+	-*:*.pdf|*.epub|*.txt|*.ps|*.eps|*.djvu=$ICONPATH/64x64/file-text.xpm
+	*=$ICONPATH/64x64/file.xpm
+	"
+}
+
+
+§ Thumbnails
+
+The thumbnailer program is called with two arguments: the original
+file's path and the path to a ppm file to be generated.  The thumbnail
+must be in the .ppm format and must be at most 64x64 in size.
+
+XFiles comes with a thumbnailer script for generating thumbnails.  Such
+script depends on the following programs:
+• ImageMagick's convert(1): To generate thumbnail for images.
+• ffmpegthumbnail(1): To generate thumbnail for videos.
+• rsvg-convert(1): To generate thumbnail for svg files.
+• pdftoppm(1): To generate thumbnail for pdf.
+• ffmpeg(1): To generate thumbnail for audio files.
+
+
+§ Questions
+
+.Why all icons are the X logo?
+You must set the FILE_ICONS environment variable.
+
+.Why there are no thumbnail/miniatures?
+You must set the THUMBNAILER and THUMBNAILDIR environment variables.
+
+.Why XPM for icons?
+XPM is the default file format for icons in X11.  It is used for small
+images with few colors, just like icons.  One can easily draw xpm icons
+with a text editor and change the colors on a bunch of xpm files with a
+simple shell script.
+
+.Why PPM for thumbnails?
+Thumbnails need to be quickly decoded and processed for a smooth file
+browsing.  PPM is a raw image format that needs no decoding.  That
+means, however, that there is no compression involved.  But thumbnails
+are at most 64x64 pixels in size, so there's no need for compression as
+the files are small.
+
+.What features need to be implemented?
 • Implement copy and move operations.
 • Implement CLI commands.
 • Implement right-click context menu.
