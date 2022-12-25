@@ -30,14 +30,16 @@ tags: ${SRCS}
 clean:
 	rm -f ${OBJS} ${PROG} ${PROG:=.core} tags
 
-#install: all
-#	install -d ${DESTDIR}${PREFIX}/bin
-#	install -d ${DESTDIR}${MANPREFIX}/man1
-#	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
-#	install -m 644 ${MANS} ${DESTDIR}${MANPREFIX}/man1/${MANS}
-#
-#uninstall:
-#	rm ${DESTDIR}${PREFIX}/bin/${PROG}
-#	rm ${DESTDIR}${MANPREFIX}/man1/${MANS}
+install: all
+	install -d ${DESTDIR}${PREFIX}/bin
+	install -d ${DESTDIR}${MANPREFIX}/man1
+	install -m 755 thumbnail ${DESTDIR}${PREFIX}/bin/thumbnail
+	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
+	install -m 644 ${MANS} ${DESTDIR}${MANPREFIX}/man1/${MANS}
+
+uninstall:
+	rm ${DESTDIR}${PREFIX}/bin/thumbnail
+	rm ${DESTDIR}${PREFIX}/bin/${PROG}
+	rm ${DESTDIR}${MANPREFIX}/man1/${MANS}
 
 .PHONY: all tags clean install uninstall
