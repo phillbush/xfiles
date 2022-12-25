@@ -1,6 +1,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
+#include <fcntl.h>
 #include <fnmatch.h>
 #include <err.h>
 #include <grp.h>
@@ -19,9 +20,12 @@
 #define APPCLASS        "XFiles"
 #define DEF_APPNAME     "xfiles"
 #define DEF_OPENER      "xdg-open"
+#define OPENER          "OPENER"
 #define THUMBNAILER     "THUMBNAILER"
 #define THUMBNAILDIR    "THUMBNAILDIR"
+#define DEV_NULL        "/dev/null"
 #define DOTDOT          ".."
+#define LAST_ARG        "--"
 #define UNIT_LAST       7
 #define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
 #define TIME_BUFSIZE    128
@@ -64,6 +68,8 @@ struct FM {
 	char *thumbnailer;
 	char *thumbnaildir;
 	size_t thumbnaildirlen;
+
+	char *opener;
 };
 
 static int hide = 1;
@@ -268,7 +274,7 @@ error:
 }
 
 static int
-entrycompar(const void *ap, const void *bp)
+entrycmp(const void *ap, const void *bp)
 {
 	char **a, **b;
 	a = *(char ***)ap;
@@ -280,7 +286,7 @@ entrycompar(const void *ap, const void *bp)
 		return 1;
 
 	/* directories first */
-	if (a[STATE_MODE][0] == 'd' && b[STATE_NAME][0] != 'd')
+	if (a[STATE_MODE][0] == 'd' && b[STATE_MODE][0] != 'd')
 		return -1;
 	if (b[STATE_MODE][0] == 'd' && a[STATE_MODE][0] != 'd')
 		return 1;
@@ -362,7 +368,6 @@ thumbnailer(void *arg)
 			break;
 		if (fm->entries[i][STATE_PATH] == NULL)
 			continue;
-		//printf("%s, %s\n", fm->thumbnaildir, fm->entries[i][STATE_PATH]);
 		if (strncmp(fm->entries[i][STATE_PATH], fm->thumbnaildir, fm->thumbnaildirlen) == 0)
 			continue;
 		setthumbpath(fm, fm->entries[i][STATE_PATH], path);
@@ -371,7 +376,6 @@ thumbnailer(void *arg)
 			wait(NULL);
 		}
 		setthumbnail(fm->wid, path, i);
-		// TODO
 	}
 	pthread_exit(0);
 }
@@ -423,10 +427,7 @@ diropen(struct FM *fm, const char *path, int savecwd)
 	for (i = 0; i < fm->nentries; i++) {
 		fm->entries[i] = emalloc(sizeof(*fm->entries[i]) * STATE_LAST);
 		fm->entries[i][STATE_NAME] = estrdup(array[i]->d_name);
-		if (strcmp(fm->entries[i][STATE_NAME], DOTDOT) == 0)
-			fm->entries[i][STATE_PATH] = NULL;
-		else
-			fm->entries[i][STATE_PATH] = fullpath(fm->path, array[i]->d_name);
+		fm->entries[i][STATE_PATH] = fullpath(fm->path, array[i]->d_name);
 		if (stat(array[i]->d_name, &sb) == -1) {
 			warn("%s", fm->path);
 			fm->entries[i][STATE_SIZE] = NULL;
@@ -443,7 +444,7 @@ diropen(struct FM *fm, const char *path, int savecwd)
 		free(array[i]);
 	}
 	free(array);
-	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycompar);
+	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycmp);
 	for (i = 0; i < fm->nentries; i++) {
 		for (j = 0, icon = fm->icons; fm->foundicons[i] == -1 && icon != NULL; icon = icon->next, j++) {
 			if (icon->mode != '\0' && (fm->entries[i][STATE_MODE] == NULL || fm->entries[i][STATE_MODE][0] != icon->mode))
@@ -552,14 +553,35 @@ initthumbnailer(struct FM *fm)
 	return fm->thumbnailer != NULL && fm->thumbnaildir != NULL;
 }
 
+static void
+fileopen(struct FM *fm, char *path)
+{
+	pid_t pid1, pid2;
+	int fd;
+
+	if ((pid1 = efork()) == 0) {
+		if ((pid2 = efork()) == 0) {
+			fd = open(DEV_NULL, O_RDWR);
+			(void)dup2(fd, STDOUT_FILENO);
+			(void)dup2(fd, STDIN_FILENO);
+			if (fd > 2)
+				(void)close(fd);
+			eexec(fm->opener, LAST_ARG, path);
+			exit(EXIT_FAILURE);
+		}
+		exit(EXIT_SUCCESS);
+	}
+	waitpid(pid1, NULL, 0);
+}
+
 int
 main(int argc, char *argv[])
 {
 	struct FM fm;
 	size_t nicons;
-	int hasthumb, ch;
+	int hasthumb, ch, index, state;
 	char *geom, *name, *path, *home, *iconpatts;
-	char **entry, **icons;
+	char **icons;
 
 	iconpatts = getenv(FILE_ICONS);
 	home = getenv(HOME);
@@ -579,6 +601,8 @@ main(int argc, char *argv[])
 		.thumbnailer = NULL,
 		.thumbnaildir = NULL,
 	};
+	if ((fm.opener = getenv(OPENER)) == NULL)
+		fm.opener = DEF_OPENER;
 	while ((ch = getopt(argc, argv, "ag:n:")) != -1) {
 		switch (ch) {
 		case 'a':
@@ -610,8 +634,19 @@ main(int argc, char *argv[])
 	diropen(&fm, path, 1);
 	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
 	mapwidget(fm.wid);
-	while (pollwidget(fm.wid, &entry) != WIDGET_CLOSE) {
-		;
+	while ((state = pollwidget(fm.wid, &index)) != WIDGET_CLOSE) {
+		switch (state) {
+		case WIDGET_OPEN:
+			if (index < 0 || index >= fm.nentries)
+				break;
+			if (fm.entries[index][STATE_MODE][0] == 'd') {
+				diropen(&fm, fm.entries[index][STATE_PATH], 1);
+				setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
+			} else if (fm.entries[index][STATE_MODE][0] == '-') {
+				fileopen(&fm, fm.entries[index][STATE_PATH]);
+			}
+			break;
+		}
 	}
 	freeentries(&fm);
 	free(fm.entries);

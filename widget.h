@@ -1,6 +1,5 @@
 typedef enum {
 	WIDGET_CLOSE,
-	WIDGET_SELECT,
 	WIDGET_OPEN,
 	WIDGET_PREV,
 	WIDGET_NEXT,
@@ -10,7 +9,7 @@ typedef struct Widget *Widget;;
 
 Widget initwidget(const char *appclass, const char *appname, const char *geom, const char *state[], size_t nstate, int argc, char *argv[], unsigned long *icon, size_t iconsize, int hasthumb);
 void initicons(const char *paths[], size_t npaths);
-WidgetEvent pollwidget(Widget, char ***);
+WidgetEvent pollwidget(Widget, int *);
 void mapwidget(Widget wid);
 void setwidget(Widget wid, const char *doc, char ***items, int *foundicons, size_t nitems);
 void mapwidget(Widget wid);

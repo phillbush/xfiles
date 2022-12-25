@@ -39,7 +39,9 @@
 #define MARGIN          16
 #define MAXICONS        256
 #define THUMBSIZE       64
+#define NLINES          2
 #define BYTE            8
+#define DOUBLECLICK  250
 #define NAMEWIDTH       ((int)(THUMBSIZE * 1.75))
 #define VISUAL(d)       (DefaultVisual((d), DefaultScreen((d))))
 #define COLORMAP(d)     (DefaultColormap((d), DefaultScreen((d))))
@@ -95,11 +97,12 @@ struct Widget {
 	pthread_mutex_t rowlock;
 	struct Thumb **thumbs;
 	struct Thumb *thumbhead;
+	int (*linelens)[2];       /* length of first and second text lines */
+	int nitems;
+	int nstates;
 	char ***items;
-	size_t nstates;
-	size_t nitems;
 
-	int w, h;
+	int w, h;               /* window width and height */
 	int pixw, pixh;
 	int itemw, itemh;
 	int ydiff;              /* how much the icons are scrolled up */
@@ -112,25 +115,10 @@ struct Widget {
 	struct Icon *icons;
 	int nicons;
 	int *foundicons;
+
+	Time lastclick;         /* last click with the mouse button 1 */
+	int lastitem;
 };
-
-static int
-between(int x, int a, int b)
-{
-	return a <= x && x <= b;
-}
-
-static int
-max(int x, int y)
-{
-	return x > y ? x : y;
-}
-
-static int
-min(int x, int y)
-{
-	return x < y ? x : y;
-}
 
 static int
 createwin(Widget wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
@@ -435,6 +423,8 @@ drawentry(Widget wid, int index)
 			max(NAMEWIDTH / 2 - textw / 2, 0),
 			text, textlen
 		);
+		if (wid->linelens != NULL)
+			wid->linelens[i][j] = min(NAMEWIDTH, textw);
 		XCopyArea(
 			wid->dpy,
 			wid->namepix, wid->pix,
@@ -455,6 +445,7 @@ drawentry(Widget wid, int index)
 		extensionlen = strlen(extension);
 		extensionw = textwidth(wid, extension, extensionlen);
 	}
+	textw = min(NAMEWIDTH, textw);
 	if (extension != NULL) {
 		/* draw ellipsis */
 		drawtext(
@@ -469,7 +460,7 @@ drawentry(Widget wid, int index)
 			wid->gc,
 			0, 0,
 			wid->ellipsisw, wid->fonth,
-			textx + min(NAMEWIDTH, textw) - extensionw - wid->ellipsisw,
+			textx + textw - extensionw - wid->ellipsisw,
 			y + wid->itemh - (3.5 - nlines) * wid->fonth
 		);
 
@@ -485,7 +476,7 @@ drawentry(Widget wid, int index)
 			wid->gc,
 			0, 0,
 			extensionw, wid->fonth,
-			textx + min(NAMEWIDTH, textw) - extensionw,
+			textx + textw - extensionw,
 			y + wid->itemh - (3.5 - nlines) * wid->fonth
 		);
 	}
@@ -591,6 +582,44 @@ readsize(FILE *fp)
 	return size;
 }
 
+static int
+getentry(Widget wid, int x, int y)
+{
+	int i, j, n, w, h;
+	int textx, texty;
+	int row;
+
+	y -= MARGIN;
+	x -= wid->x0;
+	if (x < 0 || x >= wid->ncols * wid->itemw)
+		return -1;
+	if (y < 0 || y >= wid->h)
+		return -1;
+	y += wid->ydiff;
+	w = x / wid->itemw;
+	h = y / wid->itemh;
+	row = wid->row * wid->ncols;
+	i = row + h * wid->ncols + w;
+	n = min(wid->nitems, row + wid->nrows * wid->ncols);
+	if (i < row || i >= n || i < 0 || i >= wid->nitems)
+		return -1;
+	x -= w * wid->itemw;
+	y -= h * wid->itemh;
+	if (x >= 0 && x < THUMBSIZE + (wid->itemw - THUMBSIZE) / 2 && y >= 0 && y < THUMBSIZE)
+		return i;
+	if (wid->linelens == NULL)
+		return -1;
+	for (j = 0; j < NLINES; j++) {
+		textx = (wid->itemw - wid->linelens[i][j]) / 2;
+		texty = wid->itemh - (2.5 - j) * wid->fonth;
+		if (x >= textx && x < textx + wid->linelens[i][j] &&
+		    y >= texty && y < texty + wid->fonth) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 Widget
 initwidget(const char *appclass, const char *appname, const char *geom, const char *states[], size_t nstates, int argc, char *argv[], unsigned long *icon, size_t iconsize, int hasthumb)
 {
@@ -616,7 +645,10 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		.rowlock = PTHREAD_MUTEX_INITIALIZER,
 		.thumbs = NULL,
 		.thumbhead = NULL,
+		.linelens = NULL,
 		.icons = NULL,
+		.lastclick = 0,
+		.lastitem = -1,
 	};
 	if (!XInitThreads())
 		goto error_pre;
@@ -668,6 +700,7 @@ setwidget(Widget wid, const char *doc, char ***items, int *foundicons, size_t ni
 	}
 	if (wid->thumbs != NULL)
 		free(wid->thumbs);
+	free(wid->linelens);
 	XmbSetWMProperties(wid->dpy, wid->win, doc, doc, NULL, 0, NULL, NULL, NULL);
 	XChangeProperty(
 		wid->dpy,
@@ -692,9 +725,11 @@ setwidget(Widget wid, const char *doc, char ***items, int *foundicons, size_t ni
 	wid->nitems = nitems;
 	wid->foundicons = foundicons;
 	wid->ydiff = 0;
+	wid->lastclick = 0;
+	wid->lastitem = -1;
 	(void)calcsize(wid, -1, -1);
-	if (wid->hasthumb) {
-		wid->thumbs = malloc(nitems * sizeof(*wid->thumbs));
+	wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens));
+	if (wid->hasthumb && (wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) != NULL) {
 		for (i = 0; i < nitems; i++)
 			wid->thumbs[i] = NULL;
 		wid->thumbhead = NULL;
@@ -709,8 +744,26 @@ mapwidget(Widget wid)
 	XMapWindow(wid->dpy, wid->win);
 }
 
+static int
+mouseclick(Widget wid, XButtonPressedEvent *ev)
+{
+	int index, ret;
+
+	ret = -1;
+	index = getentry(wid, ev->x, ev->y);
+	if (index == -1)
+		return -1;
+	if (!(ev->state & (ControlMask | ShiftMask)) &&
+	    index == wid->lastitem && ev->time - wid->lastclick <= DOUBLECLICK) {
+		ret = index;
+	}
+	wid->lastclick = ev->time;
+	wid->lastitem = index;
+	return ret;
+}
+
 WidgetEvent
-pollwidget(Widget wid, char ***entry)
+pollwidget(Widget wid, int *index)
 {
 	XEvent ev;
 
@@ -735,7 +788,8 @@ pollwidget(Widget wid, char ***entry)
 			break;
 		case ButtonPress:
 			if (ev.xbutton.button == Button1) {
-				// TODO
+				if ((*index = mouseclick(wid, &ev.xbutton)) != -1)
+					return WIDGET_OPEN;
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
 				if (scroll(wid, (ev.xbutton.button == Button4 ? -5 : +5)))
 					drawentries(wid);

@@ -5,6 +5,24 @@
 
 #include "util.h"
 
+int
+between(int x, int a, int b)
+{
+	return a <= x && x <= b;
+}
+
+int
+max(int x, int y)
+{
+	return x > y ? x : y;
+}
+
+int
+min(int x, int y)
+{
+	return x < y ? x : y;
+}
+
 void *
 emalloc(size_t size)
 {
