@@ -727,6 +727,8 @@ setwidget(Widget wid, const char *doc, char ***items, int *foundicons, size_t ni
 	wid->ydiff = 0;
 	wid->lastclick = 0;
 	wid->lastitem = -1;
+	wid->row = 0;
+	wid->ydiff = 0;
 	(void)calcsize(wid, -1, -1);
 	wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens));
 	if (wid->hasthumb && (wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) != NULL) {
@@ -884,24 +886,25 @@ setthumbnail(Widget wid, char *path, int item)
 	if ((fp = fopen(path, "rb")) == NULL)
 		return;
 	if (checkheader(fp, PPM_HEADER, PPM_HEADER_SIZE) == -1)
-		goto error;
+		goto error_fp;
 	w = readsize(fp);
 	h = readsize(fp);
 	if (w <= 0 || w > THUMBSIZE || h <= 0 || h > THUMBSIZE)
-		goto error;
+		goto error_fp;
 	if (checkheader(fp, PPM_COLOR, PPM_COLOR_SIZE) == -1)
-		goto error;
+		goto error_fp;
 	size = w * h;
 	if ((data = malloc(size * DATA_DEPTH)) == NULL)
-		goto error;
+		goto error_fp;
 	for (i = 0; i < size; i++) {
 		if (fread(buf, 1, PPM_DEPTH, fp) != PPM_DEPTH)
-			goto error;
+			goto error_fp;
 		data[i * DATA_DEPTH + 0] = buf[2];   /* B */
 		data[i * DATA_DEPTH + 1] = buf[1];   /* G */
 		data[i * DATA_DEPTH + 2] = buf[0];   /* R */
 		data[i * DATA_DEPTH + 3] = '\0';     /* A */
 	}
+	fclose(fp);
 	if ((wid->thumbs[item] = malloc(sizeof(*wid->thumbs[item]))) == NULL)
 		goto error_data;
 	*wid->thumbs[item] = (struct Thumb){
@@ -937,6 +940,7 @@ error_thumb:
 	wid->thumbs[item] = NULL;
 error_data:
 	free(data);
-error:
+	return;
+error_fp:
 	fclose(fp);
 }
