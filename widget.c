@@ -9,6 +9,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xresource.h>
+#include <X11/cursorfont.h>
 #include <X11/xpm.h>
 #include <X11/Xft/Xft.h>
 
@@ -88,6 +89,7 @@ struct Thumb {
 struct Widget {
 	Display *dpy;
 	Atom atoms[ATOM_LAST];
+	Cursor cursors[CURSOR_LAST];
 	GC gc;
 	Window win;
 	XftColor normal[COLOR_LAST];
@@ -717,6 +719,8 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		goto error_win;
 	if (!(xa.valuemask & XpmSize))
 		goto error_pix;
+	wid->cursors[CURSOR_NORMAL] = XCreateFontCursor(wid->dpy, XC_left_ptr);
+	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
 	return wid;
 error_pix:
 	XFreePixmap(wid->dpy, wid->deficon.pix);
@@ -974,4 +978,12 @@ error_data:
 	return;
 error_fp:
 	fclose(fp);
+}
+
+void
+widgetcursor(Widget wid, int cursor)
+{
+	if (cursor < 0 || cursor >= CURSOR_LAST)
+		cursor = CURSOR_NORMAL;
+	XDefineCursor(wid->dpy, wid->win, wid->cursors[cursor]);
 }

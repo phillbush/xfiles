@@ -6,6 +6,12 @@ typedef enum {
 } WidgetEvent;
 
 enum {
+	CURSOR_NORMAL,
+	CURSOR_WATCH,
+	CURSOR_LAST,
+};
+
+enum {
 	/* item elements */
 	ITEM_NAME,
 	ITEM_PATH,
@@ -24,3 +30,4 @@ void mapwidget(Widget wid);
 void closewidget(Widget wid);
 void openicons(Widget wid, char **paths, int nicons);
 void setthumbnail(Widget wid, char *path, int item);
+void widgetcursor(Widget wid, int cursor);

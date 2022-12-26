@@ -648,8 +648,10 @@ main(int argc, char *argv[])
 			if (index < 0 || index >= fm.nentries)
 				break;
 			if (fm.entries[index][STATE_MODE][0] == 'd') {
+				widgetcursor(fm.wid, CURSOR_WATCH);
 				diropen(&fm, fm.entries[index][STATE_PATH], 1);
 				setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
+				widgetcursor(fm.wid, CURSOR_NORMAL);
 			} else if (fm.entries[index][STATE_MODE][0] == '-') {
 				fileopen(&fm, fm.entries[index][STATE_PATH]);
 			}
