@@ -5,6 +5,14 @@ typedef enum {
 	WIDGET_NEXT,
 } WidgetEvent;
 
+enum {
+	/* item elements */
+	ITEM_NAME,
+	ITEM_PATH,
+	ITEM_STATUS,
+	ITEM_LAST,
+};
+
 typedef struct Widget *Widget;;
 
 Widget initwidget(const char *appclass, const char *appname, const char *geom, const char *state[], size_t nstate, int argc, char *argv[], unsigned long *icon, size_t iconsize, int hasthumb);

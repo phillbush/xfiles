@@ -25,24 +25,7 @@
 #define DEF_SELFG       "#707880"
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
-#define PPM_DEPTH       3
-#define DATA_DEPTH      4
-#define DATA_SIZE       (THUMBSIZE * THUMBSIZE * DATA_DEPTH)
-#define PPM_HEADER_SIZE (sizeof(PPM_HEADER) - 1)
-#define PPM_COLOR_SIZE  (sizeof(PPM_COLOR) - 1)
-#define PPM_BUFSIZE     8
-#define BUF_SIZE        512
-#define MIN_WIDTH       (THUMBSIZE * 2)
-#define MIN_HEIGHT      (THUMBSIZE * 3)
-#define DEF_WIDTH       600
-#define DEF_HEIGHT      460
-#define MARGIN          16
-#define MAXICONS        256
-#define THUMBSIZE       64
-#define NLINES          2
-#define BYTE            8
-#define DOUBLECLICK  250
-#define NAMEWIDTH       ((int)(THUMBSIZE * 1.75))
+
 #define VISUAL(d)       (DefaultVisual((d), DefaultScreen((d))))
 #define COLORMAP(d)     (DefaultColormap((d), DefaultScreen((d))))
 #define DEPTH(d)        (DefaultDepth((d), DefaultScreen((d))))
@@ -51,6 +34,29 @@
 #define ROOT(d)         (DefaultRootWindow((d)))
 #define FLAG(f, b)      (((f) & (b)) == (b))
 #define ATOI(c)         (((c) >= '0' && (c) <= '9') ? (c) - '0' : -1)
+
+enum {
+	TITLE_SIZE      = 1028,
+	STATUS_SIZE     = 64,
+	THUMBSIZE       = 64,
+	MIN_WIDTH       = (THUMBSIZE * 2),
+	MIN_HEIGHT      = (THUMBSIZE * 3),
+	DEF_WIDTH       = 600,
+	DEF_HEIGHT      = 460,
+	PPM_DEPTH       = 3,
+	DATA_DEPTH      = 4,
+	DATA_SIZE       = (THUMBSIZE * THUMBSIZE * DATA_DEPTH),
+	PPM_HEADER_SIZE = (sizeof(PPM_HEADER) - 1),
+	PPM_COLOR_SIZE  = (sizeof(PPM_COLOR) - 1),
+	PPM_BUFSIZE     = 8,
+	BUF_SIZE        = 512,
+	MARGIN          = 16,
+	MAXICONS        = 256,
+	NLINES          = 2,
+	BYTE            = 8,
+	DOUBLECLICK     = 250,
+	NAMEWIDTH       = ((int)(THUMBSIZE * 1.75)),
+};
 
 enum {
 	COLOR_BG,
@@ -118,6 +124,9 @@ struct Widget {
 
 	Time lastclick;         /* last click with the mouse button 1 */
 	int lastitem;
+
+	const char *title;
+	const char *class;
 };
 
 static int
@@ -379,7 +388,7 @@ drawentry(Widget wid, int index)
 		pix = wid->deficon.pix;
 		mask = wid->deficon.mask;
 	}
-	text = wid->items[index][0];
+	text = wid->items[index][ITEM_NAME];
 	textlen = strlen(text);
 	textw = textwidth(wid, text, textlen);
 	nlines = 1;
@@ -541,6 +550,41 @@ commitdraw(Widget wid)
 	);
 }
 
+static void
+settitle(Widget wid)
+{
+	char title[TITLE_SIZE];
+	char nitems[STATUS_SIZE];
+	int scrollpct;                  /* scroll percentage */
+
+	if (wid->row == 0 && wid->maxrow > 1)
+		scrollpct = 0;
+	else
+		scrollpct = 100 * ((double)(wid->row + 1) / wid->maxrow);
+	(void)snprintf(nitems, STATUS_SIZE, "%d items", wid->nitems - 1);
+	(void)snprintf(
+		title, TITLE_SIZE,
+		"%s%s%s (%s) - %s (%d%%)",
+		wid->title,
+		(strcmp(wid->title, "/") != 0 ? "/" : ""),
+		(wid->lastitem > 0 ? wid->items[wid->lastitem][ITEM_NAME] : ""),
+		(wid->lastitem > 0 ? wid->items[wid->lastitem][ITEM_STATUS] : nitems),
+		wid->class,
+		scrollpct
+	);
+	XmbSetWMProperties(wid->dpy, wid->win, title, title, NULL, 0, NULL, NULL, NULL);
+	XChangeProperty(
+		wid->dpy,
+		wid->win,
+		wid->atoms[_NET_WM_NAME],
+		wid->atoms[UTF8_STRING],
+		8,
+		PropModeReplace,
+		title,
+		strlen(title)
+	);
+}
+
 static int
 scroll(struct Widget *wid, int y)
 {
@@ -560,6 +604,7 @@ scroll(struct Widget *wid, int y)
 			setrow(wid, 0);
 		}
 	}
+	settitle(wid);
 	return prevrow != wid->row;
 }
 
@@ -649,6 +694,8 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		.icons = NULL,
 		.lastclick = 0,
 		.lastitem = -1,
+		.title = "",
+		.class = appclass,
 	};
 	if (!XInitThreads())
 		goto error_pre;
@@ -686,7 +733,7 @@ error_pre:
 }
 
 void
-setwidget(Widget wid, const char *doc, char ***items, int *foundicons, size_t nitems)
+setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t nitems)
 {
 	struct Thumb *thumb, *tmp;
 	size_t i;
@@ -701,26 +748,6 @@ setwidget(Widget wid, const char *doc, char ***items, int *foundicons, size_t ni
 	if (wid->thumbs != NULL)
 		free(wid->thumbs);
 	free(wid->linelens);
-	XmbSetWMProperties(wid->dpy, wid->win, doc, doc, NULL, 0, NULL, NULL, NULL);
-	XChangeProperty(
-		wid->dpy,
-		wid->win,
-		wid->atoms[_NET_WM_NAME],
-		wid->atoms[UTF8_STRING],
-		8,
-		PropModeReplace,
-		doc,
-		strlen(doc)
-	);
-	XChangeProperty(
-		wid->dpy,
-		wid->win,
-		wid->atoms[_NET_WM_NAME],
-		wid->atoms[UTF8_STRING],
-		8,
-		PropModeAppend,
-		" - XFiles", 10
-	);
 	wid->items = items;
 	wid->nitems = nitems;
 	wid->foundicons = foundicons;
@@ -729,6 +756,7 @@ setwidget(Widget wid, const char *doc, char ***items, int *foundicons, size_t ni
 	wid->lastitem = -1;
 	wid->row = 0;
 	wid->ydiff = 0;
+	wid->title = title;
 	(void)calcsize(wid, -1, -1);
 	wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens));
 	if (wid->hasthumb && (wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) != NULL) {
@@ -736,6 +764,7 @@ setwidget(Widget wid, const char *doc, char ***items, int *foundicons, size_t ni
 			wid->thumbs[i] = NULL;
 		wid->thumbhead = NULL;
 	}
+	settitle(wid);
 	drawentries(wid);
 	commitdraw(wid);
 }
@@ -754,13 +783,15 @@ mouseclick(Widget wid, XButtonPressedEvent *ev)
 	ret = -1;
 	index = getentry(wid, ev->x, ev->y);
 	if (index == -1)
-		return -1;
+		goto done;
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
 	    index == wid->lastitem && ev->time - wid->lastclick <= DOUBLECLICK) {
 		ret = index;
 	}
+done:
 	wid->lastclick = ev->time;
 	wid->lastitem = index;
+	settitle(wid);
 	return ret;
 }
 

@@ -172,9 +172,9 @@ sizefmt(off_t size)
 	if (number == 0)
 		return estrdup("0B");
 	if (number >= 100)
-		(void)snprintf(buf, sizeof(buf), "%4lld%c", number, units[i].u);
+		(void)snprintf(buf, sizeof(buf), "%lld%c", number, units[i].u);
 	else
-		(void)snprintf(buf, sizeof(buf), "%2lld.%1lld%c", number, fract, units[i].u);
+		(void)snprintf(buf, sizeof(buf), "%lld.%lld%c", number, fract, units[i].u);
 	return estrdup(buf);
 }
 
@@ -477,15 +477,10 @@ diropen(struct FM *fm, const char *path, int savecwd)
 			}
 		}
 	}
-	if (strstr(fm->path, fm->home) == fm->path) {
-		if (strlen(fm->path) == fm->homelen) {
-			snprintf(fm->here, PATH_MAX, "~/");
-		} else {
-			snprintf(fm->here, PATH_MAX, "~%s", fm->path + fm->homelen);
-		}
-	} else {
-		(void)memcpy(fm->here, fm->path, strlen(fm->path) + 1);
-	}
+	if (strstr(fm->path, fm->home) == fm->path)
+		snprintf(fm->here, PATH_MAX, "~%s", fm->path + fm->homelen);
+	else
+		snprintf(fm->here, PATH_MAX, "%s", fm->path);
 	createthumbthread(fm);
 }
 

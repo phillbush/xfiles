@@ -33,9 +33,6 @@ svg)
 pdf)
 	pdftoppm -f 1 -l 1 -scale-to "${THUMBSIZE}" -singlefile "${1}" "${2%.ppm}"
 	;;
-mp3)
-	ffmpeg -v quiet -y -i "${1}" -f image2 -s "${THUMBSIZE}x${THUMBSIZE}" "${2}"
-	;;
 *)
 	exit 1
 	;;
