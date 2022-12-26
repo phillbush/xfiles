@@ -1,5 +1,7 @@
                                  XFiles
 
+demo video: https://ttm.sh/0yU.png
+
 This is a still incomplete file manager for X11.  It can only navigate
 through directories, select files (and do nothing with them), call a
 script to open files, and call a script to generate thumbnails.
