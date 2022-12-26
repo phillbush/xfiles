@@ -45,14 +45,14 @@ and also icons for some file types and other files.
 
 {
 	export FILE_ICONS="
-	d*:..=$ICONPATH/64x64/folder-up.xpm
-	d*:$HOME=$ICONPATH/64x64/folder-home.xpm
-	d*:*=$ICONPATH/64x64/folder.xpm
-	-*:*.zip|*.tar.*|*.tar|*.gz|*.rar=$ICONPATH/64x64/file-archive.xpm
-	-*:*.mp4|*.webm|*.mkv|*.mov=$ICONPATH/64x64/file-video.xpm
-	-*:*.xpm|*.xbm|*.png|*.jpg|*.ppm|*.jpeg|*.gif=$ICONPATH/64x64/file-image.xpm
-	-*:*.mp[23]|*.ogg|*.opus|*.flac=$ICONPATH/64x64/file-music.xpm
-	-*:*.pdf|*.epub|*.txt|*.ps|*.eps|*.djvu=$ICONPATH/64x64/file-text.xpm
+	d:..=$ICONPATH/64x64/folder-up.xpm
+	d:$HOME=$ICONPATH/64x64/folder-home.xpm
+	d:*=$ICONPATH/64x64/folder.xpm
+	-:*.zip|*.tar.*|*.tar|*.gz|*.rar=$ICONPATH/64x64/file-archive.xpm
+	-:*.mp4|*.webm|*.mkv|*.mov=$ICONPATH/64x64/file-video.xpm
+	-:*.xpm|*.xbm|*.png|*.jpg|*.ppm|*.jpeg|*.gif=$ICONPATH/64x64/file-image.xpm
+	-:*.mp[23]|*.ogg|*.opus|*.flac=$ICONPATH/64x64/file-music.xpm
+	-:*.pdf|*.epub|*.txt|*.ps|*.eps|*.djvu=$ICONPATH/64x64/file-text.xpm
 	*=$ICONPATH/64x64/file.xpm
 	"
 }
