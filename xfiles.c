@@ -105,21 +105,21 @@ wchdir(const char *path)
 {
 	if (chdir(path) == -1) {
 		warn("%s", path);
-		return -1;
+		return RET_ERROR;
 	}
-	return 0;
+	return RET_OK;
 }
 
 static int
 direntselect(const struct dirent *dp)
 {
 	if (strcmp(dp->d_name, ".") == 0)
-		return 0;
+		return FALSE;
 	if (strcmp(dp->d_name, "..") == 0)
-		return 1;
+		return TRUE;
 	if (hide && dp->d_name[0] == '.')
-		return 0;
-	return 1;
+		return FALSE;
+	return TRUE;
 }
 
 static void
@@ -325,7 +325,7 @@ thumbexit(struct FM *fm)
 	return ret;
 }
 
-static void
+static pid_t
 forkthumb(struct FM *fm, char *orig, char *thumb)
 {
 	pid_t pid;
@@ -336,23 +336,38 @@ forkthumb(struct FM *fm, char *orig, char *thumb)
 		eexec(fm->thumbnailer, orig, thumb);
 		exit(EXIT_FAILURE);
 	}
+	return pid;
 }
 
 static int
-thumbexists(char *orig, char *mime)
+timespeclt(struct timespec *tsp, struct timespec *usp)
+{
+	return (tsp->tv_sec == usp->tv_sec)
+	     ? (tsp->tv_nsec < usp->tv_nsec)
+	     : (tsp->tv_sec < usp->tv_sec);
+}
+
+static int
+thumbexists(struct FM *fm, char *orig, char *mime)
 {
 	struct stat sb;
 	struct timespec origt, mimet;
+	pid_t pid;
+	int status;
 
 	if (stat(mime, &sb) == -1)
-		return 0;
+		goto forkthumbnailer;
 	mimet = sb.st_mtim;
 	if (stat(orig, &sb) == -1)
-		return 0;
+		goto forkthumbnailer;
 	origt = sb.st_mtim;
-	if (origt.tv_sec == mimet.tv_sec)
-		return origt.tv_nsec < mimet.tv_nsec;
-	return origt.tv_sec < mimet.tv_sec;
+	if (timespeclt(&origt, &mimet))
+		return TRUE;
+forkthumbnailer:
+	pid = forkthumb(fm, orig, mime);
+	if (waitpid(pid, &status, 0) == -1)
+		return FALSE;
+	return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
 static void *
@@ -371,11 +386,9 @@ thumbnailer(void *arg)
 		if (strncmp(fm->entries[i][STATE_PATH], fm->thumbnaildir, fm->thumbnaildirlen) == 0)
 			continue;
 		setthumbpath(fm, fm->entries[i][STATE_PATH], path);
-		if (!thumbexists(fm->entries[i][STATE_PATH], path)) {
-			forkthumb(fm, fm->entries[i][STATE_PATH], path);
-			wait(NULL);
+		if (thumbexists(fm, fm->entries[i][STATE_PATH], path)) {
+			setthumbnail(fm->wid, path, i);
 		}
-		setthumbnail(fm->wid, path, i);
 	}
 	pthread_exit(0);
 }

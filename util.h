@@ -4,6 +4,19 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#ifndef RET_ERROR
+#define RET_ERROR (-1)
+#endif
+#ifndef RET_OK
+#define RET_OK 0
+#endif
+#ifndef FALSE
+#define FALSE 0
+#endif
+#ifndef TRUE
+#define TRUE 1
+#endif
+
 pid_t efork(void);
 int between(int x, int a, int b);
 int max(int x, int y);

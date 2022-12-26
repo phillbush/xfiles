@@ -180,7 +180,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		DEPTH(wid->dpy)
 	);
 	if (wid->win == None)
-		return -1;
+		return RET_ERROR;
 	XmbSetWMProperties(
 		wid->dpy, wid->win,
 		class, class,
@@ -217,7 +217,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		(unsigned char *)&pid,
 		1
 	);
-	return 0;
+	return RET_OK;
 }
 
 /* get color from color string */
@@ -225,8 +225,8 @@ static int
 ealloccolor(Display *dpy, const char *s, XftColor *color)
 {
 	if(!XftColorAllocName(dpy, VISUAL(dpy), COLORMAP(dpy), s, color))
-		return -1;
-	return 0;
+		return RET_ERROR;
+	return RET_OK;
 }
 
 static void
@@ -289,7 +289,7 @@ inittheme(Widget wid, const char *class, const char *name)
 	wid->ellipsisw = textwidth(wid, ELLIPSIS, strlen(ELLIPSIS));
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
-	return 0;
+	return RET_OK;
 error:
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
@@ -298,7 +298,7 @@ error:
 	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_BG]);
 	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_FG]);
 	XftFontClose(wid->dpy, wid->font);
-	return -1;
+	return RET_ERROR;
 }
 
 static int
@@ -866,10 +866,10 @@ checkheader(FILE *fp, char *header, size_t size)
 	char buf[PPM_BUFSIZE];
 
 	if (fread(buf, 1, size, fp) != size)
-		return -1;
+		return RET_ERROR;
 	if (memcmp(buf, header, size) != 0)
-		return -1;
-	return 0;
+		return RET_ERROR;
+	return RET_OK;
 }
 
 void
