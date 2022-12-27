@@ -37,6 +37,9 @@
 #define ATOI(c)         (((c) >= '0' && (c) <= '9') ? (c) - '0' : -1)
 
 enum {
+	NTARGETS        = 7,
+	STIPPLE_SIZE    = 2,
+	STIPPLE_DEPTH   = 1,
 	TITLE_SIZE      = 1028,
 	STATUS_SIZE     = 64,
 	THUMBSIZE       = 64,
@@ -66,6 +69,13 @@ enum {
 };
 
 enum {
+	ATOM_PAIR,
+	COMPOUND_TEXT,
+	DELETE,
+	MULTIPLE,
+	TARGETS,
+	TEXT,
+	TIMESTAMP,
 	UTF8_STRING,
 	WM_DELETE_WINDOW,
 	_NET_WM_ICON,
@@ -73,6 +83,7 @@ enum {
 	_NET_WM_PID,
 	_NET_WM_WINDOW_TYPE,
 	_NET_WM_WINDOW_TYPE_NORMAL,
+	_NULL,
 	ATOM_LAST,
 };
 
@@ -86,7 +97,14 @@ struct Thumb {
 	XImage *img;
 };
 
+struct Selection {
+	struct Selection *prev, *next;
+	int index;
+};
+
 struct Widget {
+	int start;
+
 	Display *dpy;
 	Atom atoms[ATOM_LAST];
 	Cursor cursors[CURSOR_LAST];
@@ -97,6 +115,7 @@ struct Widget {
 	XftFont *font;
 	Pixmap pix;
 	Pixmap namepix;
+	Pixmap stipple;
 	int ellipsisw;
 	int fonth;
 	int hasthumb;
@@ -109,6 +128,10 @@ struct Widget {
 	int nitems;
 	int nstates;
 	char ***items;
+
+	struct Selection *sel;  /* list of selections */
+	struct Selection **issel;/* array of pointers to Selections */
+	Time seltime;
 
 	int w, h;               /* window width and height */
 	int pixw, pixh;
@@ -129,6 +152,24 @@ struct Widget {
 
 	const char *title;
 	const char *class;
+};
+
+static char *atomnames[ATOM_LAST] = {
+	[ATOM_PAIR]                  = "ATOM_PAIR",
+	[COMPOUND_TEXT]              = "COMPOUND_TEXT",
+	[UTF8_STRING]                = "UTF8_STRING",
+	[WM_DELETE_WINDOW]           = "WM_DELETE_WINDOW",
+	[DELETE]                     = "DELETE",
+	[MULTIPLE]                   = "MULTIPLE",
+	[TARGETS]                    = "TARGETS",
+	[TEXT]                       = "TEXT",
+	[TIMESTAMP]                  = "TIMESTAMP",
+	[_NET_WM_ICON]               = "_NET_WM_ICON",
+	[_NET_WM_NAME]               = "_NET_WM_NAME",
+	[_NET_WM_PID]                = "_NET_WM_PID",
+	[_NET_WM_WINDOW_TYPE]        = "_NET_WM_WINDOW_TYPE",
+	[_NET_WM_WINDOW_TYPE_NORMAL] = "_NET_WM_WINDOW_TYPE_NORMAL",
+	[_NULL]                      = "NULL",
 };
 
 static int
@@ -328,7 +369,7 @@ calcsize(Widget wid, int w, int h)
 		wid->h = h;
 	}
 	wid->ncols = max(wid->w / wid->itemw, 1);
-	wid->nrows = max(wid->h / wid->itemh + (wid->h % wid->itemh ? 2 : 1), 1);
+	wid->nrows = max(wid->h / wid->itemh + (wid->h % wid->itemh ? 1 : 0), 1);
 	wid->ydiff = 0;
 	wid->x0 = max((wid->w - wid->ncols * wid->itemw) / 2, 0);
 	wid->maxrow = wid->nitems / wid->ncols - wid->h / wid->itemh + (wid->nitems % wid->ncols != 0 ? 1 : 0);
@@ -355,9 +396,13 @@ static void
 drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int len)
 {
 	XftDraw *draw;
+	int w;
 
-	XSetForeground(wid->dpy, wid->gc, color[COLOR_BG].pixel);
+	w = textwidth(wid, text, len);
+	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, 0, 0, NAMEWIDTH, wid->fonth);
+	XSetForeground(wid->dpy, wid->gc, color[COLOR_BG].pixel);
+	XFillRectangle(wid->dpy, wid->namepix, wid->gc, x, 0, w, wid->fonth);
 	draw = XftDrawCreate(wid->dpy, pix, VISUAL(wid->dpy), COLORMAP(wid->dpy));
 	XftDrawStringUtf8(draw, &color[COLOR_FG], wid->font, x, wid->font->ascent, text, len);
 	XftDrawDestroy(draw);
@@ -372,12 +417,13 @@ setrow(Widget wid, int row)
 }
 
 static void
-drawentry(Widget wid, int index)
+drawitem(Widget wid, int index)
 {
 	XGCValues val;
+	XftColor *color;
 	Pixmap pix, mask;
 	int i, j, x, y, nlines;
-	int textx;
+	int textx, maxw;
 	int textw, w, textlen, len;
 	int extensionw, extensionlen;
 	char *text, *extension;
@@ -390,6 +436,10 @@ drawentry(Widget wid, int index)
 		pix = wid->deficon.pix;
 		mask = wid->deficon.mask;
 	}
+	if (wid->issel != NULL && wid->issel[index])
+		color = wid->select;
+	else
+		color = wid->normal;
 	text = wid->items[index][ITEM_NAME];
 	textlen = strlen(text);
 	textw = textwidth(wid, text, textlen);
@@ -407,10 +457,10 @@ drawentry(Widget wid, int index)
 		textlen = len = 0;
 		w = 0;
 		while (w < NAMEWIDTH) {
-			while (isspace(text[len]))
-				len++;
 			textlen = len;
 			textw = w;
+			while (isspace(text[len]))
+				len++;
 			while (isbreakable(text[len]))
 				len++;
 			while (text[len] != '\0' && !isspace(text[len]) && !isbreakable(text[len]))
@@ -427,15 +477,18 @@ drawentry(Widget wid, int index)
 			textw = w;
 		}
 	}
+	maxw = 0;
 	for (j = 0; j < nlines; j++) {
+		textw = min(NAMEWIDTH, textw);
+		maxw = max(textw, maxw);
 		drawtext(
 			wid,
-			wid->namepix, wid->normal,
+			wid->namepix, color,
 			max(NAMEWIDTH / 2 - textw / 2, 0),
 			text, textlen
 		);
 		if (wid->linelens != NULL)
-			wid->linelens[i][j] = min(NAMEWIDTH, textw);
+			wid->linelens[index][j] = min(NAMEWIDTH, textw);
 		XCopyArea(
 			wid->dpy,
 			wid->namepix, wid->pix,
@@ -445,10 +498,27 @@ drawentry(Widget wid, int index)
 			textx, y + wid->itemh - (2.5 - j) * wid->fonth
 		);
 		if (j + 1 < nlines) {
+			while (isspace(text[textlen]))
+				textlen++;
 			text += textlen;
 			textlen = strlen(text);
 			textw = textwidth(wid, text, textlen);
 		}
+	}
+	if (index == wid->lastitem) {
+		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
+		val.line_style = LineOnOffDash;
+		XChangeGC(wid->dpy, wid->gc, GCLineStyle, &val);
+		XDrawRectangle(
+			wid->dpy,
+			wid->pix,
+			wid->gc,
+			x + wid->itemw / 2 - maxw / 2 - 1,
+			y + wid->itemh - 2.5 * wid->fonth - 1,
+			maxw + 1, j * wid->fonth + 1
+		);
+		val.line_style = LineSolid;
+		XChangeGC(wid->dpy, wid->gc, GCLineStyle, &val);
 	}
 	if (textw >= NAMEWIDTH &&
 	    (extension = strrchr(text, '.')) != NULL &&
@@ -456,12 +526,11 @@ drawentry(Widget wid, int index)
 		extensionlen = strlen(extension);
 		extensionw = textwidth(wid, extension, extensionlen);
 	}
-	textw = min(NAMEWIDTH, textw);
 	if (extension != NULL) {
 		/* draw ellipsis */
 		drawtext(
 			wid,
-			wid->namepix, wid->normal,
+			wid->namepix, color,
 			0,
 			ELLIPSIS, strlen(ELLIPSIS)
 		);
@@ -478,7 +547,7 @@ drawentry(Widget wid, int index)
 		/* draw extension */
 		drawtext(
 			wid,
-			wid->namepix, wid->normal,
+			wid->namepix, color,
 			0, extension, extensionlen
 		);
 		XCopyArea(
@@ -504,6 +573,20 @@ drawentry(Widget wid, int index)
 			wid->thumbs[index]->w,
 			wid->thumbs[index]->h
 		);
+		if (wid->issel[index]) {
+			XSetFillStyle(wid->dpy, wid->gc, FillStippled);
+			XSetForeground(wid->dpy, wid->gc, wid->select[COLOR_BG].pixel);
+			XFillRectangle(
+				wid->dpy,
+				wid->pix,
+				wid->gc,
+				x + (wid->itemw - wid->thumbs[index]->w) / 2,
+				y + (THUMBSIZE - wid->thumbs[index]->h) / 2,
+				wid->thumbs[index]->w,
+				wid->thumbs[index]->h
+			);
+			XSetFillStyle(wid->dpy, wid->gc, FillSolid);
+		}
 	} else {
 		/* draw icon */
 		val.clip_x_origin = x + (wid->itemw - THUMBSIZE) / 2;
@@ -519,13 +602,25 @@ drawentry(Widget wid, int index)
 			val.clip_x_origin,
 			y
 		);
+		if (wid->issel[index]) {
+			XSetFillStyle(wid->dpy, wid->gc, FillStippled);
+			XSetForeground(wid->dpy, wid->gc, wid->select[COLOR_BG].pixel);
+			XFillRectangle(
+				wid->dpy,
+				wid->pix,
+				wid->gc,
+				val.clip_x_origin, y,
+				THUMBSIZE, THUMBSIZE
+			);
+			XSetFillStyle(wid->dpy, wid->gc, FillSolid);
+		}
 		val.clip_mask = None;
 		XChangeGC(wid->dpy, wid->gc, GCClipMask, &val);
 	}
 }
 
 static void
-drawentries(Widget wid)
+drawitems(Widget wid)
 {
 	int i, n;
 
@@ -534,7 +629,7 @@ drawentries(Widget wid)
 	XFillRectangle(wid->dpy, wid->pix, wid->gc, 0, 0, wid->w, wid->nrows * wid->itemh);
 	n = min(wid->nitems, wid->row * wid->ncols + wid->nrows * wid->ncols);
 	for (i = wid->row * wid->ncols; i < n; i++) {
-		drawentry(wid, i);
+		drawitem(wid, i);
 	}
 	etunlock(&wid->rowlock);
 }
@@ -592,7 +687,7 @@ scroll(struct Widget *wid, int y)
 {
 	int prevrow, newrow;
 
-	if (wid->nitems / wid->ncols < wid->nrows)
+	if (wid->nitems / wid->ncols + (wid->nitems % wid->ncols != 0 ? 1 : 0) < wid->nrows)
 		return FALSE;
 	newrow = prevrow = wid->row;
 	wid->ydiff += y;
@@ -614,8 +709,11 @@ scroll(struct Widget *wid, int y)
 		}
 	}
 	setrow(wid, newrow);
-	settitle(wid);
-	return prevrow != wid->row;
+	if (prevrow != newrow) {
+		settitle(wid);
+		return TRUE;
+	}
+	return FALSE;
 }
 
 static int
@@ -638,7 +736,7 @@ readsize(FILE *fp)
 }
 
 static int
-getentry(Widget wid, int x, int y)
+getitem(Widget wid, int x, int y)
 {
 	int i, j, n, w, h;
 	int iconx, textx, texty;
@@ -676,25 +774,47 @@ getentry(Widget wid, int x, int y)
 	return -1;
 }
 
+static void
+cleanwidget(Widget wid)
+{
+	struct Thumb *thumb;
+	struct Selection *sel;
+	void *tmp;
+
+	thumb = wid->thumbhead;
+	while (thumb != NULL) {
+		tmp = thumb;
+		thumb = thumb->next;
+		XDestroyImage(((struct Thumb *)tmp)->img);
+		free(tmp);
+	}
+	sel = wid->sel;
+	while (sel != NULL) {
+		tmp = sel;
+		sel = sel->next;
+		free(tmp);
+	}
+	wid->sel = NULL;
+	free(wid->thumbs);
+	wid->thumbs = NULL;
+	free(wid->linelens);
+	wid->linelens = NULL;
+	free(wid->issel);
+	wid->issel = NULL;
+}
+
 Widget
 initwidget(const char *appclass, const char *appname, const char *geom, const char *states[], size_t nstates, int argc, char *argv[], unsigned long *icon, size_t iconsize, int hasthumb)
 {
+	GC gc;
 	Widget wid;
 	XpmAttributes xa;
-	char *atomnames[ATOM_LAST] = {
-		[UTF8_STRING]                = "UTF8_STRING",
-		[WM_DELETE_WINDOW]           = "WM_DELETE_WINDOW",
-		[_NET_WM_ICON]               = "_NET_WM_ICON",
-		[_NET_WM_NAME]               = "_NET_WM_NAME",
-		[_NET_WM_PID]                = "_NET_WM_PID",
-		[_NET_WM_WINDOW_TYPE]        = "_NET_WM_WINDOW_TYPE",
-		[_NET_WM_WINDOW_TYPE_NORMAL] = "_NET_WM_WINDOW_TYPE_NORMAL",
-	};
 
 	wid = NULL;
 	if ((wid = malloc(sizeof(*wid))) == NULL)
 		goto error_pre;
 	*wid = (struct Widget){
+		.start = 0,
 		.hasthumb = hasthumb,
 		.states = states,
 		.nstates = nstates,
@@ -707,6 +827,9 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		.lastitem = -1,
 		.title = "",
 		.class = appclass,
+		.sel = NULL,
+		.issel = NULL,
+		.seltime = 0,
 	};
 	if (!XInitThreads())
 		goto error_pre;
@@ -728,9 +851,20 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		goto error_win;
 	if (!(xa.valuemask & XpmSize))
 		goto error_pix;
+	if ((wid->stipple = XCreatePixmap(wid->dpy, ROOT(wid->dpy), STIPPLE_SIZE, STIPPLE_SIZE, STIPPLE_DEPTH)) == None)
+		goto error_pix;
+	if ((gc = XCreateGC(wid->dpy, wid->stipple, 0, NULL)) == None)
+		goto error_stip;
+	XSetForeground(wid->dpy, gc, 0);
+	XFillRectangle(wid->dpy, wid->stipple, gc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
+	XSetForeground(wid->dpy, gc, 1);
+	XFillRectangle(wid->dpy, wid->stipple, gc, 0, 0, 1, 1);
+	XSetStipple(wid->dpy, wid->gc, wid->stipple);
 	wid->cursors[CURSOR_NORMAL] = XCreateFontCursor(wid->dpy, XC_left_ptr);
 	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
 	return wid;
+error_stip:
+	XFreePixmap(wid->dpy, wid->stipple);
 error_pix:
 	XFreePixmap(wid->dpy, wid->deficon.pix);
 	XFreePixmap(wid->dpy, wid->deficon.mask);
@@ -748,19 +882,9 @@ error_pre:
 void
 setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t nitems)
 {
-	struct Thumb *thumb, *tmp;
 	size_t i;
 
-	thumb = wid->thumbhead;
-	while (thumb != NULL) {
-		tmp = thumb;
-		thumb = thumb->next;
-		XDestroyImage(tmp->img);
-		free(tmp);
-	}
-	if (wid->thumbs != NULL)
-		free(wid->thumbs);
-	free(wid->linelens);
+	cleanwidget(wid);
 	wid->items = items;
 	wid->nitems = nitems;
 	wid->foundicons = foundicons;
@@ -771,6 +895,7 @@ setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t 
 	wid->ydiff = 0;
 	wid->title = title;
 	(void)calcsize(wid, -1, -1);
+	wid->issel = calloc(wid->nitems, sizeof(*wid->issel));
 	wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens));
 	if (wid->hasthumb && (wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) != NULL) {
 		for (i = 0; i < nitems; i++)
@@ -778,9 +903,8 @@ setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t 
 		wid->thumbhead = NULL;
 	}
 	settitle(wid);
-	drawentries(wid);
+	drawitems(wid);
 	commitdraw(wid);
-	(void)XPending(wid->dpy);
 }
 
 void
@@ -789,15 +913,302 @@ mapwidget(Widget wid)
 	XMapWindow(wid->dpy, wid->win);
 }
 
+static void
+selectitem(struct Widget *wid, int index, int select)
+{
+	struct Selection *sel;
+
+	if (wid->issel == NULL || index <= 0 || index >= wid->nitems)
+		return;
+	if (select && wid->issel[index] == NULL) {
+		if ((sel = malloc(sizeof(*sel))) == NULL)
+			return;
+		*sel = (struct Selection){
+			.next = wid->sel,
+			.prev = NULL,
+			.index = index,
+		};
+		if (wid->sel != NULL)
+			wid->sel->prev = sel;
+		wid->sel = sel;
+		wid->issel[index] = sel;
+	} else if (!select && wid->issel[index] != NULL) {
+		sel = wid->issel[index];
+		if (sel->next != NULL)
+			sel->next->prev = sel->prev;
+		if (sel->prev != NULL)
+			sel->prev->next = sel->next;
+		if (wid->sel == sel)
+			wid->sel = sel->next;
+		free(sel);
+		wid->issel[index] = NULL;
+	}
+}
+
+static void
+selectitems(struct Widget *wid, int a, int b, int select)
+{
+	int i, min, max;
+
+	if (a < 0 || b < 0 || a >= wid->nitems || b >= wid->nitems)
+		return;
+	if (a < b) {
+		min = a;
+		max = b;
+	} else {
+		min = b;
+		max = a;
+	}
+	for (i = min; i <= max; i++) {
+		selectitem(wid, i, select);
+	}
+}
+
+static void
+unselectitems(struct Widget *wid)
+{
+	while (wid->sel) {
+		selectitem(wid, wid->sel->index, FALSE);
+	}
+}
+
+static void
+ownselection(Widget wid, Time time)
+{
+	if (wid->sel == NULL)
+		return;
+	wid->seltime = time;
+	XSetSelectionOwner(wid->dpy, XA_PRIMARY, wid->win, time);
+}
+
+static unsigned long
+getatompairs(Widget wid, Window win, Atom prop, Atom **pairs)
+{
+	unsigned char *p;
+	unsigned long len;
+	unsigned long dl;   /* dummy variable */
+	int di;             /* dummy variable */
+	Atom type;
+	size_t size;
+
+	if (XGetWindowProperty(wid->dpy, win, prop, 0L, 0x1FFFFFFF, False, wid->atoms[ATOM_PAIR], &type, &di, &len, &dl, &p) != Success ||
+	    len == 0 || p == NULL || type != wid->atoms[ATOM_PAIR]) {
+		XFree(p);
+		*pairs = NULL;
+		return 0;
+	}
+	size = len * sizeof(**pairs);
+	*pairs = emalloc(size);
+	memcpy(*pairs, p, size);
+	XFree(p);
+	return len;
+}
+
+static Bool
+convert(Widget wid, Window requestor, Atom target, Atom property)
+{
+	struct Selection *sel;
+
+	if (target == wid->atoms[MULTIPLE]) {
+		/*
+		 * A MULTIPLE should be handled when processing a
+		 * SelectionRequest event.  We do not support nested
+		 * MULTIPLE targets.
+		 */
+		return False;
+	}
+	if (target == wid->atoms[TIMESTAMP]) {
+		/*
+		 * According to ICCCM, to avoid some race conditions, it
+		 * is important that requestors be able to discover the
+		 * timestamp the owner used to acquire ownership.
+		 * Requester do that by requesting sellection owners to
+		 * convert to `TIMESTAMP`.  Selections owners must
+		 * return the timestamp as an `XA_INTEGER`.
+		 */
+		XChangeProperty(
+			wid->dpy,
+			requestor,
+			property,
+			XA_INTEGER, 32,
+			PropModeReplace,
+			(unsigned char *)&wid->seltime,
+			1
+		);
+		return True;
+	}
+	if (target == wid->atoms[TARGETS]) {
+		/*
+		 * According to ICCCM, when requested for the `TARGETS`
+		 * target, the selection owner should return a list of
+		 * atoms representing the targets for which an attempt
+		 * to convert the selection will (hopefully) succeed.
+		 */
+		XChangeProperty(
+			wid->dpy,
+			requestor,
+			property,
+			XA_ATOM, 32,
+			PropModeReplace,
+			(unsigned char *)(Atom[]){
+				XA_STRING,
+				wid->atoms[DELETE],
+				wid->atoms[MULTIPLE],
+				wid->atoms[TARGETS],
+				wid->atoms[TEXT],
+				wid->atoms[TIMESTAMP],
+				wid->atoms[UTF8_STRING],
+			},
+			NTARGETS
+		);
+		return True;
+	}
+	if (target == wid->atoms[DELETE]) {
+		unselectitems(wid);
+		drawitems(wid);
+		XChangeProperty(
+			wid->dpy,
+			requestor,
+			property,
+			wid->atoms[_NULL],
+			8L,
+			PropModeReplace,
+			"",
+			0
+		);
+		return True;
+	}
+	if (target == wid->atoms[TEXT] ||
+	    target == wid->atoms[UTF8_STRING] ||
+	    target == wid->atoms[COMPOUND_TEXT] ||
+	    target == XA_STRING) {
+		XChangeProperty(
+			wid->dpy,
+			requestor,
+			property,
+			wid->atoms[UTF8_STRING],
+			8L,
+			PropModeReplace,
+			NULL,
+			0
+		);
+		for (sel = wid->sel; sel != NULL; sel = sel->next) {
+			XChangeProperty(
+				wid->dpy,
+				requestor,
+				property,
+				wid->atoms[UTF8_STRING],
+				8L,
+				PropModeAppend,
+				wid->items[sel->index][ITEM_PATH],
+				strlen(wid->items[sel->index][ITEM_PATH])
+			);
+			XChangeProperty(
+				wid->dpy,
+				requestor,
+				property,
+				wid->atoms[UTF8_STRING],
+				8L,
+				PropModeAppend,
+				"\n",
+				1
+			);
+		}
+		XChangeProperty(
+			wid->dpy,
+			requestor,
+			property,
+			wid->atoms[UTF8_STRING],
+			8L,
+			PropModeAppend,
+			(unsigned char[]){ '\0' },
+			1
+		);
+		return True;
+	}
+	return False;
+}
+
+static void
+sendselection(Widget wid, XSelectionRequestEvent *xev)
+{
+	enum { PAIR_TARGET, PAIR_PROPERTY, PAIR_LAST };
+	;
+	XSelectionEvent sev;
+	Atom *pairs;
+	Atom pair[PAIR_LAST];
+	unsigned long natoms, i;
+	Bool success;
+
+	sev = (XSelectionEvent){
+		.type           = SelectionNotify,
+		.display        = xev->display,
+		.requestor      = xev->requestor,
+		.selection      = xev->selection,
+		.time           = xev->time,
+		.target         = xev->target,
+		.property       = None,
+	};
+	if (xev->time != CurrentTime && xev->time < wid->seltime) {
+		/*
+		 * According to ICCCM, the selection owner should
+		 * compare the timestamp with the period it has owned
+		 * the selection and, if the time is outside, refuse the
+		 * `SelectionRequest` by sending the requestor window a
+		 * `SelectionNotify` event with the property set to
+		 * `None` (by means of a `SendEvent` request with an
+		 * empty event mask).
+		 */
+		goto done;
+	}
+	if (xev->target == wid->atoms[MULTIPLE]) {
+		if (xev->property == None)
+			goto done;
+		natoms = getatompairs(wid, xev->requestor, xev->property, &pairs);
+	} else {
+		pair[PAIR_TARGET] = xev->target;
+		pair[PAIR_PROPERTY] = xev->property;
+		pairs = pair;
+		natoms = 2;
+	}
+	success = True;
+	for (i = 0; i < natoms; i += 2) {
+		if (!convert(wid, xev->requestor, pairs[i + PAIR_TARGET], pairs[i + PAIR_PROPERTY])) {
+			success = False;
+			pairs[i + PAIR_PROPERTY] = None;
+		}
+	}
+	if (xev->target == wid->atoms[MULTIPLE]) {
+		XChangeProperty(
+			xev->display,
+			xev->requestor,
+			xev->property,
+			wid->atoms[ATOM_PAIR],
+			32, PropModeReplace,
+			(unsigned char *)pairs, natoms
+		);
+		free(pairs);
+	}
+	if (success) {
+		sev.property = (xev->property == None) ? xev->target : xev->property;
+	}
+done:
+	XSendEvent(xev->display, xev->requestor, False, NoEventMask, (XEvent *)&sev);
+}
+
 static int
 mouseclick(Widget wid, XButtonPressedEvent *ev)
 {
 	int index, ret;
 
 	ret = -1;
-	index = getentry(wid, ev->x, ev->y);
-	if (index == -1)
+	if (!(ev->state & (ControlMask | ShiftMask)))
+		unselectitems(wid);
+	if ((index = getitem(wid, ev->x, ev->y)) == -1)
 		goto done;
+	if (ev->state & ShiftMask)
+		selectitems(wid, index, wid->lastitem, 1);
+	selectitem(wid, index, ((ev->state & ControlMask) ? wid->issel[index] == NULL : 1));
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
 	    index == wid->lastitem && ev->time - wid->lastclick <= DOUBLECLICK) {
 		ret = index;
@@ -814,7 +1225,9 @@ pollwidget(Widget wid, int *index)
 {
 	XEvent ev;
 
-	XSync(wid->dpy, True);
+	if (!wid->start)
+		XSync(wid->dpy, True);
+	wid->start = 1;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		switch (ev.type) {
 		case ClientMessage:
@@ -829,17 +1242,31 @@ pollwidget(Widget wid, int *index)
 			if (calcsize(wid, ev.xconfigure.width, ev.xconfigure.height)) {
 				if (wid->row >= wid->maxrow)
 					setrow(wid, wid->maxrow - 1);
-				drawentries(wid);
+				drawitems(wid);
 				commitdraw(wid);
 			}
 			break;
+		case SelectionRequest:
+			if (ev.xselectionrequest.selection == XA_PRIMARY)
+				sendselection(wid, &ev.xselectionrequest);
+			break;
+		case SelectionClear:
+			unselectitems(wid);
+			drawitems(wid);
+			commitdraw(wid);
+			break;
 		case ButtonPress:
 			if (ev.xbutton.button == Button1) {
-				if ((*index = mouseclick(wid, &ev.xbutton)) != -1)
+				*index = mouseclick(wid, &ev.xbutton);
+				ownselection(wid, ev.xbutton.time);
+				drawitems(wid);
+				commitdraw(wid);
+				if (*index != -1) {
 					return WIDGET_OPEN;
+				}
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
 				if (scroll(wid, (ev.xbutton.button == Button4 ? -5 : +5)))
-					drawentries(wid);
+					drawitems(wid);
 				commitdraw(wid);
 			}
 			break;
@@ -869,6 +1296,7 @@ closewidget(Widget wid)
 	XFreePixmap(wid->dpy, wid->deficon.mask);
 	XFreePixmap(wid->dpy, wid->pix);
 	XFreePixmap(wid->dpy, wid->namepix);
+	XFreePixmap(wid->dpy, wid->stipple);
 	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_BG]);
 	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_FG]);
 	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_BG]);
@@ -974,7 +1402,7 @@ setthumbnail(Widget wid, char *path, int item)
 	wid->thumbhead = wid->thumbs[item];
 	etlock(&wid->rowlock);
 	if (item >= wid->row * wid->ncols && item < wid->row * wid->ncols + wid->nrows * wid->ncols) {
-		drawentry(wid, item);
+		drawitem(wid, item);
 		commitdraw(wid);
 		XFlush(wid->dpy);
 	}
