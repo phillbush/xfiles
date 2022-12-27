@@ -590,22 +590,30 @@ settitle(Widget wid)
 static int
 scroll(struct Widget *wid, int y)
 {
-	int prevrow;
+	int prevrow, newrow;
 
-	prevrow = wid->row;
-	if (y > 0 && wid->row < wid->maxrow && (wid->ydiff += y) >= wid->itemh) {
-		wid->ydiff = 0;
-		if (++wid->row == wid->maxrow) {
+	if (wid->nitems / wid->ncols < wid->nrows)
+		return FALSE;
+	newrow = prevrow = wid->row;
+	wid->ydiff += y;
+	newrow += wid->ydiff / wid->itemh;
+	wid->ydiff %= wid->itemh;
+	if (wid->ydiff < 0) {
+		wid->ydiff += wid->itemh;
+		newrow--;
+	}
+	if (y > 0) {
+		if (newrow >= wid->maxrow) {
 			wid->ydiff = wid->itemh;
-			setrow(wid, wid->maxrow - 1);
+			newrow = wid->maxrow - 1;
 		}
-	} else if (y < 0 && (wid->ydiff += y) < 0) {
-		wid->ydiff = wid->itemh + y;
-		if (wid->row-- == 0) {
+	} else if (y < 0) {
+		if (newrow < 0) {
 			wid->ydiff = 0;
-			setrow(wid, 0);
+			newrow = 0;
 		}
 	}
+	setrow(wid, newrow);
 	settitle(wid);
 	return prevrow != wid->row;
 }
@@ -633,7 +641,7 @@ static int
 getentry(Widget wid, int x, int y)
 {
 	int i, j, n, w, h;
-	int textx, texty;
+	int iconx, textx, texty;
 	int row;
 
 	y -= MARGIN;
@@ -652,7 +660,8 @@ getentry(Widget wid, int x, int y)
 		return -1;
 	x -= w * wid->itemw;
 	y -= h * wid->itemh;
-	if (x >= 0 && x < THUMBSIZE + (wid->itemw - THUMBSIZE) / 2 && y >= 0 && y < THUMBSIZE)
+	iconx = (wid->itemw - THUMBSIZE) / 2;
+	if (x >= iconx && x < iconx + THUMBSIZE && y >= 0 && y < THUMBSIZE)
 		return i;
 	if (wid->linelens == NULL)
 		return -1;
@@ -771,6 +780,7 @@ setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t 
 	settitle(wid);
 	drawentries(wid);
 	commitdraw(wid);
+	(void)XPending(wid->dpy);
 }
 
 void
