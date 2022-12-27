@@ -39,7 +39,7 @@
 enum {
 	NTARGETS        = 7,
 	STIPPLE_SIZE    = 2,
-	STIPPLE_DEPTH   = 1,
+	CLIP_DEPTH      = 1,
 	TITLE_SIZE      = 1028,
 	STATUS_SIZE     = 64,
 	THUMBSIZE       = 64,
@@ -60,6 +60,11 @@ enum {
 	BYTE            = 8,
 	DOUBLECLICK     = 250,
 	NAMEWIDTH       = ((int)(THUMBSIZE * 1.75)),
+
+	/* update time rate for rectangular selection */
+	RECTTIME        = 32,
+
+	SCROLL_STEP     = 5,    /* pixels per scroll */
 };
 
 enum {
@@ -108,7 +113,7 @@ struct Widget {
 	Display *dpy;
 	Atom atoms[ATOM_LAST];
 	Cursor cursors[CURSOR_LAST];
-	GC gc;
+	GC stipgc, gc;
 	Window win;
 	XftColor normal[COLOR_LAST];
 	XftColor select[COLOR_LAST];
@@ -116,6 +121,7 @@ struct Widget {
 	Pixmap pix;
 	Pixmap namepix;
 	Pixmap stipple;
+	Pixmap rectfill, rectbord;
 	int ellipsisw;
 	int fonth;
 	int hasthumb;
@@ -132,6 +138,9 @@ struct Widget {
 	struct Selection *sel;  /* list of selections */
 	struct Selection **issel;/* array of pointers to Selections */
 	Time seltime;
+	Time recttime;
+	int rectinit;
+	int rectrow, rectydiff;
 
 	int w, h;               /* window width and height */
 	int pixw, pixh;
@@ -149,6 +158,7 @@ struct Widget {
 
 	Time lastclick;         /* last click with the mouse button 1 */
 	int lastitem;
+	int clickx, clicky;
 
 	const char *title;
 	const char *class;
@@ -220,8 +230,8 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		&(XSetWindowAttributes){
 			.background_pixel = wid->normal[COLOR_BG].pixel,
 			.event_mask = StructureNotifyMask | ExposureMask
-			            | KeyPressMask | ButtonPressMask
-			            | PointerMotionMask,
+			            | KeyPressMask | PointerMotionMask
+			            | ButtonReleaseMask | ButtonPressMask,
 		}
 	);
 	wid->namepix = XCreatePixmap(
@@ -369,7 +379,7 @@ calcsize(Widget wid, int w, int h)
 		wid->h = h;
 	}
 	wid->ncols = max(wid->w / wid->itemw, 1);
-	wid->nrows = max(wid->h / wid->itemh + (wid->h % wid->itemh ? 1 : 0), 1);
+	wid->nrows = max(wid->h / wid->itemh + (wid->h % wid->itemh ? 2 : 1), 1);
 	wid->ydiff = 0;
 	wid->x0 = max((wid->w - wid->ncols * wid->itemw) / 2, 0);
 	wid->maxrow = wid->nitems / wid->ncols - wid->h / wid->itemh + (wid->nitems % wid->ncols != 0 ? 1 : 0);
@@ -377,9 +387,15 @@ calcsize(Widget wid, int w, int h)
 	if (ncols != wid->ncols || nrows != wid->nrows) {
 		if (wid->pix != None)
 			XFreePixmap(wid->dpy, wid->pix);
+		if (wid->rectfill != None)
+			XFreePixmap(wid->dpy, wid->rectfill);
+		if (wid->rectbord != None)
+			XFreePixmap(wid->dpy, wid->rectbord);
 		wid->pixw = wid->ncols * wid->itemw;
 		wid->pixh = wid->nrows * wid->itemh;
 		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, DEPTH(wid->dpy));
+		wid->rectfill = XCreatePixmap(wid->dpy, ROOT(wid->dpy), wid->w, wid->h, CLIP_DEPTH);
+		wid->rectbord = XCreatePixmap(wid->dpy, ROOT(wid->dpy), wid->w, wid->h, CLIP_DEPTH);
 		ret = 1;
 	}
 	etunlock(&wid->rowlock);
@@ -507,8 +523,6 @@ drawitem(Widget wid, int index)
 	}
 	if (index == wid->lastitem) {
 		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
-		val.line_style = LineOnOffDash;
-		XChangeGC(wid->dpy, wid->gc, GCLineStyle, &val);
 		XDrawRectangle(
 			wid->dpy,
 			wid->pix,
@@ -517,8 +531,6 @@ drawitem(Widget wid, int index)
 			y + wid->itemh - 2.5 * wid->fonth - 1,
 			maxw + 1, j * wid->fonth + 1
 		);
-		val.line_style = LineSolid;
-		XChangeGC(wid->dpy, wid->gc, GCLineStyle, &val);
 	}
 	if (textw >= NAMEWIDTH &&
 	    (extension = strrchr(text, '.')) != NULL &&
@@ -637,6 +649,7 @@ drawitems(Widget wid)
 static void
 commitdraw(Widget wid)
 {
+	XClearWindow(wid->dpy, wid->win);
 	XCopyArea(
 		wid->dpy,
 		wid->pix, wid->win,
@@ -644,6 +657,28 @@ commitdraw(Widget wid)
 		0, wid->ydiff - MARGIN,
 		wid->pixw, wid->pixh,
 		wid->x0, 0
+	);
+	if (!wid->rectinit)
+		return;
+	XChangeGC(
+		wid->dpy,
+		wid->gc,
+		GCClipXOrigin | GCClipYOrigin | GCClipMask,
+		&(XGCValues) {
+			.clip_x_origin = 0,
+			.clip_y_origin = 0,
+			.clip_mask = wid->rectbord,
+		}
+	);
+	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_FG].pixel);
+	XFillRectangle(wid->dpy, wid->win, wid->gc, 0, 0, wid->w, wid->h);
+	XChangeGC(
+		wid->dpy,
+		wid->gc,
+		GCClipMask,
+		&(XGCValues) {
+			.clip_mask = None,
+		}
 	);
 }
 
@@ -736,28 +771,38 @@ readsize(FILE *fp)
 }
 
 static int
-getitem(Widget wid, int x, int y)
+getitem(Widget wid, int row, int ydiff, int *x, int *y)
 {
-	int i, j, n, w, h;
-	int iconx, textx, texty;
-	int row;
+	int i, w, h;
 
-	y -= MARGIN;
-	x -= wid->x0;
-	if (x < 0 || x >= wid->ncols * wid->itemw)
+	*y -= MARGIN;
+	*x -= wid->x0;
+	if (*x < 0 || *x >= wid->ncols * wid->itemw)
 		return -1;
-	if (y < 0 || y >= wid->h)
+	if (*y < 0 || *y >= wid->h)
 		return -1;
-	y += wid->ydiff;
-	w = x / wid->itemw;
-	h = y / wid->itemh;
-	row = wid->row * wid->ncols;
+	*y += ydiff;
+	w = *x / wid->itemw;
+	h = *y / wid->itemh;
+	row *= wid->ncols;
 	i = row + h * wid->ncols + w;
-	n = min(wid->nitems, row + wid->nrows * wid->ncols);
-	if (i < row || i >= n || i < 0 || i >= wid->nitems)
+	if (i < row)
 		return -1;
-	x -= w * wid->itemw;
-	y -= h * wid->itemh;
+	*x -= w * wid->itemw;
+	*y -= h * wid->itemh;
+	return i;
+}
+
+static int
+getpointerclick(Widget wid, int x, int y)
+{
+	int i, j;
+	int iconx, textx, texty;
+
+	if ((i = getitem(wid, wid->row, wid->ydiff, &x, &y)) < 0)
+		return -1;
+	if (i < 0 || i >= wid->nitems)
+		return -1;
 	iconx = (wid->itemw - THUMBSIZE) / 2;
 	if (x >= iconx && x < iconx + THUMBSIZE && y >= 0 && y < THUMBSIZE)
 		return i;
@@ -806,7 +851,6 @@ cleanwidget(Widget wid)
 Widget
 initwidget(const char *appclass, const char *appname, const char *geom, const char *states[], size_t nstates, int argc, char *argv[], unsigned long *icon, size_t iconsize, int hasthumb)
 {
-	GC gc;
 	Widget wid;
 	XpmAttributes xa;
 
@@ -825,11 +869,19 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		.icons = NULL,
 		.lastclick = 0,
 		.lastitem = -1,
+		.clickx = 0,
+		.clicky = 0,
 		.title = "",
 		.class = appclass,
 		.sel = NULL,
 		.issel = NULL,
 		.seltime = 0,
+		.pix = None,
+		.recttime = 0,
+		.rectinit = FALSE,
+		.rectbord = None,
+		.rectfill = None,
+		.stipple = None,
 	};
 	if (!XInitThreads())
 		goto error_pre;
@@ -840,7 +892,7 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
 	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1)
 		goto error_dpy;
-	if ((wid->gc = XCreateGC(wid->dpy, ROOT(wid->dpy), 0, NULL)) == None)
+	if ((wid->gc = XCreateGC(wid->dpy, ROOT(wid->dpy), GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None)
 		goto error_dpy;
 	if (inittheme(wid, appclass, appname) == -1)
 		goto error_dpy;
@@ -851,14 +903,14 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		goto error_win;
 	if (!(xa.valuemask & XpmSize))
 		goto error_pix;
-	if ((wid->stipple = XCreatePixmap(wid->dpy, ROOT(wid->dpy), STIPPLE_SIZE, STIPPLE_SIZE, STIPPLE_DEPTH)) == None)
+	if ((wid->stipple = XCreatePixmap(wid->dpy, ROOT(wid->dpy), STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None)
 		goto error_pix;
-	if ((gc = XCreateGC(wid->dpy, wid->stipple, 0, NULL)) == None)
+	if ((wid->stipgc = XCreateGC(wid->dpy, wid->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None)
 		goto error_stip;
-	XSetForeground(wid->dpy, gc, 0);
-	XFillRectangle(wid->dpy, wid->stipple, gc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
-	XSetForeground(wid->dpy, gc, 1);
-	XFillRectangle(wid->dpy, wid->stipple, gc, 0, 0, 1, 1);
+	XSetForeground(wid->dpy, wid->stipgc, 0);
+	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
+	XSetForeground(wid->dpy, wid->stipgc, 1);
+	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, 1, 1);
 	XSetStipple(wid->dpy, wid->gc, wid->stipple);
 	wid->cursors[CURSOR_NORMAL] = XCreateFontCursor(wid->dpy, XC_left_ptr);
 	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
@@ -891,6 +943,9 @@ setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t 
 	wid->ydiff = 0;
 	wid->lastclick = 0;
 	wid->lastitem = -1;
+	wid->clickx = wid->clicky = 0;
+	wid->rectrow = 0;
+	wid->rectydiff = 0;
 	wid->row = 0;
 	wid->ydiff = 0;
 	wid->title = title;
@@ -1204,7 +1259,7 @@ mouseclick(Widget wid, XButtonPressedEvent *ev)
 	ret = -1;
 	if (!(ev->state & (ControlMask | ShiftMask)))
 		unselectitems(wid);
-	if ((index = getitem(wid, ev->x, ev->y)) == -1)
+	if ((index = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
 	if (ev->state & ShiftMask)
 		selectitems(wid, index, wid->lastitem, 1);
@@ -1216,8 +1271,93 @@ mouseclick(Widget wid, XButtonPressedEvent *ev)
 done:
 	wid->lastclick = ev->time;
 	wid->lastitem = index;
+	wid->clickx = ev->x;
+	wid->clicky = ev->y;
 	settitle(wid);
 	return ret;
+}
+
+static void
+rectdraw(Widget wid, int x, int y)
+{
+	int x0, y0, w, h;
+
+	XSetForeground(wid->dpy, wid->stipgc, 0);
+	XFillRectangle(
+		wid->dpy,
+		wid->rectbord,
+		wid->stipgc,
+		0, 0,
+		wid->w, wid->h
+	);
+	if (!wid->rectinit)
+		return;
+	y0 = wid->clicky;
+	x0 = wid->clickx;
+	if (wid->rectrow < wid->row) {
+		y0 -= min(wid->row - wid->rectrow, wid->nrows) * wid->itemh;
+	} else if (wid->rectrow > wid->row) {
+		y0 += min(wid->rectrow - wid->row, wid->nrows) * wid->itemh;
+	}
+	y0 += wid->rectydiff - wid->ydiff;
+	w = (x0 > x) ? x0 - x : x - x0;
+	h = (y0 > y) ? y0 - y : y - y0;
+	XSetForeground(wid->dpy, wid->stipgc, 1);
+	XDrawRectangle(
+		wid->dpy,
+		wid->rectbord,
+		wid->stipgc,
+		min(x0, x),
+		min(y0, y),
+		w, h
+	);
+}
+
+static void
+rectselect(Widget wid, int x, int y)
+{
+	int minx, maxx;
+	int srcx, srcy, dstx, dsty;
+	int indexmin, indexmax;
+	int col, colmin, colmax;
+	int tmp, i, j;
+
+	minx = min(wid->clickx, x);
+	maxx = max(wid->clickx, x);
+	srcx = wid->clickx;
+	srcy = wid->clicky;
+	dstx = x;
+	dsty = y;
+	if ((dstx > srcx && srcy > dsty) || (dstx < srcx && srcy < dsty)) {
+		tmp = dstx;
+		dstx = srcx;
+		srcx = tmp;
+	}
+	if (dstx < wid->x0)              dstx = wid->x0;
+	if (srcx < wid->x0)              srcx = wid->x0;
+	if (dstx >= wid->x0 + wid->pixw) dstx = wid->x0 + wid->pixw - 1;
+	if (srcx >= wid->x0 + wid->pixw) srcx = wid->x0 + wid->pixw - 1;
+	if (dsty < MARGIN)               dsty = MARGIN;
+	if (srcy < MARGIN)               srcy = MARGIN;
+	if (dsty >= wid->h)              dsty = wid->h - 1;
+	if (srcy >= wid->h)              srcy = wid->h - 1;
+	if ((i = getitem(wid, wid->rectrow, wid->rectydiff, &srcx, &srcy)) < 0)
+		return;
+	if ((j = getitem(wid, wid->row, wid->ydiff, &dstx, &dsty)) < 0)
+		return;
+	indexmin = min(min(i, j), wid->nitems - 1);
+	indexmax = min(max(i, j), wid->nitems - 1);
+	colmin = indexmin % wid->ncols;
+	colmax = indexmax % wid->ncols;
+	for (i = indexmin; i <= indexmax; i++) {
+		col = i % wid->ncols;
+		x = wid->x0 + col * wid->itemw + (wid->itemw - THUMBSIZE) / 2;
+		if ((col == colmin && minx < x + THUMBSIZE && maxx > x) ||
+		    (col == colmax && maxx > x && minx < x + THUMBSIZE) ||
+		    (col > colmin && i % wid->ncols < colmax)) {
+			selectitem(wid, i, TRUE);
+		}
+	}
 }
 
 WidgetEvent
@@ -1265,13 +1405,38 @@ pollwidget(Widget wid, int *index)
 					return WIDGET_OPEN;
 				}
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
-				if (scroll(wid, (ev.xbutton.button == Button4 ? -5 : +5)))
+				if (scroll(wid, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
 					drawitems(wid);
 				commitdraw(wid);
 			}
 			break;
+		case ButtonRelease:
+			wid->rectinit = FALSE;
+			rectdraw(wid, ev.xbutton.x, ev.xbutton.y);
+			commitdraw(wid);
+			break;
 		case MotionNotify:
-			// TODO
+			if (wid->lastitem != -1)
+				break;
+			if (ev.xmotion.state != Button1Mask)
+				break;
+			if (!wid->rectinit) {
+				wid->recttime = ev.xmotion.time;
+				wid->rectinit = TRUE;
+				wid->rectydiff = wid->ydiff;
+				wid->rectrow = wid->row;
+			} else if (ev.xmotion.time - wid->recttime > RECTTIME) {
+				unselectitems(wid);
+				if (ev.xmotion.y > wid->h)
+					(void)scroll(wid, (ev.xmotion.y - wid->h) / SCROLL_STEP);
+				else if (ev.xmotion.y < 0)
+					(void)scroll(wid, ev.xmotion.y / SCROLL_STEP);
+				rectdraw(wid, ev.xmotion.x, ev.xmotion.y);
+				rectselect(wid, ev.xmotion.x, ev.xmotion.y);
+				drawitems(wid);
+				commitdraw(wid);
+				wid->recttime = ev.xmotion.time;
+			}
 			break;
 		}
 	}
