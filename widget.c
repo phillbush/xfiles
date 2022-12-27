@@ -1345,10 +1345,12 @@ rectselect(Widget wid, int x, int y)
 		return;
 	if ((j = getitem(wid, wid->row, wid->ydiff, &dstx, &dsty)) < 0)
 		return;
-	indexmin = min(min(i, j), wid->nitems - 1);
-	indexmax = min(max(i, j), wid->nitems - 1);
+	indexmin = min(i, j);
+	indexmax = max(i, j);
 	colmin = indexmin % wid->ncols;
 	colmax = indexmax % wid->ncols;
+	indexmin = min(indexmin, wid->nitems - 1);
+	indexmax = min(indexmax, wid->nitems - 1);
 	for (i = indexmin; i <= indexmax; i++) {
 		col = i % wid->ncols;
 		x = wid->x0 + col * wid->itemw + (wid->itemw - THUMBSIZE) / 2;
