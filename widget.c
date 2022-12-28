@@ -1369,8 +1369,8 @@ rectselect(Widget wid, int srcrow, int srcydiff, int x, int y)
 		return;
 	if ((j = getitem(wid, wid->row, wid->ydiff, &dstx, &dsty)) < 0)
 		return;
-	indexmin = min(min(i, j), wid->nitems - 1);
-	indexmax = min(max(i, j), wid->nitems - 1);
+	indexmin = min(i, j);
+	indexmax = max(i, j);
 	colmin = indexmin % wid->ncols;
 	colmax = indexmax % wid->ncols;
 	indexmin = min(indexmin, wid->nitems - 1);
