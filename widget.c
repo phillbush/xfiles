@@ -1664,7 +1664,6 @@ scrollmotion(Widget wid, int x, int y)
 		case MotionNotify:
 			if (ev.xmotion.window == wid->scroller && (ev.xmotion.state & Button1Mask)) {
 				scrollerset(wid, ev.xmotion.y);
-				left = TRUE;
 			} else if (ev.xmotion.window == wid->win &&
 			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
 				left = TRUE;
@@ -1675,9 +1674,13 @@ scrollmotion(Widget wid, int x, int y)
 				goto done;
 			break;
 		case ButtonPress:
-			if (ev.xbutton.window == wid->win) {
+			if (ev.xbutton.button == Button2)
 				goto done;
-			} else if (ev.xbutton.window == wid->scroller) {
+			if (ev.xbutton.button != Button1)
+				break;
+			if (ev.xbutton.window == wid->win)
+				goto done;
+			if (ev.xbutton.window == wid->scroller) {
 				scrollerset(wid, ev.xmotion.y);
 				left = TRUE;
 			}
