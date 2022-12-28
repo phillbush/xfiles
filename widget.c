@@ -1703,11 +1703,13 @@ pollwidget(Widget wid, int *index)
 	Time lasttime = 0;
 	int close = FALSE;
 	int lastitem = -1;
+	int ignoremotion;
 
 	if (!wid->start)
 		XSync(wid->dpy, True);
 	wid->start = 1;
 	wid->lastitemp = &lastitem;
+	ignoremotion = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		if (processevent(wid, &ev, &close)) {
 			if (close)
@@ -1731,10 +1733,16 @@ pollwidget(Widget wid, int *index)
 			} else if (ev.xbutton.button == Button2) {
 				if (scrollmotion(wid, ev.xmotion.x, ev.xmotion.y) == WIDGET_CLOSE)
 					return WIDGET_CLOSE;
-				lastitem = -1;
+				ignoremotion = TRUE;
 			}
 			break;
+		case ButtonRelease:
+			if (ignoremotion)
+				ignoremotion = FALSE;
+			break;
 		case MotionNotify:
+			if (ignoremotion)
+				break;
 			if (lastitem != -1)
 				break;
 			if (ev.xmotion.state != Button1Mask)
