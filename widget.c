@@ -138,9 +138,7 @@ struct Widget {
 	struct Selection *sel;  /* list of selections */
 	struct Selection **issel;/* array of pointers to Selections */
 	Time seltime;
-	Time recttime;
 	int rectinit;
-	int rectrow, rectydiff;
 
 	int w, h;               /* window width and height */
 	int pixw, pixh;
@@ -156,12 +154,12 @@ struct Widget {
 	int nicons;
 	int *foundicons;
 
-	Time lastclick;         /* last click with the mouse button 1 */
-	int lastitem;
 	int clickx, clicky;
 
 	const char *title;
 	const char *class;
+
+	int *lastitemp;
 };
 
 static char *atomnames[ATOM_LAST] = {
@@ -521,7 +519,7 @@ drawitem(Widget wid, int index)
 			textw = textwidth(wid, text, textlen);
 		}
 	}
-	if (index == wid->lastitem) {
+	if (wid->lastitemp != NULL && index == *wid->lastitemp) {
 		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
 		XDrawRectangle(
 			wid->dpy,
@@ -687,20 +685,29 @@ settitle(Widget wid)
 {
 	char title[TITLE_SIZE];
 	char nitems[STATUS_SIZE];
+	char *selitem, *status;
 	int scrollpct;                  /* scroll percentage */
+	int lastitem;
 
 	if (wid->row == 0 && wid->maxrow > 1)
 		scrollpct = 0;
 	else
 		scrollpct = 100 * ((double)(wid->row + 1) / wid->maxrow);
 	(void)snprintf(nitems, STATUS_SIZE, "%d items", wid->nitems - 1);
+	selitem = "";
+	status = nitems;
+	if (wid->lastitemp != NULL) {
+		lastitem = *wid->lastitemp;
+		selitem = (lastitem > 0 ? wid->items[lastitem][ITEM_NAME] : "");
+		status = (lastitem > 0 ? wid->items[lastitem][ITEM_STATUS] : nitems);
+	}
 	(void)snprintf(
 		title, TITLE_SIZE,
 		"%s%s%s (%s) - %s (%d%%)",
 		wid->title,
 		(strcmp(wid->title, "/") != 0 ? "/" : ""),
-		(wid->lastitem > 0 ? wid->items[wid->lastitem][ITEM_NAME] : ""),
-		(wid->lastitem > 0 ? wid->items[wid->lastitem][ITEM_STATUS] : nitems),
+		selitem,
+		status,
 		wid->class,
 		scrollpct
 	);
@@ -867,8 +874,7 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		.thumbhead = NULL,
 		.linelens = NULL,
 		.icons = NULL,
-		.lastclick = 0,
-		.lastitem = -1,
+		.lastitemp = NULL,
 		.clickx = 0,
 		.clicky = 0,
 		.title = "",
@@ -877,7 +883,6 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		.issel = NULL,
 		.seltime = 0,
 		.pix = None,
-		.recttime = 0,
 		.rectinit = FALSE,
 		.rectbord = None,
 		.rectfill = None,
@@ -941,14 +946,11 @@ setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t 
 	wid->nitems = nitems;
 	wid->foundicons = foundicons;
 	wid->ydiff = 0;
-	wid->lastclick = 0;
-	wid->lastitem = -1;
-	wid->clickx = wid->clicky = 0;
-	wid->rectrow = 0;
-	wid->rectydiff = 0;
 	wid->row = 0;
 	wid->ydiff = 0;
 	wid->title = title;
+	wid->lastitemp = NULL;
+	wid->clickx = wid->clicky = 0;
 	(void)calcsize(wid, -1, -1);
 	wid->issel = calloc(wid->nitems, sizeof(*wid->issel));
 	wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens));
@@ -1252,7 +1254,7 @@ done:
 }
 
 static int
-mouseclick(Widget wid, XButtonPressedEvent *ev)
+mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime, int *lastitem)
 {
 	int index, ret;
 
@@ -1262,15 +1264,15 @@ mouseclick(Widget wid, XButtonPressedEvent *ev)
 	if ((index = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
 	if (ev->state & ShiftMask)
-		selectitems(wid, index, wid->lastitem, 1);
+		selectitems(wid, index, *lastitem, 1);
 	selectitem(wid, index, ((ev->state & ControlMask) ? wid->issel[index] == NULL : 1));
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
-	    index == wid->lastitem && ev->time - wid->lastclick <= DOUBLECLICK) {
+	    index == (*lastitem) && ev->time - (*lasttime) <= DOUBLECLICK) {
 		ret = index;
 	}
 done:
-	wid->lastclick = ev->time;
-	wid->lastitem = index;
+	*lasttime = ev->time;
+	*lastitem = index;
 	wid->clickx = ev->x;
 	wid->clicky = ev->y;
 	settitle(wid);
@@ -1278,7 +1280,7 @@ done:
 }
 
 static void
-rectdraw(Widget wid, int x, int y)
+rectdraw(Widget wid, int row, int ydiff, int x, int y)
 {
 	int x0, y0, w, h;
 
@@ -1294,12 +1296,12 @@ rectdraw(Widget wid, int x, int y)
 		return;
 	y0 = wid->clicky;
 	x0 = wid->clickx;
-	if (wid->rectrow < wid->row) {
-		y0 -= min(wid->row - wid->rectrow, wid->nrows) * wid->itemh;
-	} else if (wid->rectrow > wid->row) {
-		y0 += min(wid->rectrow - wid->row, wid->nrows) * wid->itemh;
+	if (row < wid->row) {
+		y0 -= min(wid->row - row, wid->nrows) * wid->itemh;
+	} else if (row > wid->row) {
+		y0 += min(row - wid->row, wid->nrows) * wid->itemh;
 	}
-	y0 += wid->rectydiff - wid->ydiff;
+	y0 += ydiff - wid->ydiff;
 	w = (x0 > x) ? x0 - x : x - x0;
 	h = (y0 > y) ? y0 - y : y - y0;
 	XSetForeground(wid->dpy, wid->stipgc, 1);
@@ -1314,7 +1316,7 @@ rectdraw(Widget wid, int x, int y)
 }
 
 static void
-rectselect(Widget wid, int x, int y)
+rectselect(Widget wid, int srcrow, int srcydiff, int x, int y)
 {
 	int minx, maxx;
 	int srcx, srcy, dstx, dsty;
@@ -1341,12 +1343,12 @@ rectselect(Widget wid, int x, int y)
 	if (srcy < MARGIN)               srcy = MARGIN;
 	if (dsty >= wid->h)              dsty = wid->h - 1;
 	if (srcy >= wid->h)              srcy = wid->h - 1;
-	if ((i = getitem(wid, wid->rectrow, wid->rectydiff, &srcx, &srcy)) < 0)
+	if ((i = getitem(wid, srcrow, srcydiff, &srcx, &srcy)) < 0)
 		return;
 	if ((j = getitem(wid, wid->row, wid->ydiff, &dstx, &dsty)) < 0)
 		return;
-	indexmin = min(i, j);
-	indexmax = max(i, j);
+	indexmin = min(min(i, j), wid->nitems - 1);
+	indexmax = min(max(i, j), wid->nitems - 1);
 	colmin = indexmin % wid->ncols;
 	colmax = indexmax % wid->ncols;
 	indexmin = min(indexmin, wid->nitems - 1);
@@ -1362,44 +1364,109 @@ rectselect(Widget wid, int x, int y)
 	}
 }
 
+static int
+processevent(Widget wid, XEvent *ev, int *close)
+{
+	/*
+	 * Return TRUE if an event was processed.
+	 * Set *close to TRUE if we were asked to close the window.
+	 */
+	*close = FALSE;
+	switch (ev->type) {
+	case ClientMessage:
+		if ((Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
+			*close = TRUE;
+		return TRUE;
+	case Expose:
+		if (ev->xexpose.count == 0)
+			commitdraw(wid);
+		return TRUE;
+	case ConfigureNotify:
+		if (calcsize(wid, ev->xconfigure.width, ev->xconfigure.height)) {
+			if (wid->row >= wid->maxrow)
+				setrow(wid, wid->maxrow - 1);
+			drawitems(wid);
+			commitdraw(wid);
+		}
+		return TRUE;
+	case SelectionRequest:
+		if (ev->xselectionrequest.selection == XA_PRIMARY)
+			sendselection(wid, &ev->xselectionrequest);
+		return TRUE;
+	case SelectionClear:
+		unselectitems(wid);
+		drawitems(wid);
+		commitdraw(wid);
+		return TRUE;
+	default:
+		return FALSE;
+	}
+	return FALSE;
+}
+
+static int
+rectmotion(Widget wid, Time lasttime)
+{
+	XEvent ev;
+	int rectrow, rectydiff;
+	int close;
+
+	rectrow = wid->row;
+	rectydiff = wid->ydiff;
+	while (!XNextEvent(wid->dpy, &ev)) {
+		if (processevent(wid, &ev, &close)) {
+			if (close)
+				return WIDGET_CLOSE;
+			continue;
+		}
+		switch (ev.type) {
+		case ButtonPress:
+		case ButtonRelease:
+			wid->rectinit = FALSE;
+			rectdraw(wid, rectrow, rectydiff, ev.xbutton.x, ev.xbutton.y);
+			commitdraw(wid);
+			return WIDGET_CONTINUE;
+		case MotionNotify:
+			if (ev.xmotion.time - lasttime < RECTTIME)
+				break;
+			unselectitems(wid);
+			if (ev.xmotion.y > wid->h)
+				(void)scroll(wid, (ev.xmotion.y - wid->h) / SCROLL_STEP);
+			else if (ev.xmotion.y < 0)
+				(void)scroll(wid, ev.xmotion.y / SCROLL_STEP);
+			rectdraw(wid, rectrow, rectydiff, ev.xmotion.x, ev.xmotion.y);
+			rectselect(wid, rectrow, rectydiff, ev.xmotion.x, ev.xmotion.y);
+			drawitems(wid);
+			commitdraw(wid);
+			lasttime = ev.xmotion.time;
+			break;
+		}
+	}
+	return WIDGET_CONTINUE;
+}
+
 WidgetEvent
 pollwidget(Widget wid, int *index)
 {
 	XEvent ev;
+	Time lasttime = 0;
+	int close = FALSE;
+	int lastitem = -1;
 
 	if (!wid->start)
 		XSync(wid->dpy, True);
 	wid->start = 1;
+	wid->lastitemp = &lastitem;
 	while (!XNextEvent(wid->dpy, &ev)) {
-		switch (ev.type) {
-		case ClientMessage:
-			if ((Atom)ev.xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
+		if (processevent(wid, &ev, &close)) {
+			if (close)
 				return WIDGET_CLOSE;
-			break;
-		case Expose:
-			if (ev.xexpose.count == 0)
-				commitdraw(wid);
-			break;
-		case ConfigureNotify:
-			if (calcsize(wid, ev.xconfigure.width, ev.xconfigure.height)) {
-				if (wid->row >= wid->maxrow)
-					setrow(wid, wid->maxrow - 1);
-				drawitems(wid);
-				commitdraw(wid);
-			}
-			break;
-		case SelectionRequest:
-			if (ev.xselectionrequest.selection == XA_PRIMARY)
-				sendselection(wid, &ev.xselectionrequest);
-			break;
-		case SelectionClear:
-			unselectitems(wid);
-			drawitems(wid);
-			commitdraw(wid);
-			break;
+			continue;
+		}
+		switch (ev.type) {
 		case ButtonPress:
 			if (ev.xbutton.button == Button1) {
-				*index = mouseclick(wid, &ev.xbutton);
+				*index = mouseclick(wid, &ev.xbutton, &lasttime, &lastitem);
 				ownselection(wid, ev.xbutton.time);
 				drawitems(wid);
 				commitdraw(wid);
@@ -1412,32 +1479,16 @@ pollwidget(Widget wid, int *index)
 				commitdraw(wid);
 			}
 			break;
-		case ButtonRelease:
-			wid->rectinit = FALSE;
-			rectdraw(wid, ev.xbutton.x, ev.xbutton.y);
-			commitdraw(wid);
-			break;
 		case MotionNotify:
-			if (wid->lastitem != -1)
+			if (lastitem != -1)
 				break;
 			if (ev.xmotion.state != Button1Mask)
 				break;
 			if (!wid->rectinit) {
-				wid->recttime = ev.xmotion.time;
 				wid->rectinit = TRUE;
-				wid->rectydiff = wid->ydiff;
-				wid->rectrow = wid->row;
-			} else if (ev.xmotion.time - wid->recttime > RECTTIME) {
-				unselectitems(wid);
-				if (ev.xmotion.y > wid->h)
-					(void)scroll(wid, (ev.xmotion.y - wid->h) / SCROLL_STEP);
-				else if (ev.xmotion.y < 0)
-					(void)scroll(wid, ev.xmotion.y / SCROLL_STEP);
-				rectdraw(wid, ev.xmotion.x, ev.xmotion.y);
-				rectselect(wid, ev.xmotion.x, ev.xmotion.y);
-				drawitems(wid);
-				commitdraw(wid);
-				wid->recttime = ev.xmotion.time;
+				if (rectmotion(wid, ev.xmotion.time) == WIDGET_CLOSE) {
+					return WIDGET_CLOSE;
+				}
 			}
 			break;
 		}
