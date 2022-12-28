@@ -1318,12 +1318,34 @@ rectdraw(Widget wid, int row, int ydiff, int x, int y)
 static void
 rectselect(Widget wid, int srcrow, int srcydiff, int x, int y)
 {
-	int minx, maxx;
-	int srcx, srcy, dstx, dsty;
-	int indexmin, indexmax;
-	int col, colmin, colmax;
-	int tmp, i, j;
+	int row, col, tmp, i, j;
 
+	/* x,y positions of the vertices of the rectangular selection */
+	int minx, maxx, miny;
+
+	/*
+	 * Those variables begin describing the x,y positions of the
+	 * source and destination vertices of the rectangular selection.
+	 * But after calling getitem(), they are converted to the
+	 * positions of the vertices of the inner item area of the
+	 * item below each vertex.
+	 */
+	int srcx, srcy, dstx, dsty;
+
+	/*
+	 * Indices of items at the top left of the rectangular selection
+	 * and at bottom right of the rectangular selection.
+	 */
+	int indexmin, indexmax;
+
+	/*
+	 * First and last columns and rows of the items at the
+	 * rectangular selection.
+	 */
+	int colmin, colmax;
+	int rowmin;
+
+	miny = min(wid->clicky, y);
 	minx = min(wid->clickx, x);
 	maxx = max(wid->clickx, x);
 	srcx = wid->clickx;
@@ -1353,14 +1375,22 @@ rectselect(Widget wid, int srcrow, int srcydiff, int x, int y)
 	colmax = indexmax % wid->ncols;
 	indexmin = min(indexmin, wid->nitems - 1);
 	indexmax = min(indexmax, wid->nitems - 1);
+	rowmin = indexmin / wid->ncols;
 	for (i = indexmin; i <= indexmax; i++) {
+		row = i / wid->ncols;
 		col = i % wid->ncols;
 		x = wid->x0 + col * wid->itemw + (wid->itemw - THUMBSIZE) / 2;
-		if ((col == colmin && minx < x + THUMBSIZE && maxx > x) ||
-		    (col == colmax && maxx > x && minx < x + THUMBSIZE) ||
-		    (col > colmin && i % wid->ncols < colmax)) {
-			selectitem(wid, i, TRUE);
+		y = (row - wid->row + 1) * wid->itemh - 1.5 * wid->fonth + MARGIN - wid->ydiff;
+		if ((col == colmin && (minx > x + THUMBSIZE || maxx < x)) ||
+		    (col == colmax && (maxx < x || minx > x + THUMBSIZE)) ||
+		    (col == colmax && (maxx < x || minx > x + THUMBSIZE)) ||
+		    col < colmin || col > colmax){
+			continue;
 		}
+		if (row == rowmin && row >= wid->row && miny > y) {
+			continue;
+		}
+		selectitem(wid, i, TRUE);
 	}
 }
 
