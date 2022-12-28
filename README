@@ -94,6 +94,19 @@ means, however, that there is no compression involved.  But thumbnails
 are at most 64x64 pixels in size, so there's no need for compression as
 the files are small.
 
+.What is this thing that opens on middle click?
+That's the scroller, it replaces the scrollbar.  It can be used either
+as a scrollbar, by dragging the handle with the left mouse button; or as
+Firefox's autoScroll feature, by moving the cursor up and down while
+holding no button at all.
+
+.What selection does?
+Nothing.  Yet.  It actually copies the paths of selected files into the
+PRIMARY selection.  You can then paste them into your text editor by
+middle clicking on the editor, or can be stored to the clipboard with
+xsel(1).  The idea is for me to develop other applications that will use
+the primary selection for file operations.
+
 .What features need to be implemented?
 • Implement copy and move operations.
 • Implement CLI commands.
