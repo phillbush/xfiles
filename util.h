@@ -21,6 +21,7 @@ pid_t efork(void);
 int between(int x, int a, int b);
 int max(int x, int y);
 int min(int x, int y);
+int diff(int x, int y);
 int escandir(const char *dirname, struct dirent ***namelist, int (*select)(const struct dirent *), int (*compar)(const struct dirent **, const struct dirent **));
 void *emalloc(size_t size);
 void *ecalloc(size_t nmemb, size_t size);

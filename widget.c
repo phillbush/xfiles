@@ -12,6 +12,7 @@
 #include <X11/cursorfont.h>
 #include <X11/xpm.h>
 #include <X11/Xft/Xft.h>
+#include <X11/extensions/sync.h>
 
 #include "util.h"
 #include "widget.h"
@@ -19,13 +20,14 @@
 
 /* ellipsis has two dots rather than three; the third comes from the extension */
 #define ELLIPSIS        ".."
-#define DEF_FONT        "monospace:size=9,DejaVuSansMono:size=9"
+#define DEF_FONT        "monospace:size=9"
 #define DEF_BG          "#0A0A0A"
 #define DEF_FG          "#FFFFFF"
 #define DEF_SELBG       "#121212"
 #define DEF_SELFG       "#707880"
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
+#define ALARMFLAGS      (XSyncCACounter | XSyncCAValue | XSyncCAValueType | XSyncCATestType | XSyncCADelta)
 
 #define VISUAL(d)       (DefaultVisual((d), DefaultScreen((d))))
 #define COLORMAP(d)     (DefaultColormap((d), DefaultScreen((d))))
@@ -64,7 +66,10 @@ enum {
 	/* update time rate for rectangular selection */
 	RECTTIME        = 32,
 
-	SCROLL_STEP     = 5,    /* pixels per scroll */
+	SCROLL_STEP     = 5,            /* pixels per scroll */
+	SCROLLER_SIZE   = 32,           /* size of the scroller */
+	HANDLE_MAX_SIZE = (SCROLLER_SIZE - 2),
+	SCROLLER_MIN    = 16,           /* min lines to scroll for the scroller to change */
 };
 
 enum {
@@ -121,7 +126,7 @@ struct Widget {
 	Pixmap pix;
 	Pixmap namepix;
 	Pixmap stipple;
-	Pixmap rectfill, rectbord;
+	Pixmap rectbord;        /* rectangular selection border */
 	int ellipsisw;
 	int fonth;
 	int hasthumb;
@@ -138,7 +143,6 @@ struct Widget {
 	struct Selection *sel;  /* list of selections */
 	struct Selection **issel;/* array of pointers to Selections */
 	Time seltime;
-	int rectinit;
 
 	int w, h;               /* window width and height */
 	int pixw, pixh;
@@ -160,6 +164,17 @@ struct Widget {
 	const char *class;
 
 	int *lastitemp;
+
+	XSyncAlarmAttributes syncattr;
+	int syncevent;
+	Window scroller;
+	int handlew;            /* size of scroller handle */
+
+	enum {
+		STATE_NORMAL,
+		STATE_SELECTING,
+		STATE_SCROLLING,
+	} state;
 };
 
 static char *atomnames[ATOM_LAST] = {
@@ -333,16 +348,16 @@ inittheme(Widget wid, const char *class, const char *name)
 		getresource(xdb, class, name, "faceName", &font);
 	}
 	if (ealloccolor(wid->dpy, bg, &wid->normal[COLOR_BG]) == -1)
-		goto error;
+		goto error_0;
 	if (ealloccolor(wid->dpy, fg, &wid->normal[COLOR_FG]) == -1)
-		goto error;
+		goto error_1;
 	if (ealloccolor(wid->dpy, selbg, &wid->select[COLOR_BG]) == -1)
-		goto error;
+		goto error_2;
 	if (ealloccolor(wid->dpy, selfg, &wid->select[COLOR_FG]) == -1)
-		goto error;
+		goto error_3;
 	if ((wid->font = XftFontOpenXlfd(wid->dpy, DefaultScreen(wid->dpy), font)) == NULL)
 		if ((wid->font = XftFontOpenName(wid->dpy, DefaultScreen(wid->dpy), font)) == NULL)
-			goto error;
+			goto error_4;
 	wid->fonth = wid->font->height;
 	wid->itemw = THUMBSIZE * 2;
 	wid->itemh = THUMBSIZE + 3 * wid->fonth;
@@ -350,14 +365,18 @@ inittheme(Widget wid, const char *class, const char *name)
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
 	return RET_OK;
-error:
+	XftFontClose(wid->dpy, wid->font);
+error_4:
+	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_FG]);
+error_3:
+	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_BG]);
+error_2:
+	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_FG]);
+error_1:
+	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_BG]);
+error_0:
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_BG]);
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_FG]);
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_BG]);
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_FG]);
-	XftFontClose(wid->dpy, wid->font);
 	return RET_ERROR;
 }
 
@@ -365,6 +384,7 @@ static int
 calcsize(Widget wid, int w, int h)
 {
 	int ncols, nrows, ret;
+	double d;
 
 	ret = 0;
 	if (wid->w == w && wid->h == h)
@@ -382,17 +402,20 @@ calcsize(Widget wid, int w, int h)
 	wid->x0 = max((wid->w - wid->ncols * wid->itemw) / 2, 0);
 	wid->maxrow = wid->nitems / wid->ncols - wid->h / wid->itemh + (wid->nitems % wid->ncols != 0 ? 1 : 0);
 	wid->maxrow = max(wid->maxrow, 1);
+	d = (double)wid->maxrow / SCROLLER_MIN;
+	d = (d < 1.0 ? 1.0 : d);
+	wid->handlew = max(SCROLLER_SIZE / d - 2, 1);
+	wid->handlew = min(wid->handlew, HANDLE_MAX_SIZE);
+	if (wid->handlew == HANDLE_MAX_SIZE && wid->maxrow > 1)
+		wid->handlew = HANDLE_MAX_SIZE - 1;
 	if (ncols != wid->ncols || nrows != wid->nrows) {
 		if (wid->pix != None)
 			XFreePixmap(wid->dpy, wid->pix);
-		if (wid->rectfill != None)
-			XFreePixmap(wid->dpy, wid->rectfill);
 		if (wid->rectbord != None)
 			XFreePixmap(wid->dpy, wid->rectbord);
 		wid->pixw = wid->ncols * wid->itemw;
 		wid->pixh = wid->nrows * wid->itemh;
 		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, DEPTH(wid->dpy));
-		wid->rectfill = XCreatePixmap(wid->dpy, ROOT(wid->dpy), wid->w, wid->h, CLIP_DEPTH);
 		wid->rectbord = XCreatePixmap(wid->dpy, ROOT(wid->dpy), wid->w, wid->h, CLIP_DEPTH);
 		ret = 1;
 	}
@@ -656,7 +679,7 @@ commitdraw(Widget wid)
 		wid->pixw, wid->pixh,
 		wid->x0, 0
 	);
-	if (!wid->rectinit)
+	if (wid->state != STATE_SELECTING)
 		return;
 	XChangeGC(
 		wid->dpy,
@@ -725,12 +748,42 @@ settitle(Widget wid)
 }
 
 static int
+gethandlepos(Widget wid)
+{
+	int row;
+
+	if (wid->ydiff >= wid->itemh)
+		row = wid->maxrow;
+	else
+		row = wid->row;
+	return (HANDLE_MAX_SIZE - wid->handlew) * ((double)row / wid->maxrow);
+}
+
+static void
+drawscroller(Widget wid, int y)
+{
+	Pixmap pix;
+
+	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, DEPTH(wid->dpy))) == None)
+		return;
+	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
+	XFillRectangle(wid->dpy, pix, wid->gc, 0, 0, SCROLLER_SIZE, SCROLLER_SIZE);
+	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_FG].pixel);
+	XFillRectangle(wid->dpy, pix, wid->gc, 1, y + 1, HANDLE_MAX_SIZE, wid->handlew);
+	XSetWindowBackgroundPixmap(wid->dpy, wid->scroller, pix);
+	XClearWindow(wid->dpy, wid->scroller);
+	XFreePixmap(wid->dpy, pix);
+}
+
+static int
 scroll(struct Widget *wid, int y)
 {
+	int prevhand, newhand;          /* position of the scroller handle */
 	int prevrow, newrow;
 
 	if (wid->nitems / wid->ncols + (wid->nitems % wid->ncols != 0 ? 1 : 0) < wid->nrows)
 		return FALSE;
+	prevhand = gethandlepos(wid);
 	newrow = prevrow = wid->row;
 	wid->ydiff += y;
 	newrow += wid->ydiff / wid->itemh;
@@ -751,6 +804,10 @@ scroll(struct Widget *wid, int y)
 		}
 	}
 	setrow(wid, newrow);
+	newhand = gethandlepos(wid);
+	if (wid->state == STATE_SCROLLING && prevhand != newhand) {
+		drawscroller(wid, newhand);
+	}
 	if (prevrow != newrow) {
 		settitle(wid);
 		return TRUE;
@@ -858,13 +915,17 @@ cleanwidget(Widget wid)
 Widget
 initwidget(const char *appclass, const char *appname, const char *geom, const char *states[], size_t nstates, int argc, char *argv[], unsigned long *icon, size_t iconsize, int hasthumb)
 {
-	Widget wid;
+	XSyncSystemCounter *counters;
 	XpmAttributes xa;
+	Widget wid;
+	int ncounters, tmp, i;
 
 	wid = NULL;
 	if ((wid = malloc(sizeof(*wid))) == NULL)
 		goto error_pre;
 	*wid = (struct Widget){
+		.win = None,
+		.scroller = None,
 		.start = 0,
 		.hasthumb = hasthumb,
 		.states = states,
@@ -883,16 +944,24 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		.issel = NULL,
 		.seltime = 0,
 		.pix = None,
-		.rectinit = FALSE,
+		.state = STATE_NORMAL,
 		.rectbord = None,
-		.rectfill = None,
 		.stipple = None,
+		.syncattr = (XSyncAlarmAttributes){
+			.trigger.counter        = None,
+			.trigger.value_type     = XSyncRelative,
+			.trigger.test_type      = XSyncPositiveComparison,
+		},
 	};
 	if (!XInitThreads())
 		goto error_pre;
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		goto error_pre;
 	if ((wid->dpy = XOpenDisplay(NULL)) == NULL)
+		goto error_pre;
+	if (!XSyncQueryExtension(wid->dpy, &wid->syncevent, &tmp))
+		goto error_pre;
+	if (!XSyncInitialize(wid->dpy, &tmp, &tmp))
 		goto error_pre;
 	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
 	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1)
@@ -903,6 +972,19 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		goto error_dpy;
 	if (createwin(wid, appclass, appname, geom, argc, argv, icon, iconsize) == -1)
 		goto error_dpy;
+	wid->scroller = XCreateWindow(
+		wid->dpy, wid->win,
+		0, 0, SCROLLER_SIZE, SCROLLER_SIZE, 1,
+		CopyFromParent, CopyFromParent, CopyFromParent,
+		CWBackPixel | CWBorderPixel | CWEventMask,
+		&(XSetWindowAttributes){
+			.background_pixel = wid->normal[COLOR_BG].pixel,
+			.border_pixel = wid->normal[COLOR_FG].pixel,
+			.event_mask = ButtonPressMask | PointerMotionMask,
+		}
+	);
+	if (wid->scroller == None)
+		goto error_win;
 	memset(&xa, 0, sizeof(xa));
 	if (XpmCreatePixmapFromData(wid->dpy, ROOT(wid->dpy), fileicon_xpm, &wid->deficon.pix, &wid->deficon.mask, &xa) != XpmSuccess)
 		goto error_win;
@@ -919,6 +1001,19 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 	XSetStipple(wid->dpy, wid->gc, wid->stipple);
 	wid->cursors[CURSOR_NORMAL] = XCreateFontCursor(wid->dpy, XC_left_ptr);
 	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
+	if ((counters = XSyncListSystemCounters(wid->dpy, &ncounters)) != NULL) {
+		for (i = 0; i < ncounters; i++) {
+			if (strcmp(counters[i].name, "SERVERTIME") == 0) {
+				wid->syncattr.trigger.counter = counters[i].counter;
+				break;
+			}
+		}
+		XSyncFreeSystemCounterList(counters);
+	}
+	if (wid->syncattr.trigger.counter == None)
+		goto error_stip;
+	XSyncIntToValue(&wid->syncattr.trigger.wait_value, 128);
+	XSyncIntToValue(&wid->syncattr.delta, 0);
 	return wid;
 error_stip:
 	XFreePixmap(wid->dpy, wid->stipple);
@@ -926,13 +1021,15 @@ error_pix:
 	XFreePixmap(wid->dpy, wid->deficon.pix);
 	XFreePixmap(wid->dpy, wid->deficon.mask);
 error_win:
-	XDestroyWindow(wid->dpy, wid->win);
+	if (wid->scroller != None)
+		XDestroyWindow(wid->dpy, wid->scroller);
+	if (wid->win != None)
+		XDestroyWindow(wid->dpy, wid->win);
 error_dpy:
 	XCloseDisplay(wid->dpy);
 error_pre:
 	if (wid != NULL)
-		free(wid->states);
-	free(wid);
+		free(wid);
 	return NULL;
 }
 
@@ -942,6 +1039,7 @@ setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t 
 	size_t i;
 
 	cleanwidget(wid);
+	wid->start = 0;
 	wid->items = items;
 	wid->nitems = nitems;
 	wid->foundicons = foundicons;
@@ -1292,7 +1390,7 @@ rectdraw(Widget wid, int row, int ydiff, int x, int y)
 		0, 0,
 		wid->w, wid->h
 	);
-	if (!wid->rectinit)
+	if (wid->state != STATE_SELECTING)
 		return;
 	y0 = wid->clicky;
 	x0 = wid->clickx;
@@ -1441,6 +1539,7 @@ rectmotion(Widget wid, Time lasttime)
 	int rectrow, rectydiff;
 	int close;
 
+	wid->state = STATE_SELECTING;
 	rectrow = wid->row;
 	rectydiff = wid->ydiff;
 	while (!XNextEvent(wid->dpy, &ev)) {
@@ -1452,7 +1551,7 @@ rectmotion(Widget wid, Time lasttime)
 		switch (ev.type) {
 		case ButtonPress:
 		case ButtonRelease:
-			wid->rectinit = FALSE;
+			wid->state = STATE_NORMAL;
 			rectdraw(wid, rectrow, rectydiff, ev.xbutton.x, ev.xbutton.y);
 			commitdraw(wid);
 			return WIDGET_CONTINUE;
@@ -1472,6 +1571,125 @@ rectmotion(Widget wid, Time lasttime)
 			break;
 		}
 	}
+	return WIDGET_CONTINUE;
+}
+
+static int
+scrollerpos(Widget wid)
+{
+	Window root, child;
+	unsigned int mask;
+	int rootx, rooty;
+	int x, y;
+	Bool state;
+
+	state = XQueryPointer(
+		wid->dpy,
+		wid->scroller,
+		&root, &child,
+		&rootx, &rooty,
+		&x, &y,
+		&mask
+	);
+	if (state == True) {
+		if (y > SCROLLER_SIZE)
+			return y - SCROLLER_SIZE;
+		if (y < 0)
+			return y;
+		return 0;
+	}
+	return 0;
+}
+
+static void
+scrollerset(Widget wid, int pos)
+{
+	int prevrow, newrow, maxpos;
+
+	maxpos = HANDLE_MAX_SIZE - wid->handlew;
+	if (maxpos <= 0) {
+		/* all files are visible, there's nothing to scroll */
+		return;
+	}
+	pos -= wid->handlew / 2;
+	pos = max(pos, 0);
+	pos = min(pos, maxpos);
+	newrow = pos * wid->maxrow / maxpos;
+	newrow = max(newrow, 0);
+	newrow = min(newrow, wid->maxrow);
+	if (newrow == wid->maxrow) {
+		wid->ydiff = wid->itemh;
+		newrow = wid->maxrow - 1;
+	} else {
+		wid->ydiff = 0;
+	}
+	prevrow = wid->row;
+	setrow(wid, newrow);
+	drawscroller(wid, pos);
+	if (prevrow != newrow)
+		settitle(wid);
+	drawitems(wid);
+	commitdraw(wid);
+}
+
+static int
+scrollmotion(Widget wid, int x, int y)
+{
+	XSyncAlarm alarm;
+	XEvent ev;
+	int pos, close, left;
+
+	wid->state = STATE_SCROLLING;
+	drawscroller(wid, gethandlepos(wid));
+	XMoveWindow(wid->dpy, wid->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
+	XMapRaised(wid->dpy, wid->scroller);
+	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
+	left = FALSE;
+	while (!XNextEvent(wid->dpy, &ev)) {
+		if (processevent(wid, &ev, &close)) {
+			if (close)
+				return WIDGET_CLOSE;
+			continue;
+		}
+		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
+			if ((pos = scrollerpos(wid)) != 0) {
+				if (scroll(wid, pos))
+					drawitems(wid);
+				commitdraw(wid);
+			}
+			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
+			continue;
+		}
+		switch (ev.type) {
+		case MotionNotify:
+			if (ev.xmotion.window == wid->scroller && (ev.xmotion.state & Button1Mask)) {
+				scrollerset(wid, ev.xmotion.y);
+				left = TRUE;
+			} else if (ev.xmotion.window == wid->win &&
+			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
+				left = TRUE;
+			}
+			break;
+		case ButtonRelease:
+			if (left)
+				goto done;
+			break;
+		case ButtonPress:
+			if (ev.xbutton.window == wid->win) {
+				goto done;
+			} else if (ev.xbutton.window == wid->scroller) {
+				scrollerset(wid, ev.xmotion.y);
+				left = TRUE;
+			}
+			break;
+		}
+	}
+done:
+	wid->state = STATE_NORMAL;
+	drawitems(wid);
+	commitdraw(wid);
+	XSyncDestroyAlarm(wid->dpy, alarm);
+	XUnmapWindow(wid->dpy, wid->scroller);
 	return WIDGET_CONTINUE;
 }
 
@@ -1507,6 +1725,10 @@ pollwidget(Widget wid, int *index)
 				if (scroll(wid, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
 					drawitems(wid);
 				commitdraw(wid);
+			} else if (ev.xbutton.button == Button2) {
+				if (scrollmotion(wid, ev.xmotion.x, ev.xmotion.y) == WIDGET_CLOSE)
+					return WIDGET_CLOSE;
+				lastitem = -1;
 			}
 			break;
 		case MotionNotify:
@@ -1514,12 +1736,9 @@ pollwidget(Widget wid, int *index)
 				break;
 			if (ev.xmotion.state != Button1Mask)
 				break;
-			if (!wid->rectinit) {
-				wid->rectinit = TRUE;
-				if (rectmotion(wid, ev.xmotion.time) == WIDGET_CLOSE) {
-					return WIDGET_CLOSE;
-				}
-			}
+			if (rectmotion(wid, ev.xmotion.time) == WIDGET_CLOSE)
+				return WIDGET_CLOSE;
+			lastitem = -1;
 			break;
 		}
 	}
@@ -1550,9 +1769,11 @@ closewidget(Widget wid)
 	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_BG]);
 	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_FG]);
 	XftFontClose(wid->dpy, wid->font);
+	XDestroyWindow(wid->dpy, wid->scroller);
 	XDestroyWindow(wid->dpy, wid->win);
 	XFreeGC(wid->dpy, wid->gc);
 	XCloseDisplay(wid->dpy);
+	free(wid);
 }
 
 void

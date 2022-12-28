@@ -23,6 +23,12 @@ min(int x, int y)
 	return x < y ? x : y;
 }
 
+int
+diff(int x, int y)
+{
+	return x > y ? x - y : y - x;
+}
+
 void *
 emalloc(size_t size)
 {
