@@ -778,6 +778,7 @@ drawitem(Widget wid, int index)
 {
 	int i, x, y, min, max;
 
+	etlock(&wid->rowlock);
 	min = firstvisible(wid);
 	max = lastvisible(wid);
 	if (index < min || index > max)
@@ -791,6 +792,7 @@ drawitem(Widget wid, int index)
 	XFillRectangle(wid->dpy, wid->pix, wid->gc, x, y, wid->itemw, wid->itemh);
 	drawicon(wid, index, x, y);
 	drawlabel(wid, index, x, y);
+	etunlock(&wid->rowlock);
 }
 
 static void
@@ -798,14 +800,12 @@ drawitems(Widget wid)
 {
 	int i, n;
 
-	etlock(&wid->rowlock);
 	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->pix, wid->gc, 0, 0, wid->w, wid->nrows * wid->itemh);
 	n = lastvisible(wid);
 	for (i = wid->row * wid->ncols; i < n; i++) {
 		drawitem(wid, i);
 	}
-	etunlock(&wid->rowlock);
 }
 
 static void
@@ -920,7 +920,7 @@ scroll(struct Widget *wid, int y)
 
 	if (y == 0)
 		return FALSE;
-	if (wid->nitems / wid->ncols + (wid->nitems % wid->ncols != 0 ? 1 : 0) < wid->nrows)
+	if (wid->nitems / wid->ncols + (wid->nitems % wid->ncols != 0 ? 2 : 1) < wid->nrows)
 		return FALSE;
 	prevhand = gethandlepos(wid);
 	newrow = prevrow = wid->row;
@@ -2076,13 +2076,11 @@ setthumbnail(Widget wid, char *path, int item)
 		goto error_thumb;
 	XInitImage(wid->thumbs[item]->img);
 	wid->thumbhead = wid->thumbs[item];
-	etlock(&wid->rowlock);
 	if (item >= wid->row * wid->ncols && item < wid->row * wid->ncols + wid->nrows * wid->ncols) {
 		drawitem(wid, item);
 		commitdraw(wid);
 		XFlush(wid->dpy);
 	}
-	etunlock(&wid->rowlock);
 	return;
 error_thumb:
 	free(wid->thumbs[item]);

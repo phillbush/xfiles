@@ -419,7 +419,6 @@ diropen(struct FM *fm, const char *path, int savecwd)
 
 	if (path != NULL && wchdir(path) == -1)
 		return;
-	closethumbthread(fm);
 	egetcwd(fm->path, sizeof(fm->path));
 	(void)savecwd;                  // XXX: delete-me
 	freeentries(fm);
@@ -473,7 +472,6 @@ diropen(struct FM *fm, const char *path, int savecwd)
 		snprintf(fm->here, PATH_MAX, "~%s", fm->path + fm->homelen);
 	else
 		snprintf(fm->here, PATH_MAX, "%s", fm->path);
-	createthumbthread(fm);
 }
 
 static char **
@@ -549,7 +547,6 @@ initthumbnailer(struct FM *fm)
 		fm->thumbnaildirlen = strlen(fm->thumbnaildir);
 	else
 		fm->thumbnaildirlen = 0;
-	createthumbthread(fm);
 }
 
 static void
@@ -632,6 +629,7 @@ main(int argc, char *argv[])
 	free(icons);
 	diropen(&fm, path, 1);
 	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
+	createthumbthread(&fm);
 	mapwidget(fm.wid);
 	while ((state = pollwidget(fm.wid, &index)) != WIDGET_CLOSE) {
 		switch (state) {
@@ -640,8 +638,10 @@ main(int argc, char *argv[])
 				break;
 			if (fm.entries[index][STATE_MODE][0] == 'd') {
 				widgetcursor(fm.wid, CURSOR_WATCH);
+				closethumbthread(&fm);
 				diropen(&fm, fm.entries[index][STATE_PATH], 1);
 				setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
+				createthumbthread(&fm);
 				widgetcursor(fm.wid, CURSOR_NORMAL);
 			} else if (fm.entries[index][STATE_MODE][0] == '-') {
 				fileopen(&fm, fm.entries[index][STATE_PATH]);
@@ -649,6 +649,7 @@ main(int argc, char *argv[])
 			break;
 		}
 	}
+	closethumbthread(&fm);
 	freeentries(&fm);
 	free(fm.entries);
 	free(fm.foundicons);
