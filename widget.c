@@ -918,6 +918,8 @@ scroll(struct Widget *wid, int y)
 	int prevhand, newhand;          /* position of the scroller handle */
 	int prevrow, newrow;
 
+	if (y == 0)
+		return FALSE;
 	if (wid->nitems / wid->ncols + (wid->nitems % wid->ncols != 0 ? 1 : 0) < wid->nrows)
 		return FALSE;
 	prevhand = gethandlepos(wid);
@@ -1691,29 +1693,64 @@ processevent(Widget wid, XEvent *ev, int *close)
 }
 
 static int
+querypointer(Widget wid, Window win, int *x, int *y)
+{
+	Window root, child;
+	unsigned int mask;
+	int rootx, rooty;
+
+	return XQueryPointer(
+		wid->dpy,
+		win,
+		&root, &child,
+		&rootx, &rooty,
+		x, y,
+		&mask
+	) == True;
+}
+
+static int
 rectmotion(Widget wid, Time lasttime, int clickx, int clicky)
 {
 	XEvent ev;
+	XSyncAlarm alarm;
 	int rectrow, rectydiff;
-	int redrawall, unsel, close;
+	int unsel, close;
+	int x, y;
 
 	wid->state = STATE_SELECTING;
 	rectrow = wid->row;
 	rectydiff = wid->ydiff;
+	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
 	unsel = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		if (processevent(wid, &ev, &close)) {
-			if (close)
+			if (close) {
+				XSyncDestroyAlarm(wid->dpy, alarm);
 				return WIDGET_CLOSE;
+			}
+			continue;
+		}
+		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
+			if (querypointer(wid, wid->win, &x, &y)) {
+				if (y > wid->h)
+					y -= wid->h;
+				else if (y > 0)
+					y = 0;
+				if (scroll(wid, y)) {
+					drawitems(wid);
+				}
+				if (y != 0) {
+					commitdraw(wid);
+				}
+			}
+			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
 			continue;
 		}
 		switch (ev.type) {
 		case ButtonPress:
 		case ButtonRelease:
-			wid->state = STATE_NORMAL;
-			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xbutton.x, ev.xbutton.y);
-			commitdraw(wid);
-			return WIDGET_CONTINUE;
+			goto done;
 		case MotionNotify:
 			if (ev.xmotion.time - lasttime < RECTTIME)
 				break;
@@ -1721,41 +1758,27 @@ rectmotion(Widget wid, Time lasttime, int clickx, int clicky)
 				unselectitems(wid);
 				unsel = TRUE;
 			}
-			redrawall = FALSE;
-			if (ev.xmotion.y > wid->h)
-				redrawall = scroll(wid, +SCROLL_STEP);
-			else if (ev.xmotion.y < 0)
-				redrawall = scroll(wid, -SCROLL_STEP);
 			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
-			rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y, !redrawall);
-			if (redrawall)
-				drawitems(wid);
+			rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y, TRUE);
 			commitdraw(wid);
 			lasttime = ev.xmotion.time;
 			break;
 		}
 	}
+done:
+	wid->state = STATE_NORMAL;
+	rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xbutton.x, ev.xbutton.y);
+	commitdraw(wid);
+	XSyncDestroyAlarm(wid->dpy, alarm);
 	return WIDGET_CONTINUE;
 }
 
 static int
 scrollerpos(Widget wid)
 {
-	Window root, child;
-	unsigned int mask;
-	int rootx, rooty;
 	int x, y;
-	Bool state;
 
-	state = XQueryPointer(
-		wid->dpy,
-		wid->scroller,
-		&root, &child,
-		&rootx, &rooty,
-		&x, &y,
-		&mask
-	);
-	if (state == True) {
+	if (querypointer(wid, wid->scroller, &x, &y) == True) {
 		if (y > SCROLLER_SIZE)
 			return y - SCROLLER_SIZE;
 		if (y < 0)
@@ -1811,8 +1834,10 @@ scrollmotion(Widget wid, int x, int y)
 	left = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		if (processevent(wid, &ev, &close)) {
-			if (close)
+			if (close) {
+				XSyncDestroyAlarm(wid->dpy, alarm);
 				return WIDGET_CLOSE;
+			}
 			continue;
 		}
 		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
