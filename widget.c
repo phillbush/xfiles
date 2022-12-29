@@ -759,12 +759,30 @@ drawlabel(Widget wid, int index, int x, int y)
 	}
 }
 
+static int
+firstvisible(Widget wid)
+{
+	/* gets index of last visible item */
+	return wid->row * wid->ncols;
+}
+
+static int
+lastvisible(Widget wid)
+{
+	/* gets index of last visible item */
+	return min(wid->nitems, firstvisible(wid) + wid->nrows * wid->ncols);
+}
+
 static void
 drawitem(Widget wid, int index)
 {
-	int i, x, y;
+	int i, x, y, min, max;
 
-	i = index - wid->row * wid->ncols;
+	min = firstvisible(wid);
+	max = lastvisible(wid);
+	if (index < min || index > max)
+		return;
+	i = index - min;
 	x = i % wid->ncols;
 	y = (i / wid->ncols) % wid->nrows;
 	x *= wid->itemw;
@@ -783,7 +801,7 @@ drawitems(Widget wid)
 	etlock(&wid->rowlock);
 	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->pix, wid->gc, 0, 0, wid->w, wid->nrows * wid->itemh);
-	n = min(wid->nitems, wid->row * wid->ncols + wid->nrows * wid->ncols);
+	n = lastvisible(wid);
 	for (i = wid->row * wid->ncols; i < n; i++) {
 		drawitem(wid, i);
 	}
@@ -1189,7 +1207,7 @@ mapwidget(Widget wid)
 }
 
 static void
-selectitem(struct Widget *wid, int index, int select)
+selectitem(struct Widget *wid, int index, int select, int redraw)
 {
 	struct Selection *sel;
 
@@ -1217,6 +1235,11 @@ selectitem(struct Widget *wid, int index, int select)
 			wid->sel = sel->next;
 		free(sel);
 		wid->issel[index] = NULL;
+	} else {
+		return;
+	}
+	if (redraw) {
+		drawitem(wid, index);
 	}
 }
 
@@ -1235,7 +1258,7 @@ selectitems(struct Widget *wid, int a, int b, int select)
 		max = a;
 	}
 	for (i = min; i <= max; i++) {
-		selectitem(wid, i, select);
+		selectitem(wid, i, select, FALSE);
 	}
 }
 
@@ -1243,7 +1266,7 @@ static void
 unselectitems(struct Widget *wid)
 {
 	while (wid->sel) {
-		selectitem(wid, wid->sel->index, FALSE);
+		selectitem(wid, wid->sel->index, FALSE, TRUE);
 	}
 }
 
@@ -1483,7 +1506,7 @@ mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 		goto done;
 	if (ev->state & ShiftMask)
 		selectitems(wid, index, wid->lastitem, 1);
-	selectitem(wid, index, ((ev->state & ControlMask) ? wid->issel[index] == NULL : 1));
+	selectitem(wid, index, ((ev->state & ControlMask) ? wid->issel[index] == NULL : 1), TRUE);
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
 	    index == (wid->lastitem) && ev->time - (*lasttime) <= DOUBLECLICK) {
 		ret = index;
@@ -1492,6 +1515,8 @@ done:
 	*lasttime = ev->time;
 	wid->lastitem = index;
 	settitle(wid);
+	if (index >= 0)
+		commitdraw(wid);
 	return ret;
 }
 
@@ -1530,9 +1555,9 @@ rectdraw(Widget wid, int row, int ydiff, int x0, int y0, int x, int y)
 }
 
 static void
-rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, int y)
+rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, int y, int redraw)
 {
-	int row, col, tmp, i, j;
+	int row, col, tmp, i, sel;
 
 	/* x,y positions of the vertices of the rectangular selection */
 	int minx, maxx, miny;
@@ -1547,10 +1572,15 @@ rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, 
 	int srcx, srcy, dstx, dsty;
 
 	/*
+	 * Indices of visible items.
+	 */
+	int vismin, vismax;
+
+	/*
 	 * Indices of items at the top left of the rectangular selection
 	 * and at bottom right of the rectangular selection.
 	 */
-	int indexmin, indexmax;
+	int indexmin, indexmax, srci, dsti;
 
 	/*
 	 * First and last columns and rows of the items at the
@@ -1558,6 +1588,7 @@ rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, 
 	 */
 	int colmin, colmax;
 	int rowmin;
+	int rowsrc;
 
 	miny = min(clicky, y);
 	minx = min(clickx, x);
@@ -1579,32 +1610,38 @@ rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, 
 	if (srcy < MARGIN)               srcy = MARGIN;
 	if (dsty >= wid->h)              dsty = wid->h - 1;
 	if (srcy >= wid->h)              srcy = wid->h - 1;
-	if ((i = getitem(wid, srcrow, srcydiff, &srcx, &srcy)) < 0)
+	if ((srci = getitem(wid, srcrow, srcydiff, &srcx, &srcy)) < 0)
 		return;
-	if ((j = getitem(wid, wid->row, wid->ydiff, &dstx, &dsty)) < 0)
+	if ((dsti = getitem(wid, wid->row, wid->ydiff, &dstx, &dsty)) < 0)
 		return;
-	indexmin = min(i, j);
-	indexmax = max(i, j);
+	vismin = firstvisible(wid);
+	vismax = lastvisible(wid);
+	indexmin = min(srci, dsti);
+	indexmax = max(srci, dsti);
 	colmin = indexmin % wid->ncols;
 	colmax = indexmax % wid->ncols;
 	indexmin = min(indexmin, wid->nitems - 1);
 	indexmax = min(indexmax, wid->nitems - 1);
+	rowsrc = srci / wid->ncols;
 	rowmin = indexmin / wid->ncols;
-	for (i = indexmin; i <= indexmax; i++) {
+	for (i = vismin; i <= vismax; i++) {
+		sel = TRUE;
 		row = i / wid->ncols;
 		col = i % wid->ncols;
 		x = wid->x0 + col * wid->itemw + (wid->itemw - THUMBSIZE) / 2;
 		y = (row - wid->row + 1) * wid->itemh - 1.5 * wid->fonth + MARGIN - wid->ydiff;
-		if ((col == colmin && (minx > x + THUMBSIZE || maxx < x)) ||
+		if (i < indexmin || i > indexmax) {
+			sel = FALSE;
+		} else if ((col == colmin && (minx > x + THUMBSIZE || maxx < x)) ||
 		    (col == colmax && (maxx < x || minx > x + THUMBSIZE)) ||
 		    (col == colmax && (maxx < x || minx > x + THUMBSIZE)) ||
 		    col < colmin || col > colmax){
-			continue;
+			sel = FALSE;
+		} else if (row == rowmin && row != rowsrc &&
+		    row >= wid->row && miny > y) {
+			sel = FALSE;
 		}
-		if (row == rowmin && row >= wid->row && miny > y) {
-			continue;
-		}
-		selectitem(wid, i, TRUE);
+		selectitem(wid, i, sel, redraw);
 	}
 }
 
@@ -1653,11 +1690,12 @@ rectmotion(Widget wid, Time lasttime, int clickx, int clicky)
 {
 	XEvent ev;
 	int rectrow, rectydiff;
-	int close;
+	int redrawall, unsel, close;
 
 	wid->state = STATE_SELECTING;
 	rectrow = wid->row;
 	rectydiff = wid->ydiff;
+	unsel = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		if (processevent(wid, &ev, &close)) {
 			if (close)
@@ -1674,14 +1712,19 @@ rectmotion(Widget wid, Time lasttime, int clickx, int clicky)
 		case MotionNotify:
 			if (ev.xmotion.time - lasttime < RECTTIME)
 				break;
-			unselectitems(wid);
+			if (!unsel) {
+				unselectitems(wid);
+				unsel = TRUE;
+			}
+			redrawall = FALSE;
 			if (ev.xmotion.y > wid->h)
-				(void)scroll(wid, (ev.xmotion.y - wid->h) / SCROLL_STEP);
+				redrawall = scroll(wid, +SCROLL_STEP);
 			else if (ev.xmotion.y < 0)
-				(void)scroll(wid, ev.xmotion.y / SCROLL_STEP);
+				redrawall = scroll(wid, -SCROLL_STEP);
 			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
-			rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
-			drawitems(wid);
+			rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y, !redrawall);
+			if (redrawall)
+				drawitems(wid);
 			commitdraw(wid);
 			lasttime = ev.xmotion.time;
 			break;
@@ -1864,8 +1907,6 @@ pollwidget(Widget wid, int *index)
 			if (ev.xbutton.button == Button1) {
 				*index = mouseclick(wid, &ev.xbutton, &lasttime);
 				ownselection(wid, ev.xbutton.time);
-				drawitems(wid);
-				commitdraw(wid);
 				clickx = ev.xbutton.x;
 				clicky = ev.xbutton.y;
 				if (*index != -1) {
