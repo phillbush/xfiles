@@ -13,7 +13,6 @@
 
 #include "util.h"
 #include "widget.h"
-#include "winicon.data"
 
 #define HOME            "HOME"
 #define FILE_ICONS      "FILE_ICONS"
@@ -31,12 +30,12 @@
 #define TIME_BUFSIZE    128
 
 enum {
-	STATE_NAME,
-	STATE_PATH,
-	STATE_SIZE,
-	STATE_TIME,
-	STATE_MODE,
-	STATE_OWNER,
+	STATE_NAME,     /* entry used by widget.c */
+	STATE_PATH,     /* entry used by widget.c */
+	STATE_SIZE,     /* entry used by widget.c */
+	STATE_MODE,     /* entry used here just for matching icon spec */
+	STATE_TIME,     /* not used rn, I'll either remove it or find some use */
+	STATE_OWNER,    /* not used rn, I'll either remove it or find some use */
 	STATE_LAST,
 };
 
@@ -73,13 +72,6 @@ struct FM {
 };
 
 static int hide = 1;
-static const char *states[STATE_LAST] = {
-	"name",
-	"size",
-	"time",
-	"mode",
-	"owner",
-};
 static struct {
 	char u;
 	long long int n;
@@ -549,7 +541,7 @@ parseicons(struct FM *fm, const char *s, size_t *nicons)
 	return tab;
 }
 
-static int
+static void
 initthumbnailer(struct FM *fm)
 {
 	fm->thumbnailer = getenv(THUMBNAILER);
@@ -558,7 +550,6 @@ initthumbnailer(struct FM *fm)
 	else
 		fm->thumbnaildirlen = 0;
 	createthumbthread(fm);
-	return fm->thumbnailer != NULL && fm->thumbnaildir != NULL;
 }
 
 static void
@@ -587,7 +578,7 @@ main(int argc, char *argv[])
 {
 	struct FM fm;
 	size_t nicons;
-	int hasthumb, ch, index, state;
+	int ch, index, state;
 	char *geom, *name, *path, *home, *iconpatts;
 	char **icons;
 
@@ -634,8 +625,8 @@ main(int argc, char *argv[])
 	else if (argc == 1)
 		path = *argv;
 	icons = parseicons(&fm, iconpatts, &nicons);
-	hasthumb = initthumbnailer(&fm);
-	if ((fm.wid = initwidget(APPCLASS, name, geom, states, STATE_LAST, argc, argv, winicon_data, winicon_size, hasthumb)) == NULL)
+	initthumbnailer(&fm);
+	if ((fm.wid = initwidget(APPCLASS, name, geom, argc, argv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
 	openicons(fm.wid, icons, nicons);
 	free(icons);

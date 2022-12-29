@@ -16,19 +16,24 @@
 
 #include "util.h"
 #include "widget.h"
-#include "fileicon.xpm"
+#include "fileicon.xpm"         /* default icon for unknown items */
+#include "winicon.data"         /* window icon, for the window manager */
 
-/* ellipsis has two dots rather than three; the third comes from the extension */
-#define ELLIPSIS        ".."
+/* default theme configuration */
 #define DEF_FONT        "monospace:size=9"
 #define DEF_BG          "#0A0A0A"
 #define DEF_FG          "#FFFFFF"
 #define DEF_SELBG       "#121212"
 #define DEF_SELFG       "#707880"
+
+/* ellipsis has two dots rather than three; the third comes from the extension */
+#define ELLIPSIS        ".."
+
+/* constants to check a .ppm file */
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
-#define ALARMFLAGS      (XSyncCACounter | XSyncCAValue | XSyncCAValueType | XSyncCATestType | XSyncCADelta)
 
+#define ALARMFLAGS      (XSyncCACounter | XSyncCAValue | XSyncCAValueType | XSyncCATestType | XSyncCADelta)
 #define VISUAL(d)       (DefaultVisual((d), DefaultScreen((d))))
 #define COLORMAP(d)     (DefaultColormap((d), DefaultScreen((d))))
 #define DEPTH(d)        (DefaultDepth((d), DefaultScreen((d))))
@@ -39,37 +44,49 @@
 #define ATOI(c)         (((c) >= '0' && (c) <= '9') ? (c) - '0' : -1)
 
 enum {
-	NTARGETS        = 7,
-	STIPPLE_SIZE    = 2,
-	CLIP_DEPTH      = 1,
-	TITLE_SIZE      = 1028,
-	STATUS_SIZE     = 64,
-	THUMBSIZE       = 64,
-	MIN_WIDTH       = (THUMBSIZE * 2),
-	MIN_HEIGHT      = (THUMBSIZE * 3),
-	DEF_WIDTH       = 600,
-	DEF_HEIGHT      = 460,
-	PPM_DEPTH       = 3,
-	DATA_DEPTH      = 4,
-	DATA_SIZE       = (THUMBSIZE * THUMBSIZE * DATA_DEPTH),
+	/* one byte was 8 bits in size last time I checked */
+	BYTE            = 8,
+
+	/* color depths */
+	CLIP_DEPTH      = 1,                    /* 0/1 */
+	PPM_DEPTH       = 3,                    /* RGB */
+	DATA_DEPTH      = 4,                    /* BGRA */
+
+	/* sizes of string buffers */
+	TITLE_BUFSIZE   = 1028,                 /* title buffer size */
+	STATUS_BUFSIZE  = 64,                   /* status buffer size */
+	RES_BUFSIZE     = 512,                  /* resource buffer size */
+
+	/* hardcoded object sizes in pixels */
+	THUMBSIZE       = 64,                   /* maximum thumbnail size */
+	MIN_WIDTH       = (THUMBSIZE * 2),      /* minimum window width */
+	MIN_HEIGHT      = (THUMBSIZE * 3),      /* minimum window height */
+	DEF_WIDTH       = 600,                  /* default window width */
+	DEF_HEIGHT      = 460,                  /* default window height */
+	STIPPLE_SIZE    = 2,                    /* size of stipple pattern */
+	MARGIN          = 16,                   /* top margin above first row */
+
+	/* constants for parsing .ppm files */
 	PPM_HEADER_SIZE = (sizeof(PPM_HEADER) - 1),
 	PPM_COLOR_SIZE  = (sizeof(PPM_COLOR) - 1),
 	PPM_BUFSIZE     = 8,
-	BUF_SIZE        = 512,
-	MARGIN          = 16,
+
+	/* we only save this much icons */
 	MAXICONS        = 256,
+
+	/* each NLINES line of label text is up to LABELWIDTH pixels long */
 	NLINES          = 2,
-	BYTE            = 8,
-	DOUBLECLICK     = 250,
-	NAMEWIDTH       = ((int)(THUMBSIZE * 1.75)),
+	LABELWIDTH      = ((int)(THUMBSIZE * 1.75)),
 
-	/* update time rate for rectangular selection */
-	RECTTIME        = 32,
+	/* times in milliseconds */
+	DOUBLECLICK     = 250,                  /* time of a doubleclick, in milliseconds */
+	RECTTIME        = 32,                   /* update time rate for rectangular selection */
 
-	SCROLL_STEP     = 5,            /* pixels per scroll */
-	SCROLLER_SIZE   = 32,           /* size of the scroller */
-	HANDLE_MAX_SIZE = (SCROLLER_SIZE - 2),
-	SCROLLER_MIN    = 16,           /* min lines to scroll for the scroller to change */
+	/* scrolling */
+	SCROLL_STEP     = 5,                    /* pixels per scroll */
+	SCROLLER_SIZE   = 32,                   /* size of the scroller */
+	SCROLLER_MIN    = 16,                   /* min lines to scroll for the scroller to change */
+	HANDLE_MAX_SIZE = (SCROLLER_SIZE - 2),  /* max size of the scroller handle */
 };
 
 enum {
@@ -113,63 +130,154 @@ struct Selection {
 };
 
 struct Widget {
-	int start;
-
+	/* X11 stuff */
 	Display *dpy;
 	Atom atoms[ATOM_LAST];
-	Cursor cursors[CURSOR_LAST];
 	GC stipgc, gc;
+	Cursor cursors[CURSOR_LAST];    /* for the hourglass cursor, when loading */
 	Window win;
 	XftColor normal[COLOR_LAST];
 	XftColor select[COLOR_LAST];
 	XftFont *font;
-	Pixmap pix;
-	Pixmap namepix;
-	Pixmap stipple;
-	Pixmap rectbord;        /* rectangular selection border */
-	int ellipsisw;
-	int fonth;
-	int hasthumb;
-	const char **states;
 
+	Pixmap pix;                     /* the pixmap of the window */
+	Pixmap namepix;                 /* temporary pixmap for the labels */
+	Pixmap stipple;                 /* stipple for painting icons of selected items */
+	Pixmap rectbord;                /* rectangular selection border */
+
+	/*
+	 * TODO
+	 */
 	pthread_mutex_t rowlock;
-	struct Thumb **thumbs;
-	struct Thumb *thumbhead;
-	int (*linelens)[2];       /* length of first and second text lines */
-	int nitems;
-	int nstates;
-	char ***items;
 
-	struct Selection *sel;  /* list of selections */
-	struct Selection **issel;/* array of pointers to Selections */
+	/*
+	 * .items is an array of arrays of strings.
+	 *
+	 * For each index i, .items[i] contains (at least) three elements:
+	 * - .items[i][ITEM_NAME]   -- The label displayed for the item.
+	 * - .items[i][ITEM_PATH]   -- The path given in PRIMARY selection.
+	 * - .items[i][ITEM_STATUS] -- The status string displayed on the
+	 *                             titlebar when the item is selected.
+	 *
+	 * .linelens is an array of pairs of integers.
+	 *
+	 * For each index i, .linelens[i] contains the width of each one
+	 * of the two label lines drawn on the window.
+	 */
+	char ***items;
+	int nitems;
+	int (*linelens)[2];             /* length of first and second text lines */
+
+	/*
+	 * Items can be selected with the mouse and the Control and Shift modifiers.
+	 *
+	 * We keep track of selections in a list of selections, which is
+	 * essentially a doubly-linked list of indices.  It's kept as a
+	 * doubly-linked list for easily adding and removing any
+	 * element.
+	 *
+	 * We also maintain an array of pointers to selections, so we
+	 * can easily access a selection in the list, and remove it for
+	 * example, given the index of an item.
+	 */
+	struct Selection *sel;          /* list of selections */
+	struct Selection **issel;       /* array of pointers to Selections */
 	Time seltime;
 
-	int w, h;               /* window width and height */
-	int pixw, pixh;
-	int itemw, itemh;
-	int ydiff;              /* how much the icons are scrolled up */
-	int ncols, nrows;       /* number of columns and rows visible at a time */
-	int maxrow;             /* maximum value .row can scroll */
-	int row;                /* index of first visible row */
-	int x0;                 /* position of first column */
+	/*
+	 * We keep track of thumbnails in a list of thumbnails, which is
+	 * essentially a singly-linked list of XImages.  It's kept as a
+	 * singly-linked list just so we can traverse them one-by-one at
+	 * the end for freeing them.
+	 *
+	 * We also maintain an array of pointers to thumbnails, so we
+	 * can easily access a thumbnail in the list, given the index
+	 * of an item.
+	 */
+	struct Thumb *thumbhead;
+	struct Thumb **thumbs;
 
-	struct Icon deficon;
-	struct Icon *icons;
-	int nicons;
-	int *foundicons;
+	/*
+	 * Geometry of the window and its contents.
+	 *
+	 * WARNING:
+	 * - .nrows is the number of rows in the pixmap, which is
+	 *   approximately the number of rows visible in the window
+	 *   (that is, those that are not hidden by scrolling) plus 2.
+	 * - .ncols is also the number of rows in the pixmap, which is
+	 *   exactly the number of columns visible in the window.
+	 *
+	 * I call "screenful" what is being visible at a given time on
+	 * the window.
+	 */
+	int w, h;                       /* window size */
+	int pixw, pixh;                 /* pixmap size */
+	int itemw, itemh;               /* size of a item (margin + icon + label) */
+	int ydiff;                      /* how much the pixmap is scrolled up */
+	int ncols, nrows;               /* number of columns and rows visible at a time */
+	int nscreens;                   /* maximum number of screenfuls we can scroll */
+	int row;                        /* index of first row visible in the current screenful */
+	int fonth;                      /* font height */
+	int x0;                         /* position of first column after the left margin */
+	int ellipsisw;                  /* width of the ellipsis we draw on long labels */
 
-	int clickx, clicky;
+	/*
+	 * We use icons for items that do not have a thumbnail.
+	 */
+	struct Icon deficon;            /* default icon, check fileicon.xpm */
+	struct Icon *icons;             /* array of icons set by the user */
+	int nicons;                     /* number of icons set by the user */
 
+	/*
+	 * This array, with .nitem members, defines the index in the
+	 * .icons array for the icon of each item.
+	 */
+	int *itemicons;
+
+	/* Strings used to build the title bar. */
 	const char *title;
-	const char *class;
+	char *class;
 
-	int *lastitemp;
+	/*
+	 * Index of the last item clicked by the user; or -1 if none.
+	 * Although it is set at the main loop (see pollwidget), it is
+	 * necessary in drawing functions to draw a dashed border around
+	 * the item's label.
+	 */
+	int lastitem;
 
+	/*
+	 * The scroller how this code calls the widget that replaces the
+	 * scrollbar.  It is a little pop-up window that appears after a
+	 * middle-click.  It can be either controlled as a scrollbar, by
+	 * dragging its inner manipulable object (called the "handler"),
+	 * or by moving the pointer up and down the scroller itself.
+	 *
+	 * The scroller is based on a Firefox's hidden feature called
+	 * autoScroll.
+	 *
+	 * TIP: To enable this feature in Firefox, set the option
+	 * "general.autoScroll" to True in about:config.
+	 *
+	 * We use the XSync extension for the scroller.
+	 * See https://nrk.neocities.org/articles/x11-timeout-with-xsyncalarm.html
+	 */
+	Window scroller;                /* the scroller popup window */
+	int handlew;                    /* size of scroller handle */
 	XSyncAlarmAttributes syncattr;
 	int syncevent;
-	Window scroller;
-	int handlew;            /* size of scroller handle */
 
+	/*
+	 * We can be either in the main loop (see pollwidget), in the
+	 * rectangular selection sub-loop (see rectmotion), or in the
+	 * scroller widget sub-loop (see scrollmotion).  Some routines
+	 * depend on the loop we're in, so we mark its current state
+	 * with this enum.
+	 *
+	 * NOTE: whenever implementing a new sub-loop, always set its
+	 * state at beginning and reset it to STATE_NORMAL at the end
+	 * of the function.
+	 */
 	enum {
 		STATE_NORMAL,
 		STATE_SELECTING,
@@ -250,7 +358,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 	wid->namepix = XCreatePixmap(
 		wid->dpy,
 		wid->win,
-		NAMEWIDTH,
+		LABELWIDTH,
 		wid->fonth,
 		DEPTH(wid->dpy)
 	);
@@ -309,10 +417,10 @@ getresource(XrmDatabase xdb, const char *class, const char *name, const char *re
 {
 	XrmValue xval;
 	char *type;
-	char classbuf[BUF_SIZE], namebuf[BUF_SIZE];
+	char classbuf[RES_BUFSIZE], namebuf[RES_BUFSIZE];
 
-	(void)snprintf(classbuf, BUF_SIZE, "%s.%s", class, resource);
-	(void)snprintf(namebuf, BUF_SIZE, "%s.%s", name, resource);
+	(void)snprintf(classbuf, RES_BUFSIZE, "%s.%s", class, resource);
+	(void)snprintf(namebuf, RES_BUFSIZE, "%s.%s", name, resource);
 	if (XrmGetResource(xdb, namebuf, classbuf, &type, &xval) == True) {
 		*val = xval.addr;
 	}
@@ -400,13 +508,13 @@ calcsize(Widget wid, int w, int h)
 	wid->nrows = max(wid->h / wid->itemh + (wid->h % wid->itemh ? 2 : 1), 1);
 	wid->ydiff = 0;
 	wid->x0 = max((wid->w - wid->ncols * wid->itemw) / 2, 0);
-	wid->maxrow = wid->nitems / wid->ncols - wid->h / wid->itemh + (wid->nitems % wid->ncols != 0 ? 1 : 0);
-	wid->maxrow = max(wid->maxrow, 1);
-	d = (double)wid->maxrow / SCROLLER_MIN;
+	wid->nscreens = wid->nitems / wid->ncols - wid->h / wid->itemh + (wid->nitems % wid->ncols != 0 ? 1 : 0);
+	wid->nscreens = max(wid->nscreens, 1);
+	d = (double)wid->nscreens / SCROLLER_MIN;
 	d = (d < 1.0 ? 1.0 : d);
 	wid->handlew = max(SCROLLER_SIZE / d - 2, 1);
 	wid->handlew = min(wid->handlew, HANDLE_MAX_SIZE);
-	if (wid->handlew == HANDLE_MAX_SIZE && wid->maxrow > 1)
+	if (wid->handlew == HANDLE_MAX_SIZE && wid->nscreens > 1)
 		wid->handlew = HANDLE_MAX_SIZE - 1;
 	if (ncols != wid->ncols || nrows != wid->nrows) {
 		if (wid->pix != None)
@@ -437,7 +545,7 @@ drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int
 
 	w = textwidth(wid, text, len);
 	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
-	XFillRectangle(wid->dpy, wid->namepix, wid->gc, 0, 0, NAMEWIDTH, wid->fonth);
+	XFillRectangle(wid->dpy, wid->namepix, wid->gc, 0, 0, LABELWIDTH, wid->fonth);
 	XSetForeground(wid->dpy, wid->gc, color[COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, x, 0, w, wid->fonth);
 	draw = XftDrawCreate(wid->dpy, pix, VISUAL(wid->dpy), COLORMAP(wid->dpy));
@@ -459,10 +567,10 @@ drawicon(Widget wid, int index, int x, int y)
 	XGCValues val;
 	Pixmap pix, mask;
 
-	if (wid->foundicons[index] >= 0 && wid->foundicons[index] < wid->nicons &&
-	    wid->icons[wid->foundicons[index]].pix != None && wid->icons[wid->foundicons[index]].mask != None) {
-		pix = wid->icons[wid->foundicons[index]].pix;
-		mask = wid->icons[wid->foundicons[index]].mask;
+	if (wid->itemicons[index] >= 0 && wid->itemicons[index] < wid->nicons &&
+	    wid->icons[wid->itemicons[index]].pix != None && wid->icons[wid->itemicons[index]].mask != None) {
+		pix = wid->icons[wid->itemicons[index]].pix;
+		mask = wid->icons[wid->itemicons[index]].mask;
 	} else {
 		pix = wid->deficon.pix;
 		mask = wid->deficon.mask;
@@ -544,12 +652,12 @@ drawlabel(Widget wid, int index, int x, int y)
 	textlen = strlen(text);
 	textw = textwidth(wid, text, textlen);
 	nlines = 1;
-	textx = x + wid->itemw / 2 - NAMEWIDTH / 2;
+	textx = x + wid->itemw / 2 - LABELWIDTH / 2;
 	extension = NULL;
-	if (textw >= NAMEWIDTH) {
+	if (textw >= LABELWIDTH) {
 		textlen = len = 0;
 		w = 0;
-		while (w < NAMEWIDTH) {
+		while (w < LABELWIDTH) {
 			textlen = len;
 			textw = w;
 			while (isspace(text[len]))
@@ -572,22 +680,22 @@ drawlabel(Widget wid, int index, int x, int y)
 	}
 	maxw = 0;
 	for (i = 0; i < nlines; i++) {
-		textw = min(NAMEWIDTH, textw);
+		textw = min(LABELWIDTH, textw);
 		maxw = max(textw, maxw);
 		drawtext(
 			wid,
 			wid->namepix, color,
-			max(NAMEWIDTH / 2 - textw / 2, 0),
+			max(LABELWIDTH / 2 - textw / 2, 0),
 			text, textlen
 		);
 		if (wid->linelens != NULL)
-			wid->linelens[index][i] = min(NAMEWIDTH, textw);
+			wid->linelens[index][i] = min(LABELWIDTH, textw);
 		XCopyArea(
 			wid->dpy,
 			wid->namepix, wid->pix,
 			wid->gc,
 			0, 0,
-			NAMEWIDTH, wid->fonth,
+			LABELWIDTH, wid->fonth,
 			textx, y + wid->itemh - (2.5 - i) * wid->fonth
 		);
 		if (i + 1 < nlines) {
@@ -598,7 +706,7 @@ drawlabel(Widget wid, int index, int x, int y)
 			textw = textwidth(wid, text, textlen);
 		}
 	}
-	if (wid->lastitemp != NULL && index == *wid->lastitemp) {
+	if (index == wid->lastitem) {
 		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
 		XDrawRectangle(
 			wid->dpy,
@@ -609,7 +717,7 @@ drawlabel(Widget wid, int index, int x, int y)
 			maxw + 1, i * wid->fonth + 1
 		);
 	}
-	if (textw >= NAMEWIDTH &&
+	if (textw >= LABELWIDTH &&
 	    (extension = strrchr(text, '.')) != NULL &&
 	    extension[1] != '\0') {
 		extensionlen = strlen(extension);
@@ -721,26 +829,22 @@ commitdraw(Widget wid)
 static void
 settitle(Widget wid)
 {
-	char title[TITLE_SIZE];
-	char nitems[STATUS_SIZE];
+	char title[TITLE_BUFSIZE];
+	char nitems[STATUS_BUFSIZE];
 	char *selitem, *status;
 	int scrollpct;                  /* scroll percentage */
-	int lastitem;
 
-	if (wid->row == 0 && wid->maxrow > 1)
+	if (wid->row == 0 && wid->nscreens > 1)
 		scrollpct = 0;
 	else
-		scrollpct = 100 * ((double)(wid->row + 1) / wid->maxrow);
-	(void)snprintf(nitems, STATUS_SIZE, "%d items", wid->nitems - 1);
+		scrollpct = 100 * ((double)(wid->row + 1) / wid->nscreens);
+	(void)snprintf(nitems, STATUS_BUFSIZE, "%d items", wid->nitems - 1);
 	selitem = "";
 	status = nitems;
-	if (wid->lastitemp != NULL) {
-		lastitem = *wid->lastitemp;
-		selitem = (lastitem > 0 ? wid->items[lastitem][ITEM_NAME] : "");
-		status = (lastitem > 0 ? wid->items[lastitem][ITEM_STATUS] : nitems);
-	}
+	selitem = (wid->lastitem > 0 ? wid->items[wid->lastitem][ITEM_NAME] : "");
+	status = (wid->lastitem > 0 ? wid->items[wid->lastitem][ITEM_STATUS] : nitems);
 	(void)snprintf(
-		title, TITLE_SIZE,
+		title, TITLE_BUFSIZE,
 		"%s%s%s (%s) - %s (%d%%)",
 		wid->title,
 		(strcmp(wid->title, "/") != 0 ? "/" : ""),
@@ -768,10 +872,10 @@ gethandlepos(Widget wid)
 	int row;
 
 	if (wid->ydiff >= wid->itemh)
-		row = wid->maxrow;
+		row = wid->nscreens;
 	else
 		row = wid->row;
-	return (HANDLE_MAX_SIZE - wid->handlew) * ((double)row / wid->maxrow);
+	return (HANDLE_MAX_SIZE - wid->handlew) * ((double)row / wid->nscreens);
 }
 
 static void
@@ -808,9 +912,9 @@ scroll(struct Widget *wid, int y)
 		newrow--;
 	}
 	if (y > 0) {
-		if (newrow >= wid->maxrow) {
+		if (newrow >= wid->nscreens) {
 			wid->ydiff = wid->itemh;
-			newrow = wid->maxrow - 1;
+			newrow = wid->nscreens - 1;
 		}
 	} else if (y < 0) {
 		if (newrow < 0) {
@@ -928,7 +1032,7 @@ cleanwidget(Widget wid)
 }
 
 Widget
-initwidget(const char *appclass, const char *appname, const char *geom, const char *states[], size_t nstates, int argc, char *argv[], unsigned long *icon, size_t iconsize, int hasthumb)
+initwidget(const char *class, const char *name, const char *geom, int argc, char *argv[])
 {
 	XSyncSystemCounter *counters;
 	XpmAttributes xa;
@@ -941,33 +1045,31 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 	*wid = (struct Widget){
 		.win = None,
 		.scroller = None,
-		.start = 0,
-		.hasthumb = hasthumb,
-		.states = states,
-		.nstates = nstates,
 		.rowlock = PTHREAD_MUTEX_INITIALIZER,
 		.thumbs = NULL,
 		.thumbhead = NULL,
 		.linelens = NULL,
 		.icons = NULL,
-		.lastitemp = NULL,
-		.clickx = 0,
-		.clicky = 0,
+		.lastitem = -1,
 		.title = "",
-		.class = appclass,
+		.class = NULL,
 		.sel = NULL,
 		.issel = NULL,
 		.seltime = 0,
 		.pix = None,
-		.state = STATE_NORMAL,
 		.rectbord = None,
+		.state = STATE_NORMAL,
 		.stipple = None,
+		.deficon.pix = None,
+		.deficon.mask = None,
 		.syncattr = (XSyncAlarmAttributes){
 			.trigger.counter        = None,
 			.trigger.value_type     = XSyncRelative,
 			.trigger.test_type      = XSyncPositiveComparison,
 		},
 	};
+	if ((wid->class = strdup(class)) == NULL)
+		goto error_pre;
 	if (!XInitThreads())
 		goto error_pre;
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
@@ -983,9 +1085,9 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		goto error_dpy;
 	if ((wid->gc = XCreateGC(wid->dpy, ROOT(wid->dpy), GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None)
 		goto error_dpy;
-	if (inittheme(wid, appclass, appname) == -1)
+	if (inittheme(wid, class, name) == -1)
 		goto error_dpy;
-	if (createwin(wid, appclass, appname, geom, argc, argv, icon, iconsize) == -1)
+	if (createwin(wid, class, name, geom, argc, argv, winicon_data, winicon_size) == -1)
 		goto error_dpy;
 	wid->scroller = XCreateWindow(
 		wid->dpy, wid->win,
@@ -1008,7 +1110,7 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 	if ((wid->stipple = XCreatePixmap(wid->dpy, ROOT(wid->dpy), STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None)
 		goto error_pix;
 	if ((wid->stipgc = XCreateGC(wid->dpy, wid->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None)
-		goto error_stip;
+		goto error_pix;
 	XSetForeground(wid->dpy, wid->stipgc, 0);
 	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
 	XSetForeground(wid->dpy, wid->stipgc, 1);
@@ -1026,15 +1128,17 @@ initwidget(const char *appclass, const char *appname, const char *geom, const ch
 		XSyncFreeSystemCounterList(counters);
 	}
 	if (wid->syncattr.trigger.counter == None)
-		goto error_stip;
+		goto error_pix;
 	XSyncIntToValue(&wid->syncattr.trigger.wait_value, 128);
 	XSyncIntToValue(&wid->syncattr.delta, 0);
 	return wid;
-error_stip:
-	XFreePixmap(wid->dpy, wid->stipple);
 error_pix:
-	XFreePixmap(wid->dpy, wid->deficon.pix);
-	XFreePixmap(wid->dpy, wid->deficon.mask);
+	if (wid->stipple != None)
+		XFreePixmap(wid->dpy, wid->stipple);
+	if (wid->deficon.pix != None)
+		XFreePixmap(wid->dpy, wid->deficon.pix);
+	if (wid->deficon.mask != None)
+		XFreePixmap(wid->dpy, wid->deficon.mask);
 error_win:
 	if (wid->scroller != None)
 		XDestroyWindow(wid->dpy, wid->scroller);
@@ -1043,31 +1147,31 @@ error_win:
 error_dpy:
 	XCloseDisplay(wid->dpy);
 error_pre:
+	if (wid->class != NULL)
+		free(wid->class);
 	if (wid != NULL)
 		free(wid);
 	return NULL;
 }
 
 void
-setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t nitems)
+setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems)
 {
 	size_t i;
 
 	cleanwidget(wid);
-	wid->start = 0;
 	wid->items = items;
 	wid->nitems = nitems;
-	wid->foundicons = foundicons;
+	wid->itemicons = itemicons;
 	wid->ydiff = 0;
 	wid->row = 0;
 	wid->ydiff = 0;
 	wid->title = title;
-	wid->lastitemp = NULL;
-	wid->clickx = wid->clicky = 0;
+	wid->lastitem = -1;
 	(void)calcsize(wid, -1, -1);
 	wid->issel = calloc(wid->nitems, sizeof(*wid->issel));
 	wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens));
-	if (wid->hasthumb && (wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) != NULL) {
+	if ((wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) != NULL) {
 		for (i = 0; i < nitems; i++)
 			wid->thumbs[i] = NULL;
 		wid->thumbhead = NULL;
@@ -1075,6 +1179,7 @@ setwidget(Widget wid, const char *title, char ***items, int *foundicons, size_t 
 	settitle(wid);
 	drawitems(wid);
 	commitdraw(wid);
+	XFlush(wid->dpy);
 }
 
 void
@@ -1229,7 +1334,7 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 				wid->atoms[TIMESTAMP],
 				wid->atoms[UTF8_STRING],
 			},
-			NTARGETS
+			7       /* the 7 atoms in the preceding array */
 		);
 		return True;
 	}
@@ -1367,7 +1472,7 @@ done:
 }
 
 static int
-mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime, int *lastitem)
+mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 {
 	int index, ret;
 
@@ -1377,25 +1482,23 @@ mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime, int *lastitem)
 	if ((index = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
 	if (ev->state & ShiftMask)
-		selectitems(wid, index, *lastitem, 1);
+		selectitems(wid, index, wid->lastitem, 1);
 	selectitem(wid, index, ((ev->state & ControlMask) ? wid->issel[index] == NULL : 1));
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
-	    index == (*lastitem) && ev->time - (*lasttime) <= DOUBLECLICK) {
+	    index == (wid->lastitem) && ev->time - (*lasttime) <= DOUBLECLICK) {
 		ret = index;
 	}
 done:
 	*lasttime = ev->time;
-	*lastitem = index;
-	wid->clickx = ev->x;
-	wid->clicky = ev->y;
+	wid->lastitem = index;
 	settitle(wid);
 	return ret;
 }
 
 static void
-rectdraw(Widget wid, int row, int ydiff, int x, int y)
+rectdraw(Widget wid, int row, int ydiff, int x0, int y0, int x, int y)
 {
-	int x0, y0, w, h;
+	int w, h;
 
 	XSetForeground(wid->dpy, wid->stipgc, 0);
 	XFillRectangle(
@@ -1407,8 +1510,6 @@ rectdraw(Widget wid, int row, int ydiff, int x, int y)
 	);
 	if (wid->state != STATE_SELECTING)
 		return;
-	y0 = wid->clicky;
-	x0 = wid->clickx;
 	if (row < wid->row) {
 		y0 -= min(wid->row - row, wid->nrows) * wid->itemh;
 	} else if (row > wid->row) {
@@ -1429,7 +1530,7 @@ rectdraw(Widget wid, int row, int ydiff, int x, int y)
 }
 
 static void
-rectselect(Widget wid, int srcrow, int srcydiff, int x, int y)
+rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, int y)
 {
 	int row, col, tmp, i, j;
 
@@ -1458,11 +1559,11 @@ rectselect(Widget wid, int srcrow, int srcydiff, int x, int y)
 	int colmin, colmax;
 	int rowmin;
 
-	miny = min(wid->clicky, y);
-	minx = min(wid->clickx, x);
-	maxx = max(wid->clickx, x);
-	srcx = wid->clickx;
-	srcy = wid->clicky;
+	miny = min(clicky, y);
+	minx = min(clickx, x);
+	maxx = max(clickx, x);
+	srcx = clickx;
+	srcy = clicky;
 	dstx = x;
 	dsty = y;
 	if ((dstx > srcx && srcy > dsty) || (dstx < srcx && srcy < dsty)) {
@@ -1526,8 +1627,8 @@ processevent(Widget wid, XEvent *ev, int *close)
 		return TRUE;
 	case ConfigureNotify:
 		if (calcsize(wid, ev->xconfigure.width, ev->xconfigure.height)) {
-			if (wid->row >= wid->maxrow)
-				setrow(wid, wid->maxrow - 1);
+			if (wid->row >= wid->nscreens)
+				setrow(wid, wid->nscreens - 1);
 			drawitems(wid);
 			commitdraw(wid);
 		}
@@ -1548,7 +1649,7 @@ processevent(Widget wid, XEvent *ev, int *close)
 }
 
 static int
-rectmotion(Widget wid, Time lasttime)
+rectmotion(Widget wid, Time lasttime, int clickx, int clicky)
 {
 	XEvent ev;
 	int rectrow, rectydiff;
@@ -1567,7 +1668,7 @@ rectmotion(Widget wid, Time lasttime)
 		case ButtonPress:
 		case ButtonRelease:
 			wid->state = STATE_NORMAL;
-			rectdraw(wid, rectrow, rectydiff, ev.xbutton.x, ev.xbutton.y);
+			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xbutton.x, ev.xbutton.y);
 			commitdraw(wid);
 			return WIDGET_CONTINUE;
 		case MotionNotify:
@@ -1578,8 +1679,8 @@ rectmotion(Widget wid, Time lasttime)
 				(void)scroll(wid, (ev.xmotion.y - wid->h) / SCROLL_STEP);
 			else if (ev.xmotion.y < 0)
 				(void)scroll(wid, ev.xmotion.y / SCROLL_STEP);
-			rectdraw(wid, rectrow, rectydiff, ev.xmotion.x, ev.xmotion.y);
-			rectselect(wid, rectrow, rectydiff, ev.xmotion.x, ev.xmotion.y);
+			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
+			rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
 			drawitems(wid);
 			commitdraw(wid);
 			lasttime = ev.xmotion.time;
@@ -1629,12 +1730,12 @@ scrollerset(Widget wid, int pos)
 	pos -= wid->handlew / 2;
 	pos = max(pos, 0);
 	pos = min(pos, maxpos);
-	newrow = pos * wid->maxrow / maxpos;
+	newrow = pos * wid->nscreens / maxpos;
 	newrow = max(newrow, 0);
-	newrow = min(newrow, wid->maxrow);
-	if (newrow == wid->maxrow) {
+	newrow = min(newrow, wid->nscreens);
+	if (newrow == wid->nscreens) {
 		wid->ydiff = wid->itemh;
-		newrow = wid->maxrow - 1;
+		newrow = wid->nscreens - 1;
 	} else {
 		wid->ydiff = 0;
 	}
@@ -1711,19 +1812,46 @@ done:
 	return WIDGET_CONTINUE;
 }
 
+static int
+checkheader(FILE *fp, char *header, size_t size)
+{
+	char buf[PPM_BUFSIZE];
+
+	if (fread(buf, 1, size, fp) != size)
+		return RET_ERROR;
+	if (memcmp(buf, header, size) != 0)
+		return RET_ERROR;
+	return RET_OK;
+}
+
+static void
+xpmtopixmap(Widget wid, char *path, Pixmap *pix, Pixmap *mask)
+{
+	XpmAttributes xa = { 0 };
+
+	if (XpmReadFileToPixmap(wid->dpy, ROOT(wid->dpy), path, pix, mask, &xa) != XpmSuccess) {
+		*pix = None;
+		*mask = None;
+	}
+}
+
+/*
+ * Check widget.h for description on the interface of the following
+ * public functions.  Some of them rely on the existence of objects
+ * in the given addresses, during their lifetime.
+ */
+
 WidgetEvent
 pollwidget(Widget wid, int *index)
 {
 	XEvent ev;
 	Time lasttime = 0;
 	int close = FALSE;
-	int lastitem = -1;
 	int ignoremotion;
+	int clickx = 0;
+	int clicky = 0;
 
-	if (!wid->start)
-		XSync(wid->dpy, True);
-	wid->start = 1;
-	wid->lastitemp = &lastitem;
+	wid->lastitem = -1;
 	ignoremotion = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		if (processevent(wid, &ev, &close)) {
@@ -1734,10 +1862,12 @@ pollwidget(Widget wid, int *index)
 		switch (ev.type) {
 		case ButtonPress:
 			if (ev.xbutton.button == Button1) {
-				*index = mouseclick(wid, &ev.xbutton, &lasttime, &lastitem);
+				*index = mouseclick(wid, &ev.xbutton, &lasttime);
 				ownselection(wid, ev.xbutton.time);
 				drawitems(wid);
 				commitdraw(wid);
+				clickx = ev.xbutton.x;
+				clicky = ev.xbutton.y;
 				if (*index != -1) {
 					return WIDGET_OPEN;
 				}
@@ -1758,13 +1888,13 @@ pollwidget(Widget wid, int *index)
 		case MotionNotify:
 			if (ignoremotion)
 				break;
-			if (lastitem != -1)
+			if (wid->lastitem != -1)
 				break;
 			if (ev.xmotion.state != Button1Mask)
 				break;
-			if (rectmotion(wid, ev.xmotion.time) == WIDGET_CLOSE)
+			if (rectmotion(wid, ev.xmotion.time, clickx, clicky) == WIDGET_CLOSE)
 				return WIDGET_CLOSE;
-			lastitem = -1;
+			wid->lastitem = -1;
 			break;
 		}
 	}
@@ -1776,6 +1906,7 @@ closewidget(Widget wid)
 {
 	int i;
 
+	cleanwidget(wid);
 	for (i = 0; i < wid->nicons; i++) {
 		if (wid->icons[i].pix != None) {
 			XFreePixmap(wid->dpy, wid->icons[i].pix);
@@ -1788,6 +1919,7 @@ closewidget(Widget wid)
 	XFreePixmap(wid->dpy, wid->deficon.pix);
 	XFreePixmap(wid->dpy, wid->deficon.mask);
 	XFreePixmap(wid->dpy, wid->pix);
+	XFreePixmap(wid->dpy, wid->rectbord);
 	XFreePixmap(wid->dpy, wid->namepix);
 	XFreePixmap(wid->dpy, wid->stipple);
 	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_BG]);
@@ -1799,22 +1931,12 @@ closewidget(Widget wid)
 	XDestroyWindow(wid->dpy, wid->win);
 	XFreeGC(wid->dpy, wid->gc);
 	XCloseDisplay(wid->dpy);
+	free(wid->class);
 	free(wid);
 }
 
 void
-xpmtopixmap(Widget wid, char *path, Pixmap *pix, Pixmap *mask)
-{
-	XpmAttributes xa = { 0 };
-
-	if (XpmReadFileToPixmap(wid->dpy, ROOT(wid->dpy), path, pix, mask, &xa) != XpmSuccess) {
-		*pix = None;
-		*mask = None;
-	}
-}
-
-void
-openicons(Widget wid, char **paths, int nicons)
+openicons(Widget wid, char *paths[], int nicons)
 {
 	int i;
 
@@ -1826,18 +1948,6 @@ openicons(Widget wid, char **paths, int nicons)
 	for (i = 0; i < nicons; i++) {
 		xpmtopixmap(wid, paths[i], &wid->icons[i].pix, &wid->icons[i].mask);
 	}
-}
-
-static int
-checkheader(FILE *fp, char *header, size_t size)
-{
-	char buf[PPM_BUFSIZE];
-
-	if (fread(buf, 1, size, fp) != size)
-		return RET_ERROR;
-	if (memcmp(buf, header, size) != 0)
-		return RET_ERROR;
-	return RET_OK;
 }
 
 void
