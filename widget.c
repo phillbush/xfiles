@@ -454,16 +454,10 @@ setrow(Widget wid, int row)
 }
 
 static void
-drawitem(Widget wid, int index)
+drawicon(Widget wid, int index, int x, int y)
 {
 	XGCValues val;
-	XftColor *color;
 	Pixmap pix, mask;
-	int i, j, x, y, nlines;
-	int textx, maxw;
-	int textw, w, textlen, len;
-	int extensionw, extensionlen;
-	char *text, *extension;
 
 	if (wid->foundicons[index] >= 0 && wid->foundicons[index] < wid->nicons &&
 	    wid->icons[wid->foundicons[index]].pix != None && wid->icons[wid->foundicons[index]].mask != None) {
@@ -472,126 +466,6 @@ drawitem(Widget wid, int index)
 	} else {
 		pix = wid->deficon.pix;
 		mask = wid->deficon.mask;
-	}
-	if (wid->issel != NULL && wid->issel[index])
-		color = wid->select;
-	else
-		color = wid->normal;
-	text = wid->items[index][ITEM_NAME];
-	textlen = strlen(text);
-	textw = textwidth(wid, text, textlen);
-	nlines = 1;
-	i = index - wid->row * wid->ncols;
-	x = i % wid->ncols;
-	y = (i / wid->ncols) % wid->nrows;
-	x *= wid->itemw;
-	y *= wid->itemh;
-	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
-	XFillRectangle(wid->dpy, wid->pix, wid->gc, x, y, wid->itemw, wid->itemh);
-	textx = x + wid->itemw / 2 - NAMEWIDTH / 2;
-	extension = NULL;
-	if (textw >= NAMEWIDTH) {
-		textlen = len = 0;
-		w = 0;
-		while (w < NAMEWIDTH) {
-			textlen = len;
-			textw = w;
-			while (isspace(text[len]))
-				len++;
-			while (isbreakable(text[len]))
-				len++;
-			while (text[len] != '\0' && !isspace(text[len]) && !isbreakable(text[len]))
-				len++;
-			w = textwidth(wid, text, len);
-			if (text[len] == '\0') {
-				break;
-			}
-		}
-		if (textw > 0) {
-			nlines++;
-		} else {
-			textlen = len;
-			textw = w;
-		}
-	}
-	maxw = 0;
-	for (j = 0; j < nlines; j++) {
-		textw = min(NAMEWIDTH, textw);
-		maxw = max(textw, maxw);
-		drawtext(
-			wid,
-			wid->namepix, color,
-			max(NAMEWIDTH / 2 - textw / 2, 0),
-			text, textlen
-		);
-		if (wid->linelens != NULL)
-			wid->linelens[index][j] = min(NAMEWIDTH, textw);
-		XCopyArea(
-			wid->dpy,
-			wid->namepix, wid->pix,
-			wid->gc,
-			0, 0,
-			NAMEWIDTH, wid->fonth,
-			textx, y + wid->itemh - (2.5 - j) * wid->fonth
-		);
-		if (j + 1 < nlines) {
-			while (isspace(text[textlen]))
-				textlen++;
-			text += textlen;
-			textlen = strlen(text);
-			textw = textwidth(wid, text, textlen);
-		}
-	}
-	if (wid->lastitemp != NULL && index == *wid->lastitemp) {
-		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
-		XDrawRectangle(
-			wid->dpy,
-			wid->pix,
-			wid->gc,
-			x + wid->itemw / 2 - maxw / 2 - 1,
-			y + wid->itemh - 2.5 * wid->fonth - 1,
-			maxw + 1, j * wid->fonth + 1
-		);
-	}
-	if (textw >= NAMEWIDTH &&
-	    (extension = strrchr(text, '.')) != NULL &&
-	    extension[1] != '\0') {
-		extensionlen = strlen(extension);
-		extensionw = textwidth(wid, extension, extensionlen);
-	}
-	if (extension != NULL) {
-		/* draw ellipsis */
-		drawtext(
-			wid,
-			wid->namepix, color,
-			0,
-			ELLIPSIS, strlen(ELLIPSIS)
-		);
-		XCopyArea(
-			wid->dpy,
-			wid->namepix, wid->pix,
-			wid->gc,
-			0, 0,
-			wid->ellipsisw, wid->fonth,
-			textx + textw - extensionw - wid->ellipsisw,
-			y + wid->itemh - (3.5 - nlines) * wid->fonth
-		);
-
-		/* draw extension */
-		drawtext(
-			wid,
-			wid->namepix, color,
-			0, extension, extensionlen
-		);
-		XCopyArea(
-			wid->dpy,
-			wid->namepix, wid->pix,
-			wid->gc,
-			0, 0,
-			extensionw, wid->fonth,
-			textx + textw - extensionw,
-			y + wid->itemh - (3.5 - nlines) * wid->fonth
-		);
 	}
 	if (wid->thumbs != NULL && wid->thumbs[index] != NULL) {
 		/* draw thumbnail */
@@ -650,6 +524,147 @@ drawitem(Widget wid, int index)
 		val.clip_mask = None;
 		XChangeGC(wid->dpy, wid->gc, GCClipMask, &val);
 	}
+}
+
+static void
+drawlabel(Widget wid, int index, int x, int y)
+{
+	XftColor *color;
+	int i, nlines;
+	int textx, maxw;
+	int textw, w, textlen, len;
+	int extensionw, extensionlen;
+	char *text, *extension;
+
+	if (wid->issel != NULL && wid->issel[index])
+		color = wid->select;
+	else
+		color = wid->normal;
+	text = wid->items[index][ITEM_NAME];
+	textlen = strlen(text);
+	textw = textwidth(wid, text, textlen);
+	nlines = 1;
+	textx = x + wid->itemw / 2 - NAMEWIDTH / 2;
+	extension = NULL;
+	if (textw >= NAMEWIDTH) {
+		textlen = len = 0;
+		w = 0;
+		while (w < NAMEWIDTH) {
+			textlen = len;
+			textw = w;
+			while (isspace(text[len]))
+				len++;
+			while (isbreakable(text[len]))
+				len++;
+			while (text[len] != '\0' && !isspace(text[len]) && !isbreakable(text[len]))
+				len++;
+			w = textwidth(wid, text, len);
+			if (text[len] == '\0') {
+				break;
+			}
+		}
+		if (textw > 0) {
+			nlines++;
+		} else {
+			textlen = len;
+			textw = w;
+		}
+	}
+	maxw = 0;
+	for (i = 0; i < nlines; i++) {
+		textw = min(NAMEWIDTH, textw);
+		maxw = max(textw, maxw);
+		drawtext(
+			wid,
+			wid->namepix, color,
+			max(NAMEWIDTH / 2 - textw / 2, 0),
+			text, textlen
+		);
+		if (wid->linelens != NULL)
+			wid->linelens[index][i] = min(NAMEWIDTH, textw);
+		XCopyArea(
+			wid->dpy,
+			wid->namepix, wid->pix,
+			wid->gc,
+			0, 0,
+			NAMEWIDTH, wid->fonth,
+			textx, y + wid->itemh - (2.5 - i) * wid->fonth
+		);
+		if (i + 1 < nlines) {
+			while (isspace(text[textlen]))
+				textlen++;
+			text += textlen;
+			textlen = strlen(text);
+			textw = textwidth(wid, text, textlen);
+		}
+	}
+	if (wid->lastitemp != NULL && index == *wid->lastitemp) {
+		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
+		XDrawRectangle(
+			wid->dpy,
+			wid->pix,
+			wid->gc,
+			x + wid->itemw / 2 - maxw / 2 - 1,
+			y + wid->itemh - 2.5 * wid->fonth - 1,
+			maxw + 1, i * wid->fonth + 1
+		);
+	}
+	if (textw >= NAMEWIDTH &&
+	    (extension = strrchr(text, '.')) != NULL &&
+	    extension[1] != '\0') {
+		extensionlen = strlen(extension);
+		extensionw = textwidth(wid, extension, extensionlen);
+	}
+	if (extension != NULL) {
+		/* draw ellipsis */
+		drawtext(
+			wid,
+			wid->namepix, color,
+			0,
+			ELLIPSIS, strlen(ELLIPSIS)
+		);
+		XCopyArea(
+			wid->dpy,
+			wid->namepix, wid->pix,
+			wid->gc,
+			0, 0,
+			wid->ellipsisw, wid->fonth,
+			textx + textw - extensionw - wid->ellipsisw,
+			y + wid->itemh - (3.5 - nlines) * wid->fonth
+		);
+
+		/* draw extension */
+		drawtext(
+			wid,
+			wid->namepix, color,
+			0, extension, extensionlen
+		);
+		XCopyArea(
+			wid->dpy,
+			wid->namepix, wid->pix,
+			wid->gc,
+			0, 0,
+			extensionw, wid->fonth,
+			textx + textw - extensionw,
+			y + wid->itemh - (3.5 - nlines) * wid->fonth
+		);
+	}
+}
+
+static void
+drawitem(Widget wid, int index)
+{
+	int i, x, y;
+
+	i = index - wid->row * wid->ncols;
+	x = i % wid->ncols;
+	y = (i / wid->ncols) % wid->nrows;
+	x *= wid->itemw;
+	y *= wid->itemh;
+	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
+	XFillRectangle(wid->dpy, wid->pix, wid->gc, x, y, wid->itemw, wid->itemh);
+	drawicon(wid, index, x, y);
+	drawlabel(wid, index, x, y);
 }
 
 static void
