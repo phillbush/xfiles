@@ -782,7 +782,7 @@ drawitem(Widget wid, int index)
 	min = firstvisible(wid);
 	max = lastvisible(wid);
 	if (index < min || index > max)
-		return;
+		goto done;
 	i = index - min;
 	x = i % wid->ncols;
 	y = (i / wid->ncols) % wid->nrows;
@@ -792,6 +792,7 @@ drawitem(Widget wid, int index)
 	XFillRectangle(wid->dpy, wid->pix, wid->gc, x, y, wid->itemw, wid->itemh);
 	drawicon(wid, index, x, y);
 	drawlabel(wid, index, x, y);
+done:
 	etunlock(&wid->rowlock);
 }
 
