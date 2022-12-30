@@ -1500,7 +1500,7 @@ done:
 static int
 mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 {
-	int previtem, index, ret, redrawall;
+	int previtem, ret, redrawall;
 
 	ret = -1;
 	redrawall = FALSE;
@@ -1508,19 +1508,18 @@ mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 		unselectitems(wid);
 		redrawall = TRUE;
 	}
-	if ((index = getpointerclick(wid, ev->x, ev->y)) == -1)
+	if ((wid->lastitem = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
 	previtem = wid->lastitem;
-	wid->lastitem = index;
 	if (ev->state & ShiftMask) {
-		selectitems(wid, index, previtem, 1);
+		selectitems(wid, wid->lastitem, previtem, 1);
 		redrawall = TRUE;
 	} else {
-		selectitem(wid, index, ((ev->state & ControlMask) ? wid->issel[index] == NULL : 1), !redrawall);
+		selectitem(wid, wid->lastitem, ((ev->state & ControlMask) ? wid->issel[wid->lastitem] == NULL : 1), !redrawall);
 	}
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
-	    index == (wid->lastitem) && ev->time - (*lasttime) <= DOUBLECLICK) {
-		ret = index;
+	    wid->lastitem == (wid->lastitem) && ev->time - (*lasttime) <= DOUBLECLICK) {
+		ret = wid->lastitem;
 	}
 done:
 	*lasttime = ev->time;
@@ -1529,7 +1528,7 @@ done:
 		drawitems(wid);
 	else if (previtem >= 0)
 		drawitem(wid, previtem);
-	if (redrawall || index >= 0)
+	if (redrawall || wid->lastitem >= 0)
 		commitdraw(wid);
 	return ret;
 }
