@@ -1933,8 +1933,13 @@ pollwidget(Widget wid, int *index)
 	int clickx = 0;
 	int clicky = 0;
 
-	if (wid->start)
-		XSync(wid->dpy, True);
+	while (wid->start && XPending(wid->dpy) > 0) {
+		(void)XNextEvent(wid->dpy, &ev);
+		(void)processevent(wid, &ev, &close);
+		if (close) {
+			return WIDGET_CLOSE;
+		}
+	}
 	wid->start = TRUE;
 	wid->lastitem = -1;
 	ignoremotion = FALSE;
