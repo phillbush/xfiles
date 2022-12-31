@@ -130,6 +130,8 @@ struct Selection {
 };
 
 struct Widget {
+	int start;
+
 	/* X11 stuff */
 	Display *dpy;
 	Atom atoms[ATOM_LAST];
@@ -1064,6 +1066,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	if ((wid = malloc(sizeof(*wid))) == NULL)
 		goto error_pre;
 	*wid = (struct Widget){
+		.start = FALSE,
 		.win = None,
 		.scroller = None,
 		.rowlock = PTHREAD_MUTEX_INITIALIZER,
@@ -1518,7 +1521,7 @@ mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 		selectitem(wid, wid->lastitem, ((ev->state & ControlMask) ? wid->issel[wid->lastitem] == NULL : 1), !redrawall);
 	}
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
-	    wid->lastitem == (wid->lastitem) && ev->time - (*lasttime) <= DOUBLECLICK) {
+	    ev->time - (*lasttime) <= DOUBLECLICK) {
 		ret = wid->lastitem;
 	}
 done:
@@ -1930,6 +1933,9 @@ pollwidget(Widget wid, int *index)
 	int clickx = 0;
 	int clicky = 0;
 
+	if (wid->start)
+		XSync(wid->dpy, True);
+	wid->start = TRUE;
 	wid->lastitem = -1;
 	ignoremotion = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
@@ -2104,4 +2110,5 @@ widgetcursor(Widget wid, int cursor)
 	if (cursor < 0 || cursor >= CURSOR_LAST)
 		cursor = CURSOR_NORMAL;
 	XDefineCursor(wid->dpy, wid->win, wid->cursors[cursor]);
+	XFlush(wid->dpy);
 }
