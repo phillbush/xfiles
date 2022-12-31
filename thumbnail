@@ -1,5 +1,6 @@
 #!/bin/sh
 
+BACKGROUND="#0A0A0A"
 THUMBSIZE=64
 umask 077
 
@@ -22,16 +23,23 @@ esac
 
 case "${1##*.}" in
 png|jpg|jpeg|gif|xpm|ppm)
-	convert "${1}[0]" -define filename:literal=true -format ppm -thumbnail "${THUMBSIZE}x${THUMBSIZE}" "${2}"
+	convert "${1}[0]" -background "$BACKGROUND" -flatten \
+		-define filename:literal=true -format ppm \
+		-thumbnail "${THUMBSIZE}x${THUMBSIZE}" \
+		"${2}"
 	;;
 webm|mp4|mkv|ogv)
-	ffmpegthumbnailer -c png -i "${1}" -o - -s "${THUMBSIZE}" | convert - -define filename:literal=true -format ppm "${2}"
+	ffmpegthumbnailer -c png -i "${1}" -o - -s "${THUMBSIZE}" \
+		| convert - -define filename:literal=true -format ppm \
+		"${2}"
 	;;
 svg)
-	rsvg-convert -h "${THUMBSIZE}" "${1}" | convert - -format ppm "${2}"
+	rsvg-convert -h "${THUMBSIZE}" "${1}" \
+		| convert - -format ppm "${2}"
 	;;
 pdf)
-	pdftoppm -f 1 -l 1 -scale-to "${THUMBSIZE}" -singlefile "${1}" "${2%.ppm}"
+	pdftoppm -f 1 -l 1 -scale-to "${THUMBSIZE}" -singlefile \
+		"${1}" "${2%.ppm}"
 	;;
 *)
 	exit 1
