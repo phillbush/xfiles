@@ -268,7 +268,9 @@ error:
 static int
 entrycmp(const void *ap, const void *bp)
 {
+	int aisdir, bisdir;
 	char **a, **b;
+
 	a = *(char ***)ap;
 	b = *(char ***)bp;
 	/* dotdot (parent directory) first */
@@ -278,9 +280,11 @@ entrycmp(const void *ap, const void *bp)
 		return 1;
 
 	/* directories first */
-	if (a[STATE_MODE][0] == 'd' && b[STATE_MODE][0] != 'd')
+	aisdir = a[STATE_MODE] != NULL && a[STATE_MODE][0] == 'd';
+	bisdir = b[STATE_MODE] != NULL && b[STATE_MODE][0] == 'd';
+	if (aisdir && !bisdir)
 		return -1;
-	if (b[STATE_MODE][0] == 'd' && a[STATE_MODE][0] != 'd')
+	if (bisdir && !aisdir)
 		return 1;
 
 	/* dotentries (hidden entries) first */
