@@ -28,7 +28,7 @@ void *ecalloc(size_t nmemb, size_t size);
 char *estrdup(const char *s);
 void *ereallocarray(void *ptr, size_t nmemb, size_t size);
 void egetcwd(char *path, size_t size);
-void eexec(const char *cmd, const char *arg1, const char *arg2);
+void eexec(char *const argv[]);
 void etcreate(pthread_t *tid, void *(*thrfn)(void *), void *arg);
 void etjoin(pthread_t tid, void **rval);
 void etlock(pthread_mutex_t *mutex);

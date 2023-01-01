@@ -98,10 +98,10 @@ efork(void)
 }
 
 void
-eexec(const char *cmd, const char *arg1, const char *arg2)
+eexec(char *const argv[])
 {
-	if (execlp(cmd, cmd, arg1, arg2, NULL) == -1) {
-		err(1, "%s", cmd);
+	if (execvp(argv[0], argv) == -1) {
+		err(1, "%s", argv[0]);
 	}
 }
 

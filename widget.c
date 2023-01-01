@@ -828,7 +828,7 @@ static int
 lastvisible(Widget wid)
 {
 	/* gets index of last visible item */
-	return min(wid->nitems, firstvisible(wid) + wid->nrows * wid->ncols);
+	return min(wid->nitems, firstvisible(wid) + wid->nrows * wid->ncols) - 1;
 }
 
 static void
@@ -839,7 +839,7 @@ drawitem(Widget wid, int index)
 	etlock(&wid->lock);
 	min = firstvisible(wid);
 	max = lastvisible(wid);
-	if (index < min || index > max)
+	if (index < min || index >= max)
 		goto done;
 	i = index - min;
 	x = i % wid->ncols;
@@ -862,7 +862,7 @@ drawitems(Widget wid)
 	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->pix, wid->gc, 0, 0, wid->w, wid->nrows * wid->itemh);
 	n = lastvisible(wid);
-	for (i = wid->row * wid->ncols; i < n; i++) {
+	for (i = wid->row * wid->ncols; i <= n; i++) {
 		drawitem(wid, i);
 	}
 }
@@ -1107,6 +1107,7 @@ cleanwidget(Widget wid)
 		free(tmp);
 	}
 	wid->sel = NULL;
+	wid->rectsel = NULL;
 	free(wid->thumbs);
 	wid->thumbs = NULL;
 	free(wid->linelens);
@@ -1153,6 +1154,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.title = "",
 		.class = class,
 		.sel = NULL,
+		.rectsel = NULL,
 		.issel = NULL,
 		.seltime = 0,
 		.pix = None,
@@ -1390,7 +1392,7 @@ static void
 unselectitems(Widget wid)
 {
 	while (wid->sel) {
-		selectitem(wid, wid->sel->index, FALSE, REDRAW);
+		selectitem(wid, wid->sel->index, FALSE, 0);
 	}
 }
 
@@ -1619,7 +1621,7 @@ done:
 }
 
 static int
-mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
+mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 {
 	int previtem, ret, redrawall;
 
@@ -1629,14 +1631,14 @@ mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 		unselectitems(wid);
 		redrawall = TRUE;
 	}
+	previtem = wid->lastitem;
 	if ((wid->lastitem = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
-	previtem = wid->lastitem;
-	if (ev->state & ShiftMask) {
+	if (previtem != -1 && ev->state & ShiftMask) {
 		selectitems(wid, wid->lastitem, previtem, 1);
 		redrawall = TRUE;
 	} else {
-		selectitem(wid, wid->lastitem, ((ev->state & ControlMask) ? wid->issel[wid->lastitem] == NULL : FALSE), REDRAW);
+		selectitem(wid, wid->lastitem, ((ev->state & ControlMask) ? wid->issel[wid->lastitem] == NULL : TRUE), REDRAW);
 	}
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
 	    ev->time - (*lasttime) <= DOUBLECLICK) {
@@ -1652,6 +1654,23 @@ done:
 	if (redrawall || wid->lastitem >= 0)
 		commitdraw(wid);
 	return ret;
+}
+
+static int
+mouse3click(Widget wid, int x, int y)
+{
+	int index;
+
+	if (wid->sel != NULL) {
+		/* there's already something selected; do nothing */
+		return -1;
+	}
+	if ((index = getpointerclick(wid, x, y)) != -1) {
+		/* we clicked on an item; select it */
+		selectitem(wid, index, TRUE, REDRAW);
+		commitdraw(wid);
+	}
+	return index;
 }
 
 static void
@@ -2056,6 +2075,23 @@ xpmtopixmap(Widget wid, char *path, Pixmap *pix, Pixmap *mask)
 	}
 }
 
+static int
+fillselitems(Widget wid, int *selitems, int clicked)
+{
+	struct Selection *sel;
+	int nitems;
+
+	nitems = 0;
+	if (clicked != -1)
+		selitems[nitems++] = clicked;
+	for (sel = wid->sel; sel != NULL; sel = sel->next) {
+		if (sel->index == clicked)
+			continue;
+		selitems[nitems++] = sel->index;
+	}
+	return nitems;
+}
+
 /*
  * Check widget.h for description on the interface of the following
  * public functions.  Some of them rely on the existence of objects
@@ -2063,7 +2099,7 @@ xpmtopixmap(Widget wid, char *path, Pixmap *pix, Pixmap *mask)
  */
 
 WidgetEvent
-pollwidget(Widget wid, int *index)
+pollwidget(Widget wid, int *selitems, int *nitems)
 {
 	XEvent ev;
 	Time lasttime = 0;
@@ -2071,6 +2107,7 @@ pollwidget(Widget wid, int *index)
 	int ignoremotion;
 	int clickx = 0;
 	int clicky = 0;
+	int clicki;
 
 	while (wid->start && XPending(wid->dpy) > 0) {
 		(void)XNextEvent(wid->dpy, &ev);
@@ -2090,14 +2127,17 @@ pollwidget(Widget wid, int *index)
 		}
 		switch (ev.type) {
 		case ButtonPress:
+			if (ev.xbutton.window != wid->win)
+				break;
 			if (ev.xbutton.button == Button1) {
-				*index = mouseclick(wid, &ev.xbutton, &lasttime);
+				clicki = mouse1click(wid, &ev.xbutton, &lasttime);
 				ownselection(wid, ev.xbutton.time);
 				clickx = ev.xbutton.x;
 				clicky = ev.xbutton.y;
-				if (*index != -1) {
-					return WIDGET_OPEN;
-				}
+				if (clicki == -1)
+					break;
+				*nitems = fillselitems(wid, selitems, clicki);
+				return WIDGET_OPEN;
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
 				if (scroll(wid, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
 					drawitems(wid);
@@ -2106,20 +2146,32 @@ pollwidget(Widget wid, int *index)
 				if (scrollmotion(wid, ev.xmotion.x, ev.xmotion.y) == WIDGET_CLOSE)
 					return WIDGET_CLOSE;
 				ignoremotion = TRUE;
+			} else if (ev.xbutton.button == Button3) {
+				clicki = mouse3click(wid, ev.xbutton.x, ev.xbutton.y);
+				*nitems = fillselitems(wid, selitems, clicki);
+				XUngrabPointer(wid->dpy, ev.xbutton.time);
+				XFlush(wid->dpy);
+				return WIDGET_CONTEXT;
 			}
 			break;
 		case ButtonRelease:
+			if (ev.xbutton.window != wid->win)
+				break;
+			if (ev.xbutton.button != Button1)
+				break;
 			if (ignoremotion)
 				ignoremotion = FALSE;
 			break;
 		case MotionNotify:
-			if (ignoremotion)
-				break;
-			if (wid->lastitem != -1)
+			if (ev.xmotion.window != wid->win)
 				break;
 			if (ev.xmotion.state != Button1Mask &&
 			    ev.xmotion.state != (Button1Mask|ShiftMask) &&
 			    ev.xmotion.state != (Button1Mask|ControlMask))
+				break;
+			if (ignoremotion)
+				break;
+			if (wid->lastitem != -1)
 				break;
 			if (rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky) == WIDGET_CLOSE)
 				return WIDGET_CLOSE;

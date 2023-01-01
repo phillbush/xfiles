@@ -21,6 +21,7 @@
 #define OPENER          "OPENER"
 #define THUMBNAILER     "THUMBNAILER"
 #define THUMBNAILDIR    "THUMBNAILDIR"
+#define XFILES_CONTEXTCMD "XFILES_CONTEXTCMD"
 #define DEV_NULL        "/dev/null"
 #define DOTDOT          ".."
 #define LAST_ARG        "--"
@@ -51,7 +52,8 @@ struct IconPattern {
 struct FM {
 	Widget wid;
 	char ***entries;
-	int *foundicons;
+	int *foundicons;        /* array of indices to found icons */
+	int *selitems;          /* array of indices to selected items */
 	int capacity;           /* capacity of entries */
 	int nentries;           /* number of entries */
 	char path[PATH_MAX];
@@ -87,7 +89,7 @@ static struct {
 static void
 usage(void)
 {
-	(void)fprintf(stderr, "usage: xfiles [-a] [-g geometry] [-n name] [path]\n");
+	(void)fprintf(stderr, "usage: xfiles [-a] [-c cmd] [-g geometry] [-n name] [path]\n");
 	exit(1);
 }
 
@@ -323,12 +325,18 @@ thumbexit(struct FM *fm)
 static pid_t
 forkthumb(struct FM *fm, char *orig, char *thumb)
 {
+	char *argv[] = {
+		fm->thumbnailer,
+		orig,
+		thumb,
+		NULL,
+	};
 	pid_t pid;
 
 	if ((pid = efork()) == 0) {     /* children */
 		close(STDOUT_FILENO);
 		close(STDIN_FILENO);
-		eexec(fm->thumbnailer, orig, thumb);
+		eexec(argv);
 		exit(EXIT_FAILURE);
 	}
 	return pid;
@@ -428,6 +436,7 @@ diropen(struct FM *fm, const char *path, int savecwd)
 	fm->nentries = escandir(fm->path, &array, direntselect, NULL);
 	if (fm->nentries > fm->capacity) {
 		fm->foundicons = ereallocarray(fm->foundicons, fm->nentries, sizeof(*fm->foundicons));
+		fm->selitems = ereallocarray(fm->selitems, fm->nentries, sizeof(*fm->selitems));
 		fm->entries = ereallocarray(fm->entries, fm->nentries, sizeof(*fm->entries));
 		fm->capacity = fm->nentries;
 	}
@@ -553,7 +562,7 @@ initthumbnailer(struct FM *fm)
 }
 
 static void
-fileopen(struct FM *fm, char *path)
+forkexec(char *const argv[])
 {
 	pid_t pid1, pid2;
 	int fd;
@@ -565,7 +574,7 @@ fileopen(struct FM *fm, char *path)
 			(void)dup2(fd, STDIN_FILENO);
 			if (fd > 2)
 				(void)close(fd);
-			eexec(fm->opener, LAST_ARG, path);
+			eexec(argv);
 			exit(EXIT_FAILURE);
 		}
 		exit(EXIT_SUCCESS);
@@ -573,28 +582,61 @@ fileopen(struct FM *fm, char *path)
 	waitpid(pid1, NULL, 0);
 }
 
+static void
+fileopen(struct FM *fm, char *path)
+{
+	forkexec(
+		(char *[]){
+			fm->opener,
+			LAST_ARG,
+			path,
+			NULL,
+		}
+	);
+}
+
+static void
+runcontext(struct FM *fm, char *contextcmd, int nselitems)
+{
+	int i;
+	char **argv;
+
+	argv = emalloc((nselitems + 2) * sizeof(*argv));
+	argv[0] = contextcmd;
+	nselitems++;
+	for (i = 1; i < nselitems; i++)
+		argv[i] = fm->entries[i][STATE_PATH];
+	argv[i] = NULL;
+	forkexec(argv);
+	free(argv);
+}
+
 int
 main(int argc, char *argv[])
 {
 	struct FM fm;
 	size_t nicons;
-	int ch, index, state;
+	int ch, nitems, state;
 	int saveargc, exitval;
-	char *geom, *name, *path, *home, *iconpatts;
+	char *geom = NULL;
+	char *name = NULL;
+	char *path = NULL;
+	char *home = NULL;
+	char *iconpatts = NULL;
+	char *contextcmd = NULL;
 	char **saveargv;
 	char **icons;
 
 	saveargv = argv;
 	saveargc = argc;
+	contextcmd = getenv(XFILES_CONTEXTCMD);
 	iconpatts = getenv(FILE_ICONS);
 	home = getenv(HOME);
-	geom = NULL;
-	path = NULL;
-	name = NULL;
 	fm = (struct FM){
 		.capacity = 0,
 		.nentries = 0,
 		.entries = NULL,
+		.selitems = NULL,
 		.foundicons = NULL,
 		.home = home,
 		.homelen = ((home != NULL) ? strlen(home) : 0),
@@ -606,10 +648,13 @@ main(int argc, char *argv[])
 	};
 	if ((fm.opener = getenv(OPENER)) == NULL)
 		fm.opener = DEF_OPENER;
-	while ((ch = getopt(argc, argv, "ag:n:")) != -1) {
+	while ((ch = getopt(argc, argv, "ac:g:n:")) != -1) {
 		switch (ch) {
 		case 'a':
 			hide = 0;
+			break;
+		case 'c':
+			contextcmd = optarg;
 			break;
 		case 'g':
 			geom = optarg;
@@ -639,27 +684,34 @@ main(int argc, char *argv[])
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
 	exitval = EXIT_SUCCESS;
-	while ((state = pollwidget(fm.wid, &index)) != WIDGET_CLOSE) {
+	while ((state = pollwidget(fm.wid, fm.selitems, &nitems)) != WIDGET_CLOSE) {
 		switch (state) {
 		case WIDGET_ERROR:
 			exitval = EXIT_FAILURE;
 			goto done;
 			break;
-		case WIDGET_OPEN:
-			if (index < 0 || index >= fm.nentries)
+		case WIDGET_CONTEXT:
+			if (contextcmd == NULL)
 				break;
-			if (fm.entries[index][STATE_MODE][0] == 'd') {
+			runcontext(&fm, contextcmd, nitems);
+			break;
+		case WIDGET_OPEN:
+			if (nitems < 1)
+				break;
+			if (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries)
+				break;
+			if (fm.entries[fm.selitems[0]][STATE_MODE][0] == 'd') {
 				widgetcursor(fm.wid, CURSOR_WATCH);
 				closethumbthread(&fm);
-				diropen(&fm, fm.entries[index][STATE_PATH], 1);
+				diropen(&fm, fm.entries[fm.selitems[0]][STATE_PATH], 1);
 				if (setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries) == RET_ERROR) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
 				createthumbthread(&fm);
 				widgetcursor(fm.wid, CURSOR_NORMAL);
-			} else if (fm.entries[index][STATE_MODE][0] == '-') {
-				fileopen(&fm, fm.entries[index][STATE_PATH]);
+			} else if (fm.entries[fm.selitems[0]][STATE_MODE][0] == '-') {
+				fileopen(&fm, fm.entries[fm.selitems[0]][STATE_PATH]);
 			}
 			break;
 		}
@@ -669,6 +721,7 @@ done:
 	freeentries(&fm);
 	free(fm.entries);
 	free(fm.foundicons);
+	free(fm.selitems);
 	closewidget(fm.wid);
 	return exitval;
 }

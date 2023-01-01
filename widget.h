@@ -1,5 +1,6 @@
 typedef enum {
 	WIDGET_CONTINUE,
+	WIDGET_CONTEXT,
 	WIDGET_CLOSE,
 	WIDGET_OPEN,
 	WIDGET_ERROR,
@@ -161,6 +162,9 @@ void mapwidget(Widget wid);
  *   This value is never returned, and is only used internally by
  *   widget.c
  *
+ * - WIDGET_CONTEXT:
+ *   The Button 3 was pressed.
+ *
  * - WIDGET_CLOSE:
  *   The widget was closed.
  *
@@ -181,11 +185,20 @@ void mapwidget(Widget wid);
  * - wid:
  *   Widget previously created with initwidget().
  *
- * - index:
- *   Pointer to a integer indexing the open item.  This parameter is
- *   only set when this function returns WIDGET_OPEN.
+ * - selitems:
+ *   Pointer to an array of integers indexing the items selected by the
+ *   user.  This array must have been allocated by the caller and must
+ *   contains at least n elements, where n is the value of the nitems
+ *   parameter passed to the previous call to setwidget().  This array
+ *   is filled by this function when it returns WIDGET_OPEN or
+ *   WIDGET_CONTEXT.
+ *
+ * - nselitems
+ *   Pointer to an integer counting the number of members of the
+ *   selitems array filled by this function when it returns WIDGET_OPEN
+ *   or WIDGET_CONTEXT.
  */
-WidgetEvent pollwidget(Widget wid, int *index);
+WidgetEvent pollwidget(Widget wid, int *selitems, int *nselitems);
 
 /*
  * Set the thumbnail (aka miniature) of a given item.

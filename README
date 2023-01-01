@@ -1,10 +1,10 @@
                                  XFiles
 
-demo videos: https://ttm.sh/0Vp.mp4
+demo video: https://ttm.sh/0Vp.mp4
 
-This is a still incomplete file manager for X11.  It can only navigate
-through directories, select files (and do nothing with them), call a
-script to open files, and call a script to generate thumbnails.
+This is a file manager for X11.  It can navigate through directories,
+select files, call a script to open files, call a script to generate
+thumbnails, and call a command to run on right mouse button click.
 
 XFiles depends on a few environment variables to be usable:
 • HOME: You probably already have `$HOME` set on your system.
@@ -12,6 +12,7 @@ XFiles depends on a few environment variables to be usable:
 • OPENER: Program to be called to open files.  Defaults to `xdg-open`.
 • THUMBNAILER: Program to be called for generating thumbnails.
 • THUMBNAILDIR: Path to directory where thumbnails must be cached.
+• XFILES_CONTEXTCMD: Program to be called when right clicking.
 
 XFiles can be customized by setting the following X resources:
 • XFiles.faceName:      Font for drawing text.
@@ -30,12 +31,13 @@ following format:
 	[TYPE:][GLOB1|GLOB2|...|GLOBN]=PATH
 }
 
-TYPE is a character that must match the file's type.  For example, the
-TYPE "d*" matches a directory whose, and "-" matches any regular file.
+TYPE is a character that must match the file's type as specified by the
+first column of `ls -l`.  For example, the TYPE "d" matches a directory
+whose, and "-" matches any regular file.
 
 GLOB1 til GLOBN are bar-delimited glob strings that must match the entry
 being displayed by XFiles, for example, "*.png|*.jpg" matches files with
-png or jpg extension.  Globing matching is case insensitive.
+the png or jpg extensions.  Globing matching is case insensitive.
 
 PATH is the path to the icon in .xpm format.
 
@@ -73,6 +75,25 @@ script depends on the following programs:
 • ffmpeg(1): To generate thumbnail for audio files.
 
 
+§ Opening
+
+The opener program is called with two arguments: dash-dash "--" and the
+file's path.  If not specified with the OPENER environment variable, it
+defaults to xdg-open (I recommend you to use plumb[1] instead).
+
+[1]: https://github.com/phillbush/plumb
+
+
+§ Context menu
+
+The context command is called with the paths to the selected files as
+arguments.  If not specified with the XFILES_CONTEXTCMD environment
+varible, nothing is used.  I recommend you to use xmenu[2] or pmenu[3].
+
+[2]: https://github.com/phillbush/xmenu
+[3]: https://github.com/phillbush/pmenu
+
+
 § Questions
 
 .Why all icons are the X logo?
@@ -94,18 +115,19 @@ means, however, that there is no compression involved.  But thumbnails
 are at most 64x64 pixels in size, so there's no need for compression as
 the files are small.
 
-.What is this thing that opens on middle click?
+.What is that thing that opens on middle click?
 That's the scroller, it replaces the scrollbar.  It can be used either
 as a scrollbar, by dragging the handle with the left mouse button; or as
 Firefox's autoScroll feature, by moving the cursor up and down while
 holding no button at all.
 
-.What selection does?
-Nothing.  Yet.  It actually copies the paths of selected files into the
-PRIMARY selection.  You can then paste them into your text editor by
-middle clicking on the editor, or can be stored to the clipboard with
-xsel(1).  The idea is for me to develop other applications that will use
-the primary selection for file operations.
+.How can I enable autoScroll on Firefox?
+Set "general.autoScroll" to True on about:config.
+(Bro tip: do it).
+
+.Is there a context menu?
+Not nativelly.  You should use a menu application like xmenu or pmenu
+for that.
 
 .What features need to be implemented?
 • Implement copy and move operations.
