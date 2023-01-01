@@ -21,8 +21,8 @@ ${PROG}: ${OBJS}
 .c.o:
 	${CC} ${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
 
-xfiles.o: util.h widget.h winicon.data
-widget.o: util.h widget.h fileicon.xpm
+xfiles.o: util.h widget.h
+widget.o: util.h widget.h winicon.data fileicon.xpm
 
 tags: ${SRCS}
 	ctags ${SRCS}

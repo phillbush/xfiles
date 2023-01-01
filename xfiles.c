@@ -17,7 +17,6 @@
 #define HOME            "HOME"
 #define FILE_ICONS      "FILE_ICONS"
 #define APPCLASS        "XFiles"
-#define DEF_APPNAME     "xfiles"
 #define DEF_OPENER      "xdg-open"
 #define OPENER          "OPENER"
 #define THUMBNAILER     "THUMBNAILER"
@@ -580,14 +579,18 @@ main(int argc, char *argv[])
 	struct FM fm;
 	size_t nicons;
 	int ch, index, state;
+	int saveargc;
 	char *geom, *name, *path, *home, *iconpatts;
+	char **saveargv;
 	char **icons;
 
+	saveargv = argv;
+	saveargc = argc;
 	iconpatts = getenv(FILE_ICONS);
 	home = getenv(HOME);
 	geom = NULL;
 	path = NULL;
-	name = DEF_APPNAME;
+	name = NULL;
 	fm = (struct FM){
 		.capacity = 0,
 		.nentries = 0,
@@ -627,7 +630,7 @@ main(int argc, char *argv[])
 		path = *argv;
 	icons = parseicons(&fm, iconpatts, &nicons);
 	initthumbnailer(&fm);
-	if ((fm.wid = initwidget(APPCLASS, name, geom, argc, argv)) == NULL)
+	if ((fm.wid = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
 	openicons(fm.wid, icons, nicons);
 	free(icons);

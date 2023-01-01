@@ -1,7 +1,9 @@
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <locale.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -90,6 +92,12 @@ enum {
 };
 
 enum {
+	SELECT_NOT,
+	SELECT_YES,
+	SELECT_LAST,
+};
+
+enum {
 	COLOR_BG,
 	COLOR_FG,
 	COLOR_LAST,
@@ -130,6 +138,7 @@ struct Selection {
 };
 
 struct Widget {
+	char *progname;
 	int start;
 
 	/* X11 stuff */
@@ -138,8 +147,7 @@ struct Widget {
 	GC stipgc, gc;
 	Cursor cursors[CURSOR_LAST];    /* for the hourglass cursor, when loading */
 	Window win;
-	XftColor normal[COLOR_LAST];
-	XftColor select[COLOR_LAST];
+	XftColor colors[SELECT_LAST][COLOR_LAST];
 	XftFont *font;
 
 	Pixmap pix;                     /* the pixmap of the window */
@@ -238,7 +246,7 @@ struct Widget {
 
 	/* Strings used to build the title bar. */
 	const char *title;
-	char *class;
+	const char *class;
 
 	/*
 	 * Index of the last item clicked by the user; or -1 if none.
@@ -305,6 +313,20 @@ static char *atomnames[ATOM_LAST] = {
 	[_NULL]                      = "NULL",
 };
 
+static void
+warn(Widget wid, const char *fmt, ...)
+{
+	va_list ap;
+
+	if (fmt == NULL)
+		return;
+	(void)fprintf(stderr, "%s: ", wid->progname);
+	va_start(ap, fmt);
+	(void)vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	(void)fprintf(stderr, "\n");
+}
+
 static int
 createwin(Widget wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
 {
@@ -351,7 +373,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		CopyFromParent, CopyFromParent, CopyFromParent,
 		CWBackPixel | CWEventMask,
 		&(XSetWindowAttributes){
-			.background_pixel = wid->normal[COLOR_BG].pixel,
+			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
 			.event_mask = StructureNotifyMask | ExposureMask
 			            | KeyPressMask | PointerMotionMask
 			            | ButtonReleaseMask | ButtonPressMask,
@@ -405,7 +427,6 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 	return RET_OK;
 }
 
-/* get color from color string */
 static int
 ealloccolor(Display *dpy, const char *s, XftColor *color)
 {
@@ -414,18 +435,29 @@ ealloccolor(Display *dpy, const char *s, XftColor *color)
 	return RET_OK;
 }
 
-static void
-getresource(XrmDatabase xdb, const char *class, const char *name, const char *resource, char **val)
+static int
+eallocfont(Display *dpy, const char *s, XftFont **font)
+{
+	if ((*font = XftFontOpenXlfd(dpy, DefaultScreen(dpy), s)) == NULL)
+		if ((*font = XftFontOpenName(dpy, DefaultScreen(dpy), s)) == NULL)
+			return RET_ERROR;
+	return RET_OK;
+}
+
+static char *
+getresource(XrmDatabase xdb, const char *class, const char *name, const char *resource)
 {
 	XrmValue xval;
 	char *type;
 	char classbuf[RES_BUFSIZE], namebuf[RES_BUFSIZE];
 
+	if (xdb == NULL)
+		return NULL;
 	(void)snprintf(classbuf, RES_BUFSIZE, "%s.%s", class, resource);
 	(void)snprintf(namebuf, RES_BUFSIZE, "%s.%s", name, resource);
-	if (XrmGetResource(xdb, namebuf, classbuf, &type, &xval) == True) {
-		*val = xval.addr;
-	}
+	if (XrmGetResource(xdb, namebuf, classbuf, &type, &xval) == True)
+		return xval.addr;
+	return NULL;
 }
 
 static int
@@ -441,33 +473,67 @@ static int
 inittheme(Widget wid, const char *class, const char *name)
 {
 	XrmDatabase xdb;
-	char *bg, *fg, *selbg, *selfg, *font;
-	char *xrm;
+	int i, j, goterror;;
+	char *xrm, *s;
+	char *resources[SELECT_LAST][COLOR_LAST] = {
+		[SELECT_NOT][COLOR_BG] = "background",
+		[SELECT_NOT][COLOR_FG] = "foreground",
+		[SELECT_YES][COLOR_BG] = "selbackground",
+		[SELECT_YES][COLOR_FG] = "selforeground",
+	};
+	char *defvalue[SELECT_LAST][COLOR_LAST] = {
+		[SELECT_NOT][COLOR_BG] = DEF_BG,
+		[SELECT_NOT][COLOR_FG] = DEF_FG,
+		[SELECT_YES][COLOR_BG] = DEF_SELBG,
+		[SELECT_YES][COLOR_FG] = DEF_SELFG,
+	};
+	int colorerror[SELECT_LAST][COLOR_LAST] = { { FALSE, FALSE }, { FALSE, FALSE } };
+	int fonterror = FALSE;
 
-	bg = DEF_BG;
-	fg = DEF_FG;
-	selbg = DEF_SELBG;
-	selfg = DEF_SELFG;
-	font = DEF_FONT;
 	xdb = NULL;
-	if ((xrm = XResourceManagerString(wid->dpy)) != NULL && (xdb = XrmGetStringDatabase(xrm)) != NULL) {
-		getresource(xdb, class, name, "background", &bg);
-		getresource(xdb, class, name, "foreground", &fg);
-		getresource(xdb, class, name, "selbackground", &selbg);
-		getresource(xdb, class, name, "selforeground", &selfg);
-		getresource(xdb, class, name, "faceName", &font);
+	goterror = FALSE;
+	if ((xrm = XResourceManagerString(wid->dpy)) != NULL)
+		xdb = XrmGetStringDatabase(xrm);
+	for (i = 0; i < SELECT_LAST; i++) {
+		for (j = 0; j < COLOR_LAST; j++) {
+			s = getresource(xdb, class, name, resources[i][j]);
+			if (s == NULL) {
+				/* could not found resource; use default value */
+				s = defvalue[i][j];
+			} else if (ealloccolor(wid->dpy, s, &wid->colors[i][j]) == RET_ERROR) {
+				/* resource found, but allocation failed; use default value */
+				warn(wid, "\"%s\": could not load color (falling back to \"%s\")", s, defvalue[i][j]);
+				s = defvalue[i][j];
+			} else {
+				/* resource found and successfully allocated */
+				continue;
+			}
+			if (ealloccolor(wid->dpy, s, &wid->colors[i][j]) == RET_ERROR) {
+				warn(wid, "\"%s\": could not load color", s);
+				colorerror[i][j] = TRUE;
+				goterror = TRUE;
+			}
+		}
 	}
-	if (ealloccolor(wid->dpy, bg, &wid->normal[COLOR_BG]) == -1)
-		goto error_0;
-	if (ealloccolor(wid->dpy, fg, &wid->normal[COLOR_FG]) == -1)
-		goto error_1;
-	if (ealloccolor(wid->dpy, selbg, &wid->select[COLOR_BG]) == -1)
-		goto error_2;
-	if (ealloccolor(wid->dpy, selfg, &wid->select[COLOR_FG]) == -1)
-		goto error_3;
-	if ((wid->font = XftFontOpenXlfd(wid->dpy, DefaultScreen(wid->dpy), font)) == NULL)
-		if ((wid->font = XftFontOpenName(wid->dpy, DefaultScreen(wid->dpy), font)) == NULL)
-			goto error_4;
+	s = getresource(xdb, class, name, "faceName");
+	if (s == NULL) {
+		/* could not found resource; use default value */
+		s = DEF_FONT;
+	} else if (eallocfont(wid->dpy, s, &wid->font) == RET_ERROR) {
+		/* resource found, but allocation failed; use default value */
+		warn(wid, "\"%s\": could not open font (falling back to \"%s\")", s, DEF_FONT);
+		s = DEF_FONT;
+	} else {
+		goto done;
+	}
+	if (eallocfont(wid->dpy, s, &wid->font) == RET_ERROR) {
+		warn(wid, "\"%s\": could not open font", s);
+		fonterror = TRUE;
+		goterror = TRUE;
+	}
+done:
+	if (goterror)
+		goto error;
 	wid->fonth = wid->font->height;
 	wid->itemw = THUMBSIZE * 2;
 	wid->itemh = THUMBSIZE + 3 * wid->fonth;
@@ -475,16 +541,16 @@ inittheme(Widget wid, const char *class, const char *name)
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
 	return RET_OK;
-	XftFontClose(wid->dpy, wid->font);
-error_4:
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_FG]);
-error_3:
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_BG]);
-error_2:
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_FG]);
-error_1:
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_BG]);
-error_0:
+error:
+	for (i = 0; i < SELECT_LAST; i++) {
+		for (j = 0; j < COLOR_LAST; j++) {
+			if (colorerror[i][j])
+				continue;
+			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
+		}
+	}
+	if (!fonterror)
+		XftFontClose(wid->dpy, wid->font);
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
 	return RET_ERROR;
@@ -546,7 +612,7 @@ drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int
 	int w;
 
 	w = textwidth(wid, text, len);
-	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
+	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, 0, 0, LABELWIDTH, wid->fonth);
 	XSetForeground(wid->dpy, wid->gc, color[COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, x, 0, w, wid->fonth);
@@ -592,7 +658,7 @@ drawicon(Widget wid, int index, int x, int y)
 		);
 		if (wid->issel[index]) {
 			XSetFillStyle(wid->dpy, wid->gc, FillStippled);
-			XSetForeground(wid->dpy, wid->gc, wid->select[COLOR_BG].pixel);
+			XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_YES][COLOR_BG].pixel);
 			XFillRectangle(
 				wid->dpy,
 				wid->pix,
@@ -621,7 +687,7 @@ drawicon(Widget wid, int index, int x, int y)
 		);
 		if (wid->issel[index]) {
 			XSetFillStyle(wid->dpy, wid->gc, FillStippled);
-			XSetForeground(wid->dpy, wid->gc, wid->select[COLOR_BG].pixel);
+			XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_YES][COLOR_BG].pixel);
 			XFillRectangle(
 				wid->dpy,
 				wid->pix,
@@ -646,10 +712,7 @@ drawlabel(Widget wid, int index, int x, int y)
 	int extensionw, extensionlen;
 	char *text, *extension;
 
-	if (wid->issel != NULL && wid->issel[index])
-		color = wid->select;
-	else
-		color = wid->normal;
+	color = wid->colors[(wid->issel != NULL && wid->issel[index]) ? SELECT_YES : SELECT_NOT];
 	text = wid->items[index][ITEM_NAME];
 	textlen = strlen(text);
 	textw = textwidth(wid, text, textlen);
@@ -790,7 +853,7 @@ drawitem(Widget wid, int index)
 	y = (i / wid->ncols) % wid->nrows;
 	x *= wid->itemw;
 	y *= wid->itemh;
-	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
+	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->pix, wid->gc, x, y, wid->itemw, wid->itemh);
 	drawicon(wid, index, x, y);
 	drawlabel(wid, index, x, y);
@@ -803,7 +866,7 @@ drawitems(Widget wid)
 {
 	int i, n;
 
-	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
+	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->pix, wid->gc, 0, 0, wid->w, wid->nrows * wid->itemh);
 	n = lastvisible(wid);
 	for (i = wid->row * wid->ncols; i < n; i++) {
@@ -835,7 +898,7 @@ commitdraw(Widget wid)
 			.clip_mask = wid->rectbord,
 		}
 	);
-	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_FG].pixel);
+	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_FG].pixel);
 	XFillRectangle(wid->dpy, wid->win, wid->gc, 0, 0, wid->w, wid->h);
 	XChangeGC(
 		wid->dpy,
@@ -906,9 +969,9 @@ drawscroller(Widget wid, int y)
 
 	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, DEPTH(wid->dpy))) == None)
 		return;
-	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_BG].pixel);
+	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, pix, wid->gc, 0, 0, SCROLLER_SIZE, SCROLLER_SIZE);
-	XSetForeground(wid->dpy, wid->gc, wid->normal[COLOR_FG].pixel);
+	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_FG].pixel);
 	XFillRectangle(wid->dpy, pix, wid->gc, 1, y + 1, HANDLE_MAX_SIZE, wid->handlew);
 	XSetWindowBackgroundPixmap(wid->dpy, wid->scroller, pix);
 	XClearWindow(wid->dpy, wid->scroller);
@@ -965,6 +1028,8 @@ readsize(FILE *fp)
 	size = 0;
 	for (i = 0; i < 3; i++) {
 		c = fgetc(fp);
+		if (c == EOF)
+			return -1;
 		n = ATOI(c);
 		if (n == -1)
 			break;
@@ -1061,11 +1126,25 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	XpmAttributes xa;
 	Widget wid;
 	int ncounters, tmp, i;
+	char *progname, *s;
 
 	wid = NULL;
-	if ((wid = malloc(sizeof(*wid))) == NULL)
-		goto error_pre;
+	progname = "";
+	if (argc > 0 && argv[0] != NULL) {
+		progname = argv[0];
+		if ((s = strrchr(argv[0], '/')) != NULL) {
+			progname = s + 1;
+		}
+	}
+	if (name == NULL)
+		name = progname;
+	if ((wid = malloc(sizeof(*wid))) == NULL) {
+		(void)fprintf(stderr, "%s: malloc: %s", progname, strerror(errno));
+		return NULL;
+	}
 	*wid = (struct Widget){
+		.progname = progname,
+		.dpy = NULL,
 		.start = FALSE,
 		.win = None,
 		.scroller = None,
@@ -1076,7 +1155,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.icons = NULL,
 		.lastitem = -1,
 		.title = "",
-		.class = NULL,
+		.class = class,
 		.sel = NULL,
 		.issel = NULL,
 		.seltime = 0,
@@ -1092,49 +1171,75 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 			.trigger.test_type      = XSyncPositiveComparison,
 		},
 	};
-	if ((wid->class = strdup(class)) == NULL)
-		goto error_pre;
-	if (!XInitThreads())
-		goto error_pre;
-	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
-		goto error_pre;
-	if ((wid->dpy = XOpenDisplay(NULL)) == NULL)
-		goto error_pre;
-	if (!XSyncQueryExtension(wid->dpy, &wid->syncevent, &tmp))
-		goto error_pre;
-	if (!XSyncInitialize(wid->dpy, &tmp, &tmp))
-		goto error_pre;
+	if (!XInitThreads()) {
+		warn(wid, "XInitThreads");
+		goto error;
+	}
+	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale()) {
+		warn(wid, "could not set locale");
+		goto error;
+	}
+	if ((wid->dpy = XOpenDisplay(NULL)) == NULL) {
+		warn(wid, "could not connect to X server");
+		goto error;
+	}
+	if (!XSyncQueryExtension(wid->dpy, &wid->syncevent, &tmp)) {
+		warn(wid, "could not query XSync extension");
+		goto error;
+	}
+	if (!XSyncInitialize(wid->dpy, &tmp, &tmp)) {
+		warn(wid, "could not initialize XSync extension");
+		goto error;
+	}
 	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
-	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1)
-		goto error_dpy;
-	if ((wid->gc = XCreateGC(wid->dpy, ROOT(wid->dpy), GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None)
-		goto error_dpy;
-	if (inittheme(wid, class, name) == -1)
-		goto error_dpy;
-	if (createwin(wid, class, name, geom, argc, argv, winicon_data, winicon_size) == -1)
-		goto error_dpy;
+	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1) {
+		warn(wid, "fcntl: %s", strerror(errno));
+		goto error;
+	}
+	if ((wid->gc = XCreateGC(wid->dpy, ROOT(wid->dpy), GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
+		warn(wid, "could not create graphics context");
+		goto error;
+	}
+	if (inittheme(wid, class, name) == -1) {
+		warn(wid, "could not set theme");
+		goto error;
+	}
+	if (createwin(wid, class, name, geom, argc, argv, winicon_data, winicon_size) == -1) {
+		warn(wid, "could not create window");
+		goto error;
+	}
 	wid->scroller = XCreateWindow(
 		wid->dpy, wid->win,
 		0, 0, SCROLLER_SIZE, SCROLLER_SIZE, 1,
 		CopyFromParent, CopyFromParent, CopyFromParent,
 		CWBackPixel | CWBorderPixel | CWEventMask,
 		&(XSetWindowAttributes){
-			.background_pixel = wid->normal[COLOR_BG].pixel,
-			.border_pixel = wid->normal[COLOR_FG].pixel,
+			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
+			.border_pixel = wid->colors[SELECT_NOT][COLOR_FG].pixel,
 			.event_mask = ButtonPressMask | PointerMotionMask,
 		}
 	);
-	if (wid->scroller == None)
-		goto error_win;
+	if (wid->scroller == None) {
+		warn(wid, "could not create window");
+		goto error;
+	}
 	memset(&xa, 0, sizeof(xa));
-	if (XpmCreatePixmapFromData(wid->dpy, ROOT(wid->dpy), fileicon_xpm, &wid->deficon.pix, &wid->deficon.mask, &xa) != XpmSuccess)
-		goto error_win;
-	if (!(xa.valuemask & XpmSize))
-		goto error_pix;
-	if ((wid->stipple = XCreatePixmap(wid->dpy, ROOT(wid->dpy), STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None)
-		goto error_pix;
-	if ((wid->stipgc = XCreateGC(wid->dpy, wid->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None)
-		goto error_pix;
+	if (XpmCreatePixmapFromData(wid->dpy, ROOT(wid->dpy), fileicon_xpm, &wid->deficon.pix, &wid->deficon.mask, &xa) != XpmSuccess) {
+		warn(wid, "could not open default icon pixmap");
+		goto error;
+	}
+	if (!(xa.valuemask & XpmSize)) {
+		warn(wid, "could not open default icon pixmap");
+		goto error;
+	}
+	if ((wid->stipple = XCreatePixmap(wid->dpy, ROOT(wid->dpy), STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None) {
+		warn(wid, "could not create pixmap");
+		goto error;
+	}
+	if ((wid->stipgc = XCreateGC(wid->dpy, wid->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
+		warn(wid, "could not create graphics context");
+		goto error;
+	}
 	XSetForeground(wid->dpy, wid->stipgc, 0);
 	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
 	XSetForeground(wid->dpy, wid->stipgc, 1);
@@ -1151,30 +1256,27 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		}
 		XSyncFreeSystemCounterList(counters);
 	}
-	if (wid->syncattr.trigger.counter == None)
-		goto error_pix;
+	if (wid->syncattr.trigger.counter == None) {
+		warn(wid, "could not use XSync extension");
+		goto error;
+	}
 	XSyncIntToValue(&wid->syncattr.trigger.wait_value, 128);
 	XSyncIntToValue(&wid->syncattr.delta, 0);
 	return wid;
-error_pix:
+error:
 	if (wid->stipple != None)
 		XFreePixmap(wid->dpy, wid->stipple);
 	if (wid->deficon.pix != None)
 		XFreePixmap(wid->dpy, wid->deficon.pix);
 	if (wid->deficon.mask != None)
 		XFreePixmap(wid->dpy, wid->deficon.mask);
-error_win:
 	if (wid->scroller != None)
 		XDestroyWindow(wid->dpy, wid->scroller);
 	if (wid->win != None)
 		XDestroyWindow(wid->dpy, wid->win);
-error_dpy:
-	XCloseDisplay(wid->dpy);
-error_pre:
-	if (wid->class != NULL)
-		free(wid->class);
-	if (wid != NULL)
-		free(wid);
+	if (wid->dpy != NULL)
+		XCloseDisplay(wid->dpy);
+	free(wid);
 	return NULL;
 }
 
@@ -1872,10 +1974,8 @@ scrollmotion(Widget wid, int x, int y)
 				goto done;
 			break;
 		case ButtonPress:
-			if (ev.xbutton.button == Button2)
-				goto done;
 			if (ev.xbutton.button != Button1)
-				break;
+				goto done;
 			if (ev.xbutton.window == wid->win)
 				goto done;
 			if (ev.xbutton.window == wid->scroller) {
@@ -1914,6 +2014,7 @@ xpmtopixmap(Widget wid, char *path, Pixmap *pix, Pixmap *mask)
 	if (XpmReadFileToPixmap(wid->dpy, ROOT(wid->dpy), path, pix, mask, &xa) != XpmSuccess) {
 		*pix = None;
 		*mask = None;
+		warn(wid, "%s: could load icon file", path);
 	}
 }
 
@@ -1992,7 +2093,7 @@ pollwidget(Widget wid, int *index)
 void
 closewidget(Widget wid)
 {
-	int i;
+	int i, j;
 
 	cleanwidget(wid);
 	for (i = 0; i < wid->nicons; i++) {
@@ -2010,16 +2111,14 @@ closewidget(Widget wid)
 	XFreePixmap(wid->dpy, wid->rectbord);
 	XFreePixmap(wid->dpy, wid->namepix);
 	XFreePixmap(wid->dpy, wid->stipple);
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_BG]);
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->normal[COLOR_FG]);
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_BG]);
-	XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->select[COLOR_FG]);
+	for (i = 0; i < SELECT_LAST; i++)
+		for (j = 0; j < COLOR_LAST; j++)
+			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
 	XftFontClose(wid->dpy, wid->font);
 	XDestroyWindow(wid->dpy, wid->scroller);
 	XDestroyWindow(wid->dpy, wid->win);
 	XFreeGC(wid->dpy, wid->gc);
 	XCloseDisplay(wid->dpy);
-	free(wid->class);
 	free(wid);
 }
 
@@ -2047,32 +2146,49 @@ setthumbnail(Widget wid, char *path, int item)
 	char buf[DATA_DEPTH];
 	char *data;
 
-	if (wid->thumbs == NULL)
+	if (item < 0 || item >= wid->nitems || wid->thumbs == NULL)
 		return;
-	if ((fp = fopen(path, "rb")) == NULL)
-		return;
-	if (checkheader(fp, PPM_HEADER, PPM_HEADER_SIZE) == -1)
-		goto error_fp;
+	data = NULL;
+	wid->thumbs[item] = NULL;
+	if ((fp = fopen(path, "rb")) == NULL) {
+		warn(wid, "%s: %s", path, strerror(errno));
+		goto error;
+	}
+	if (checkheader(fp, PPM_HEADER, PPM_HEADER_SIZE) == -1) {
+		warn(wid, "%s: not a ppm file", path);
+		goto error;
+	}
 	w = readsize(fp);
 	h = readsize(fp);
-	if (w <= 0 || w > THUMBSIZE || h <= 0 || h > THUMBSIZE)
-		goto error_fp;
-	if (checkheader(fp, PPM_COLOR, PPM_COLOR_SIZE) == -1)
-		goto error_fp;
+	if (w <= 0 || w > THUMBSIZE || h <= 0 || h > THUMBSIZE) {
+		warn(wid, "%s: ppm file with invalid header", path);
+		goto error;
+	}
+	if (checkheader(fp, PPM_COLOR, PPM_COLOR_SIZE) == -1) {
+		warn(wid, "%s: ppm file with invalid header", path);
+		goto error;
+	}
 	size = w * h;
-	if ((data = malloc(size * DATA_DEPTH)) == NULL)
-		goto error_fp;
+	if ((data = malloc(size * DATA_DEPTH)) == NULL) {
+		warn(wid, "malloc: %s", strerror(errno));
+		goto error;
+	}
 	for (i = 0; i < size; i++) {
-		if (fread(buf, 1, PPM_DEPTH, fp) != PPM_DEPTH)
-			goto error_fp;
+		if (fread(buf, 1, PPM_DEPTH, fp) != PPM_DEPTH) {
+			warn(wid, "%s: %s", path, strerror(errno));
+			goto error;
+		}
 		data[i * DATA_DEPTH + 0] = buf[2];   /* B */
 		data[i * DATA_DEPTH + 1] = buf[1];   /* G */
 		data[i * DATA_DEPTH + 2] = buf[0];   /* R */
 		data[i * DATA_DEPTH + 3] = '\0';     /* A */
 	}
 	fclose(fp);
-	if ((wid->thumbs[item] = malloc(sizeof(*wid->thumbs[item]))) == NULL)
-		goto error_data;
+	fp = NULL;
+	if ((wid->thumbs[item] = malloc(sizeof(*wid->thumbs[item]))) == NULL) {
+		warn(wid, "malloc: %s", strerror(errno));
+		goto error;
+	}
 	*wid->thumbs[item] = (struct Thumb){
 		.w = w,
 		.h = h,
@@ -2089,8 +2205,10 @@ setthumbnail(Widget wid, char *path, int item)
 		DATA_DEPTH * BYTE,
 		0
 	);
-	if (wid->thumbs[item]->img == NULL)
-		goto error_thumb;
+	if (wid->thumbs[item]->img == NULL) {
+		warn(wid, "%s: could not allocate XImage", path);
+		goto error;
+	}
 	XInitImage(wid->thumbs[item]->img);
 	wid->thumbhead = wid->thumbs[item];
 	if (item >= wid->row * wid->ncols && item < wid->row * wid->ncols + wid->nrows * wid->ncols) {
@@ -2099,14 +2217,12 @@ setthumbnail(Widget wid, char *path, int item)
 		XFlush(wid->dpy);
 	}
 	return;
-error_thumb:
+error:
+	if (fp != NULL)
+		fclose(fp);
+	free(data);
 	free(wid->thumbs[item]);
 	wid->thumbs[item] = NULL;
-error_data:
-	free(data);
-	return;
-error_fp:
-	fclose(fp);
 }
 
 void

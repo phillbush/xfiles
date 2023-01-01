@@ -13,161 +13,233 @@ enum {
 
 enum {
 	/* item elements */
-	ITEM_NAME,
-	ITEM_PATH,
-	ITEM_STATUS,
+	ITEM_NAME,   /* indexes the label displayed for the item */
+	ITEM_PATH,   /* indexes the path given in PRIMARY selection */
+	ITEM_STATUS, /* indexes the status displayed on titlebar when item is selected */
 	ITEM_LAST,
 };
 
 typedef struct Widget *Widget;;
 
 /*
- * Create and initialize a widget.  A widget is an icon container used
- * to display a scrollable grid of icons.
+ * Create and initialize a widget, and returns a pointer to it.
  *
- * The `class` and `name` parameters are the values which .res_class and
- * .res_name members of the widget's XClassHint(3) property are set to.
+ * If an error has occurred, a line describing the error is written to
+ * stderr and it returns NULL.  If an error occurred, this function must
+ * not be called again.
  *
- * All pointer parameters can be freed after calling initwidget(),
- * because this function copies them if necessary into the widget
- * itself.
+ * The parameters are as follows:
  *
- * The `geom` parameter is a string specifying the initial geometry for
- * the widget window; the string is parsed with XParseGeometry(3).
+ * - class:
+ *   String which the .res_class member of the widget's XClassHint(3)
+ *   property is set to.  It should not be null; and should not be freed
+ *   or changed during the entire life of the widget.
  *
- * The `argc` and `argv` argument are used to set the `WM_COMMAND`
- * property of the widget's window.  initwidget() does not change
- * argv, nor the strings it points to.
+ * - name:
+ *   String which the .res_name member of the widget's XClassHint(3)
+ *   property is set to.  It can be null, in which case, the name of
+ *   the program (passed through `argv`) is used.  If not null, it
+ *   should not be freed or changed during the entire life of the
+ *   widget.
  *
- * This function can only be called once for each widget.
+ * - geom:
+ *   String to be parsed by XParseGeometry(3) specifying the initial
+ *   geometry for the widget window.  It can be freed after calling
+ *   initwidget().
+ *
+ * - argc:
+ *   Integer passed to XSetCommand(3) specifying the number of arguments
+ *   the program was called with.
+ *
+ * - argv:
+ *   Array of strings passed to XSetCommand(3) specifying the arguments
+ *   the program was called with.  It can be freed after calling
+ *   initwidget().
  */
-Widget initwidget(const char *class, const char *name, const char *geom, int argc, char *argv[]);
+Widget initwidget(
+	const char *class,
+	const char *name,
+	const char *geom,
+	int argc,
+	char *argv[]
+);
 
 /*
- * Opens .xpm icons to be used for displaying the items on the icon
- * grid.
+ * Try to open a sequence of .xpm icons for displaying the items on the
+ * widget.  This function can only be called once for each widget, after
+ * the widget has been created.
  *
- * The `wid` parameter is a widget created with `initwidget()`.
+ * If an icon could not be open, it writes a line describing the problem
+ * to stderr.  It is not an error if an icon could not be open, and the
+ * calling function must do nothing in such case (it is not notified
+ * whether an error occurred, anyway); in such case, a fallback icon is
+ * used instead.
  *
- * The `path` parameter is an array of `nicons` strings.  Each one
- * containing the path to a icon.
+ * The parameters are as follows:
  *
- * When called, this function tries to open each icon using libXpm
- * functions.
+ * - wid:
+ *   Widget previously created with initwidget().
  *
- * This function can only be called once for each widget, after they
- * have been created.
+ * - path:
+ *   Array of strings for the path to the icons.
+ *
+ * - nicons:
+ *   Integer specifying the number of elements in `path`.
  */
 void openicons(Widget wid, char *paths[], int nicons);
 
 /*
- * Set the current state and icons of the widget `wid`.
+ * Set the current state of a widget and its current list of items.
  *
- * The `wid` parameter is a widget created with `initwidget()`.
+ * This function can be called at any time for each widget, after it has
+ * been created.  Whenever it is called, the list of items displayed on
+ * the widget is reset.
  *
- * The `title` parameter is the name of the currently visible set of
- * icons (such as the name of the current directory, when using widget.c
- * to display directory entries).
+ * The parameters are as follows:
  *
- * The `items` parameter is an array of arrays of strings.  The outer
- * array, `items` must have `nitems` arrays, each one representing the
- * data of an item.  For each item `i` (0<=i<nitems), `items[i]` is an
- * array of, at least three strings:
- * - .items[i][ITEM_NAME]   -- The label displayed for the item.
- * - .items[i][ITEM_PATH]   -- The path given in PRIMARY selection.
- * - .items[i][ITEM_STATUS] -- The status string displayed on the
- *                             titlebar when the item is selected.
+ * - wid:
+ *   Widget previously created with initwidget().
  *
- * The `itemicons` parameter is an array of `nitems` integers, each
- * member is the index of an icon open by `openicons()`.  If, for an
- * item, the icon index is less than zero, or if the corresponding icon
- * could not be open by `openicons()`, a default icon (the X logo) is
- * displayed for the item instead.
+ * - title:
+ *   String naming the currently visible set of icons (such as the name
+ *   of the current directory, whe using widget.c to display directory
+ *   entries).  It should not be null, and should not be freed or
+ *   changed until the next call of setwidget().
  *
- * All the parameters `title`, `items` and `itemicons` and the memory
- * pointed to by them, either directly or indirectly, should exist
- * and be acessible and not be deallocated until the next call of
- * setwidget(), after which they can be freed.
+ * - items:
+ *   Array of arrays of strings.  Each element of the outer array
+ *   represents the data of an item.  Each inner array contains
+ *   ITEM_LAST (3) items, and are indexed by the ITEM_* enums (see
+ *   above).  Neither it or its members should not be null, and should
+ *   not be freed or changed until the next call of setwidget().
  *
- * This function can be called at any time for each item, after it has
- * been created.  Whenever it is called, the list of items is reset.
+ * - itemicons:
+ *   Array of integers, each member is the index of an icon open by
+ *   openicons().  If, for an item, the icon index is less than zero, or
+ *   if the corresponding icon could not have been open by openicons(),
+ *   a default icon (the X logo) is displayed for the item instead.  It
+ *   should not be null, and should not be freed until the next call of
+ *   setwidget().
+ *
+ * - nitems:
+ *   Size variable setting the number of members of the "items" and
+ *   "itemicons" parameter arrays.
  */
-void setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems);
+void setwidget(
+	Widget wid,
+	const char *title,
+	char **items[],
+	int itemicons[],
+	size_t nitems
+);
 
 /*
  * Realize the widget by mapping its window in the screen.
  *
- * The `wid` parameter is a widget created with `initwidget()`.
+ * This function must only be called after a widget has been created
+ * with initwidget() and set with setwidget(); but can be called at
+ * any time thereafter.  Note, however, that it is only necessary to
+ * call this function once; because, once the widget has been mapped,
+ * it does not need to be mapped again.
  *
- * This function can be called at any time after a widget was created
- * with `initwidget()` and set with `setwidget()`.  Note, however that
- * it is only necessary to call this function once; because, once the
- * widget is mapped, it does not need to be mapped again.
+ * The parameters are as follows:
+ *
+ * - wid:
+ *   Widget previously created with initwidget().
  */
 void mapwidget(Widget wid);
 
 /*
- * Reads events for the widget, such as user interaction, and process
- * them.  It return a `WidgetEvent` value depending on the result of the
- * event processing:
+ * Process events directed to the widget, such as user interaction.
+ * It return a `WidgetEvent` value depending on the result of the event
+ * processing:
  *
- * - WIDGET_CONTINUE: This value is never returned, and is only used
- *   internally by widget.c
+ * - WIDGET_CONTINUE:
+ *   This value is never returned, and is only used internally by
+ *   widget.c
  *
- * - WIDGET_CLOSE: The widget was closed.
+ * - WIDGET_CLOSE:
+ *   The widget was closed.
  *
- * - WIDGET_OPEN: An item was open by the user by double-clicking it.
- *   The index of the open item is returned at *index.
+ * - WIDGET_OPEN:
+ *   An item was open by the user by double-clicking it.  The index of
+ *   the open item is returned at *index.
  *
- * - WIDGET_ERROR: An error occurred after processing the widget.  If
- *   this is returned, pollwidget() should not be called again; and the
+ * - WIDGET_ERROR:
+ *   An error occurred while processing the widget.  If this is
+ *   returned, pollwidget() should not be called again; and the
  *   widget must be closed.
  *
- * The `wid` parameter is a widget created with `initwidget()`.
+ * This function can be called at any time, usually in a loop, after a
+ * widget was created with initwidget() and set with setwidget().
  *
- * The `index` parameter is a pointer to a index returned when a item is
- * open.
+ * The parameters are as follows:
  *
- * This function can be called at any time after a widget was created
- * with `initwidget()` and set with `setwidget()`.
+ * - wid:
+ *   Widget previously created with initwidget().
+ *
+ * - index:
+ *   Pointer to a integer indexing the open item.  This parameter is
+ *   only set when this function returns WIDGET_OPEN.
  */
-WidgetEvent pollwidget(Widget, int *index);
+WidgetEvent pollwidget(Widget wid, int *index);
 
 /*
  * Set the thumbnail (aka miniature) of a given item.
  *
- * The `wid` parameter is a widget created with `initwidget()`.
+ * This function must only be called after a widget has been created
+ * with initwidget() and set with setwidget(); but can be called at
+ * any time thereafter.
  *
- * The `path` parameter is the path to a .ppm image file.
- * The image should be at most 64x64 in size.
+ * If the .ppm file could not be open, this function writes a line
+ * describing the error on stderr, but the calling function is not
+ * notified that the error occurred (as it is not fatal); in such case,
+ * the icon originally set for the item when setwidget() was called is
+ * used instead.
  *
- * The `index` parameter is the index of a item, as set by
- * `setwidget()`.
+ * The parameters are as follows:
  *
- * This function can be called at any time after a widget was created
- * with `initwidget()` and set with `setwidget()`.
+ * - wid:
+ *   Widget previously created with initwidget().
+ *
+ * - path:
+ *   String containing the path to a .ppm image file.  The image should
+ *   be at most 64x64 in size.
+ *
+ * - index:
+ *   Integer indexing the item whose miniature is to be set.  It must be
+ *   greater than or equal to zero, and less than the value of the
+ *   nitems parameter passed to the previous call to setwidget().
  */
 void setthumbnail(Widget wid, char *path, int index);
 
 /*
- * Set the cursor for a widget.
+ * Set the cursor for the widget.  The only options available are
+ * CURSOR_NORMAL (for the regular cursor) and CURSOR_WATCH (for a
+ * hourglass cursor, generally used while processing something).
  *
- * The `wid` parameter is a widget created with `initwidget()`.
+ * This function must only be called after a widget has been created
+ * with initwidget() and set with setwidget(); but can be called at
+ * any time thereafter.
  *
- * The `cursor` parameter is either `CURSOR_NORMAL` (for a normal
- * cursor), or `CURSOR_WATCH` (for a hourglass cursor, used while
- * processing something).
+ * The parameters are as follows:
  *
- * This function can be called at any time after a widget was created
- * with `initwidget()` and set with `setwidget()`.
+ * - wid:
+ *   Widget previously created with initwidget().
+ *
+ * - cursor:
+ *   Either CURSOR_NORMAL or CURSOR_WATCH.
  */
 void widgetcursor(Widget wid, int cursor);
 
 /*
  * Close the widget and free all memory used by it.
  *
- * The `wid` parameter is a widget created with `initwidget()`.
- *
  * This function must only be called once for each widget.
+ *
+ * The parameters are as follows:
+ *
+ * - wid:
+ *   Widget previously created with initwidget().
  */
 void closewidget(Widget wid);
