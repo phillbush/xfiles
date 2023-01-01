@@ -670,5 +670,5 @@ done:
 	free(fm.entries);
 	free(fm.foundicons);
 	closewidget(fm.wid);
-	return EXIT_SUCCESS;
+	return exitval;
 }
