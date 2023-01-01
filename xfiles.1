@@ -32,16 +32,19 @@ property.
 .Ar name
 is used to retrieve resources.
 If not specified, defaults to
-.Qq "xfiles" .
+the name of the command
+.Nm
+was invoked as (that is, the
+.Xr basename 3
+of its
+.Ic "argv[0]" ) .
 .El
 .Pp
 If no
 .Ar directory
 is given as argument,
 .Nm
-opens at user's
-.Ev HOME
-directory.
+opens at the current directory.
 Otherwise, it opens at the given directory.
 .Sh ENVIRONMENT
 The following environment variables affect the execution of
@@ -90,13 +93,13 @@ The second argument is the path to the thumbnail image to be created in the PPM 
 .It Ev THUMBNAILDIR
 Path to the directory where thumbnails must be saved.
 .El
-.Sh RESOURCEs
+.Sh RESOURCES
 .Nm understands the following X resources.
 They must be prefixed with either the
-.Qq "XFiles."
-class, or the name given with the
+.Qq "XFiles"
+class or the name given with the
 .Fl n
-command-line option.
+command-line option, followed by a period.
 .Bl -tag -width Ds
 .It Ic faceName
 Font for drawing text.
