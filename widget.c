@@ -1315,6 +1315,9 @@ error:
 	free(wid->issel);
 	free(wid->linelens);
 	free(wid->thumbs);
+	wid->issel = NULL;
+	wid->linelens = NULL;
+	wid->thumbs = NULL;
 	return RET_ERROR;
 }
 
