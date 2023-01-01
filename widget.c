@@ -839,7 +839,7 @@ drawitem(Widget wid, int index)
 	etlock(&wid->lock);
 	min = firstvisible(wid);
 	max = lastvisible(wid);
-	if (index < min || index >= max)
+	if (index < min || index > max)
 		goto done;
 	i = index - min;
 	x = i % wid->ncols;
