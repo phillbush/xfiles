@@ -1,5 +1,5 @@
 #include <ctype.h>
-#include <errno.h>
+#include <err.h>
 #include <fcntl.h>
 #include <locale.h>
 #include <stdio.h>
@@ -122,6 +122,12 @@ enum {
 	ATOM_LAST,
 };
 
+enum {
+	/* flags for selectitem() */
+	REDRAW      = 0x1,
+	RECTANGLE   = 0x2,
+};
+
 struct Icon {
 	Pixmap pix, mask;
 };
@@ -158,7 +164,7 @@ struct Widget {
 	/*
 	 * TODO
 	 */
-	pthread_mutex_t rowlock;
+	pthread_mutex_t lock;
 
 	/*
 	 * .items is an array of arrays of strings.
@@ -191,6 +197,7 @@ struct Widget {
 	 * example, given the index of an item.
 	 */
 	struct Selection *sel;          /* list of selections */
+	struct Selection *rectsel;      /* list of selections by rectsel */
 	struct Selection **issel;       /* array of pointers to Selections */
 	Time seltime;
 
@@ -312,20 +319,6 @@ static char *atomnames[ATOM_LAST] = {
 	[_NET_WM_WINDOW_TYPE_NORMAL] = "_NET_WM_WINDOW_TYPE_NORMAL",
 	[_NULL]                      = "NULL",
 };
-
-static void
-warn(Widget wid, const char *fmt, ...)
-{
-	va_list ap;
-
-	if (fmt == NULL)
-		return;
-	(void)fprintf(stderr, "%s: ", wid->progname);
-	va_start(ap, fmt);
-	(void)vfprintf(stderr, fmt, ap);
-	va_end(ap);
-	(void)fprintf(stderr, "\n");
-}
 
 static int
 createwin(Widget wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
@@ -502,14 +495,14 @@ inittheme(Widget wid, const char *class, const char *name)
 				s = defvalue[i][j];
 			} else if (ealloccolor(wid->dpy, s, &wid->colors[i][j]) == RET_ERROR) {
 				/* resource found, but allocation failed; use default value */
-				warn(wid, "\"%s\": could not load color (falling back to \"%s\")", s, defvalue[i][j]);
+				warnx("\"%s\": could not load color (falling back to \"%s\")", s, defvalue[i][j]);
 				s = defvalue[i][j];
 			} else {
 				/* resource found and successfully allocated */
 				continue;
 			}
 			if (ealloccolor(wid->dpy, s, &wid->colors[i][j]) == RET_ERROR) {
-				warn(wid, "\"%s\": could not load color", s);
+				warnx("\"%s\": could not load color", s);
 				colorerror[i][j] = TRUE;
 				goterror = TRUE;
 			}
@@ -521,13 +514,13 @@ inittheme(Widget wid, const char *class, const char *name)
 		s = DEF_FONT;
 	} else if (eallocfont(wid->dpy, s, &wid->font) == RET_ERROR) {
 		/* resource found, but allocation failed; use default value */
-		warn(wid, "\"%s\": could not open font (falling back to \"%s\")", s, DEF_FONT);
+		warnx("\"%s\": could not open font (falling back to \"%s\")", s, DEF_FONT);
 		s = DEF_FONT;
 	} else {
 		goto done;
 	}
 	if (eallocfont(wid->dpy, s, &wid->font) == RET_ERROR) {
-		warn(wid, "\"%s\": could not open font", s);
+		warnx("\"%s\": could not open font", s);
 		fonterror = TRUE;
 		goterror = TRUE;
 	}
@@ -565,7 +558,7 @@ calcsize(Widget wid, int w, int h)
 	ret = 0;
 	if (wid->w == w && wid->h == h)
 		return 0;
-	etlock(&wid->rowlock);
+	etlock(&wid->lock);
 	ncols = wid->ncols;
 	nrows = wid->nrows;
 	if (w >= 0 && h >= 0) {
@@ -595,7 +588,7 @@ calcsize(Widget wid, int w, int h)
 		wid->rectbord = XCreatePixmap(wid->dpy, ROOT(wid->dpy), wid->w, wid->h, CLIP_DEPTH);
 		ret = 1;
 	}
-	etunlock(&wid->rowlock);
+	etunlock(&wid->lock);
 	return ret;
 }
 
@@ -624,9 +617,9 @@ drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int
 static void
 setrow(Widget wid, int row)
 {
-	etlock(&wid->rowlock);
+	etlock(&wid->lock);
 	wid->row = row;
-	etunlock(&wid->rowlock);
+	etunlock(&wid->lock);
 }
 
 static void
@@ -843,7 +836,7 @@ drawitem(Widget wid, int index)
 {
 	int i, x, y, min, max;
 
-	etlock(&wid->rowlock);
+	etlock(&wid->lock);
 	min = firstvisible(wid);
 	max = lastvisible(wid);
 	if (index < min || index > max)
@@ -858,7 +851,7 @@ drawitem(Widget wid, int index)
 	drawicon(wid, index, x, y);
 	drawlabel(wid, index, x, y);
 done:
-	etunlock(&wid->rowlock);
+	etunlock(&wid->lock);
 }
 
 static void
@@ -877,6 +870,7 @@ drawitems(Widget wid)
 static void
 commitdraw(Widget wid)
 {
+	etlock(&wid->lock);
 	XClearWindow(wid->dpy, wid->win);
 	XCopyArea(
 		wid->dpy,
@@ -887,7 +881,7 @@ commitdraw(Widget wid)
 		wid->x0, 0
 	);
 	if (wid->state != STATE_SELECTING)
-		return;
+		goto done;
 	XChangeGC(
 		wid->dpy,
 		wid->gc,
@@ -908,6 +902,8 @@ commitdraw(Widget wid)
 			.clip_mask = None,
 		}
 	);
+done:
+	etunlock(&wid->lock);
 }
 
 static void
@@ -1139,7 +1135,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	if (name == NULL)
 		name = progname;
 	if ((wid = malloc(sizeof(*wid))) == NULL) {
-		(void)fprintf(stderr, "%s: malloc: %s", progname, strerror(errno));
+		warn("malloc");
 		return NULL;
 	}
 	*wid = (struct Widget){
@@ -1148,7 +1144,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.start = FALSE,
 		.win = None,
 		.scroller = None,
-		.rowlock = PTHREAD_MUTEX_INITIALIZER,
+		.lock = PTHREAD_MUTEX_INITIALIZER,
 		.thumbs = NULL,
 		.thumbhead = NULL,
 		.linelens = NULL,
@@ -1172,40 +1168,40 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		},
 	};
 	if (!XInitThreads()) {
-		warn(wid, "XInitThreads");
+		warnx("XInitThreads");
 		goto error;
 	}
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale()) {
-		warn(wid, "could not set locale");
+		warnx("could not set locale");
 		goto error;
 	}
 	if ((wid->dpy = XOpenDisplay(NULL)) == NULL) {
-		warn(wid, "could not connect to X server");
+		warnx("could not connect to X server");
 		goto error;
 	}
 	if (!XSyncQueryExtension(wid->dpy, &wid->syncevent, &tmp)) {
-		warn(wid, "could not query XSync extension");
+		warnx("could not query XSync extension");
 		goto error;
 	}
 	if (!XSyncInitialize(wid->dpy, &tmp, &tmp)) {
-		warn(wid, "could not initialize XSync extension");
+		warnx("could not initialize XSync extension");
 		goto error;
 	}
 	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
 	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1) {
-		warn(wid, "fcntl: %s", strerror(errno));
+		warn("fcntl");
 		goto error;
 	}
 	if ((wid->gc = XCreateGC(wid->dpy, ROOT(wid->dpy), GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
-		warn(wid, "could not create graphics context");
+		warnx("could not create graphics context");
 		goto error;
 	}
 	if (inittheme(wid, class, name) == -1) {
-		warn(wid, "could not set theme");
+		warnx("could not set theme");
 		goto error;
 	}
 	if (createwin(wid, class, name, geom, argc, argv, winicon_data, winicon_size) == -1) {
-		warn(wid, "could not create window");
+		warnx("could not create window");
 		goto error;
 	}
 	wid->scroller = XCreateWindow(
@@ -1220,24 +1216,24 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		}
 	);
 	if (wid->scroller == None) {
-		warn(wid, "could not create window");
+		warnx("could not create window");
 		goto error;
 	}
 	memset(&xa, 0, sizeof(xa));
 	if (XpmCreatePixmapFromData(wid->dpy, ROOT(wid->dpy), fileicon_xpm, &wid->deficon.pix, &wid->deficon.mask, &xa) != XpmSuccess) {
-		warn(wid, "could not open default icon pixmap");
+		warnx("could not open default icon pixmap");
 		goto error;
 	}
 	if (!(xa.valuemask & XpmSize)) {
-		warn(wid, "could not open default icon pixmap");
+		warnx("could not open default icon pixmap");
 		goto error;
 	}
 	if ((wid->stipple = XCreatePixmap(wid->dpy, ROOT(wid->dpy), STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None) {
-		warn(wid, "could not create pixmap");
+		warnx("could not create pixmap");
 		goto error;
 	}
 	if ((wid->stipgc = XCreateGC(wid->dpy, wid->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
-		warn(wid, "could not create graphics context");
+		warnx("could not create graphics context");
 		goto error;
 	}
 	XSetForeground(wid->dpy, wid->stipgc, 0);
@@ -1257,7 +1253,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		XSyncFreeSystemCounterList(counters);
 	}
 	if (wid->syncattr.trigger.counter == None) {
-		warn(wid, "could not use XSync extension");
+		warnx("could not use XSync extension");
 		goto error;
 	}
 	XSyncIntToValue(&wid->syncattr.trigger.wait_value, 128);
@@ -1315,23 +1311,26 @@ mapwidget(Widget wid)
 }
 
 static void
-selectitem(Widget wid, int index, int select, int redraw)
+selectitem(Widget wid, int index, int select, int flags)
 {
 	struct Selection *sel;
+	struct Selection **header;
 
 	if (wid->issel == NULL || index <= 0 || index >= wid->nitems)
 		return;
+	header = (flags & RECTANGLE) ? &wid->rectsel : &wid->sel;
+
 	if (select && wid->issel[index] == NULL) {
 		if ((sel = malloc(sizeof(*sel))) == NULL)
 			return;
 		*sel = (struct Selection){
-			.next = wid->sel,
+			.next = *header,
 			.prev = NULL,
-			.index = index,
+			.index = ((flags & RECTANGLE) ? -1 : 1) * index,
 		};
-		if (wid->sel != NULL)
-			wid->sel->prev = sel;
-		wid->sel = sel;
+		if (*header != NULL)
+			(*header)->prev = sel;
+		*header = sel;
 		wid->issel[index] = sel;
 	} else if (!select && wid->issel[index] != NULL) {
 		sel = wid->issel[index];
@@ -1339,14 +1338,14 @@ selectitem(Widget wid, int index, int select, int redraw)
 			sel->next->prev = sel->prev;
 		if (sel->prev != NULL)
 			sel->prev->next = sel->next;
-		if (wid->sel == sel)
-			wid->sel = sel->next;
+		if (*header == sel)
+			*header = sel->next;
 		free(sel);
 		wid->issel[index] = NULL;
 	} else {
 		return;
 	}
-	if (redraw) {
+	if (flags & REDRAW) {
 		drawitem(wid, index);
 	}
 }
@@ -1366,7 +1365,7 @@ selectitems(Widget wid, int a, int b, int select)
 		max = a;
 	}
 	for (i = min; i <= max; i++) {
-		selectitem(wid, i, select, FALSE);
+		selectitem(wid, i, select, 0);
 	}
 }
 
@@ -1374,7 +1373,7 @@ static void
 unselectitems(Widget wid)
 {
 	while (wid->sel) {
-		selectitem(wid, wid->sel->index, FALSE, TRUE);
+		selectitem(wid, wid->sel->index, FALSE, REDRAW);
 	}
 }
 
@@ -1620,7 +1619,7 @@ mouseclick(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 		selectitems(wid, wid->lastitem, previtem, 1);
 		redrawall = TRUE;
 	} else {
-		selectitem(wid, wid->lastitem, ((ev->state & ControlMask) ? wid->issel[wid->lastitem] == NULL : 1), !redrawall);
+		selectitem(wid, wid->lastitem, ((ev->state & ControlMask) ? wid->issel[wid->lastitem] == NULL : FALSE), REDRAW);
 	}
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
 	    ev->time - (*lasttime) <= DOUBLECLICK) {
@@ -1672,22 +1671,15 @@ rectdraw(Widget wid, int row, int ydiff, int x0, int y0, int x, int y)
 	);
 }
 
-static void
-rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, int y, int redraw)
+static int
+rectselect(Widget wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, int dsty)
 {
-	int row, col, tmp, i, sel;
+	int row, col, tmp, i;
+	int changed;
+	int sel, x, y;
 
 	/* x,y positions of the vertices of the rectangular selection */
 	int minx, maxx, miny;
-
-	/*
-	 * Those variables begin describing the x,y positions of the
-	 * source and destination vertices of the rectangular selection.
-	 * But after calling getitem(), they are converted to the
-	 * positions of the vertices of the inner item area of the
-	 * item below each vertex.
-	 */
-	int srcx, srcy, dstx, dsty;
 
 	/*
 	 * Indices of visible items.
@@ -1708,13 +1700,9 @@ rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, 
 	int rowmin;
 	int rowsrc;
 
-	miny = min(clicky, y);
-	minx = min(clickx, x);
-	maxx = max(clickx, x);
-	srcx = clickx;
-	srcy = clicky;
-	dstx = x;
-	dsty = y;
+	miny = min(srcy, dsty);
+	minx = min(srcx, dstx);
+	maxx = max(srcx, dstx);
 	if ((dstx > srcx && srcy > dsty) || (dstx < srcx && srcy < dsty)) {
 		tmp = dstx;
 		dstx = srcx;
@@ -1729,19 +1717,20 @@ rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, 
 	if (dsty >= wid->h)              dsty = wid->h - 1;
 	if (srcy >= wid->h)              srcy = wid->h - 1;
 	if ((srci = getitem(wid, srcrow, srcydiff, &srcx, &srcy)) < 0)
-		return;
+		return FALSE;
 	if ((dsti = getitem(wid, wid->row, wid->ydiff, &dstx, &dsty)) < 0)
-		return;
+		return FALSE;
 	vismin = firstvisible(wid);
 	vismax = lastvisible(wid);
 	indexmin = min(srci, dsti);
 	indexmax = max(srci, dsti);
+	rowmin = indexmin / wid->ncols;
 	colmin = indexmin % wid->ncols;
 	colmax = indexmax % wid->ncols;
 	indexmin = min(indexmin, wid->nitems - 1);
 	indexmax = min(indexmax, wid->nitems - 1);
 	rowsrc = srci / wid->ncols;
-	rowmin = indexmin / wid->ncols;
+	changed = FALSE;
 	for (i = vismin; i <= vismax; i++) {
 		sel = TRUE;
 		row = i / wid->ncols;
@@ -1750,16 +1739,43 @@ rectselect(Widget wid, int srcrow, int srcydiff, int clickx, int clicky, int x, 
 		y = (row - wid->row + 1) * wid->itemh - 1.5 * wid->fonth + MARGIN - wid->ydiff;
 		if (i < indexmin || i > indexmax) {
 			sel = FALSE;
-		} else if ((col == colmin && (minx > x + THUMBSIZE || maxx < x)) ||
-		    (col == colmax && (maxx < x || minx > x + THUMBSIZE)) ||
-		    (col == colmax && (maxx < x || minx > x + THUMBSIZE)) ||
-		    col < colmin || col > colmax){
+		} else if ((col == colmin || col == colmax) && (minx > x + THUMBSIZE || maxx < x)) {
 			sel = FALSE;
-		} else if (row == rowmin && row != rowsrc &&
-		    row >= wid->row && miny > y) {
+		} else if (col < colmin || col > colmax) {
+			sel = FALSE;
+		} else if (row == rowmin && row != rowsrc && row >= wid->row && miny > y) {
 			sel = FALSE;
 		}
-		selectitem(wid, i, sel, redraw);
+		if (!sel && (wid->issel[i] == NULL || wid->issel[i]->index > 0))
+			continue;
+		if (sel && wid->issel[i] != NULL && wid->issel[i]->index > 0)
+			selectitem(wid, i, FALSE, REDRAW);
+		selectitem(wid, i, sel, RECTANGLE | REDRAW);
+		changed = TRUE;
+	}
+	return changed;
+}
+
+static void
+commitrectsel(Widget wid)
+{
+	struct Selection *sel, *next;
+
+	/*
+	 * We keep the items selected by rectangular selection on a
+	 * temporary list.  Move them to the regular list.
+	 */
+	while (wid->rectsel != NULL) {
+		next = wid->rectsel->next;
+		sel = wid->rectsel;
+		sel->next = wid->sel;
+		sel->prev = NULL;
+		if (sel->index < 0)
+			sel->index *= -1;
+		if (wid->sel != NULL)
+			wid->sel->prev = sel;
+		wid->sel = sel;
+		wid->rectsel = next;
 	}
 }
 
@@ -1821,19 +1837,21 @@ querypointer(Widget wid, Window win, int *x, int *y)
 }
 
 static int
-rectmotion(Widget wid, Time lasttime, int clickx, int clicky)
+rectmotion(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 {
 	XEvent ev;
 	XSyncAlarm alarm;
 	int rectrow, rectydiff;
-	int unsel, close;
+	int moved, close;
 	int x, y;
+	int ownsel;
 
 	wid->state = STATE_SELECTING;
 	rectrow = wid->row;
 	rectydiff = wid->ydiff;
 	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
-	unsel = FALSE;
+	moved = FALSE;
+	ownsel = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		if (processevent(wid, &ev, &close)) {
 			if (close) {
@@ -1861,24 +1879,27 @@ rectmotion(Widget wid, Time lasttime, int clickx, int clicky)
 		switch (ev.type) {
 		case ButtonPress:
 		case ButtonRelease:
+			if (ownsel)
+				ownselection(wid, ev.xbutton.time);
+			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xbutton.x, ev.xbutton.y);
 			goto done;
 		case MotionNotify:
 			if (ev.xmotion.time - lasttime < RECTTIME)
 				break;
-			if (!unsel) {
+			if (!moved && !shift)
 				unselectitems(wid);
-				unsel = TRUE;
-			}
+			moved = TRUE;
 			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
-			rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y, TRUE);
+			if (rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y))
+				ownsel = TRUE;
 			commitdraw(wid);
 			lasttime = ev.xmotion.time;
 			break;
 		}
 	}
 done:
+	commitrectsel(wid);
 	wid->state = STATE_NORMAL;
-	rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xbutton.x, ev.xbutton.y);
 	commitdraw(wid);
 	XSyncDestroyAlarm(wid->dpy, alarm);
 	return WIDGET_CONTINUE;
@@ -2014,7 +2035,7 @@ xpmtopixmap(Widget wid, char *path, Pixmap *pix, Pixmap *mask)
 	if (XpmReadFileToPixmap(wid->dpy, ROOT(wid->dpy), path, pix, mask, &xa) != XpmSuccess) {
 		*pix = None;
 		*mask = None;
-		warn(wid, "%s: could load icon file", path);
+		warnx("%s: could load icon file", path);
 	}
 }
 
@@ -2079,9 +2100,11 @@ pollwidget(Widget wid, int *index)
 				break;
 			if (wid->lastitem != -1)
 				break;
-			if (ev.xmotion.state != Button1Mask)
+			if (ev.xmotion.state != Button1Mask &&
+			    ev.xmotion.state != (Button1Mask|ShiftMask) &&
+			    ev.xmotion.state != (Button1Mask|ControlMask))
 				break;
-			if (rectmotion(wid, ev.xmotion.time, clickx, clicky) == WIDGET_CLOSE)
+			if (rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky) == WIDGET_CLOSE)
 				return WIDGET_CLOSE;
 			wid->lastitem = -1;
 			break;
@@ -2151,31 +2174,31 @@ setthumbnail(Widget wid, char *path, int item)
 	data = NULL;
 	wid->thumbs[item] = NULL;
 	if ((fp = fopen(path, "rb")) == NULL) {
-		warn(wid, "%s: %s", path, strerror(errno));
+		warn("%s", path);
 		goto error;
 	}
 	if (checkheader(fp, PPM_HEADER, PPM_HEADER_SIZE) == -1) {
-		warn(wid, "%s: not a ppm file", path);
+		warnx("%s: not a ppm file", path);
 		goto error;
 	}
 	w = readsize(fp);
 	h = readsize(fp);
 	if (w <= 0 || w > THUMBSIZE || h <= 0 || h > THUMBSIZE) {
-		warn(wid, "%s: ppm file with invalid header", path);
+		warnx("%s: ppm file with invalid header", path);
 		goto error;
 	}
 	if (checkheader(fp, PPM_COLOR, PPM_COLOR_SIZE) == -1) {
-		warn(wid, "%s: ppm file with invalid header", path);
+		warnx("%s: ppm file with invalid header", path);
 		goto error;
 	}
 	size = w * h;
 	if ((data = malloc(size * DATA_DEPTH)) == NULL) {
-		warn(wid, "malloc: %s", strerror(errno));
+		warn("malloc");
 		goto error;
 	}
 	for (i = 0; i < size; i++) {
 		if (fread(buf, 1, PPM_DEPTH, fp) != PPM_DEPTH) {
-			warn(wid, "%s: %s", path, strerror(errno));
+			warn("%s", path);
 			goto error;
 		}
 		data[i * DATA_DEPTH + 0] = buf[2];   /* B */
@@ -2186,7 +2209,7 @@ setthumbnail(Widget wid, char *path, int item)
 	fclose(fp);
 	fp = NULL;
 	if ((wid->thumbs[item] = malloc(sizeof(*wid->thumbs[item]))) == NULL) {
-		warn(wid, "malloc: %s", strerror(errno));
+		warn("malloc");
 		goto error;
 	}
 	*wid->thumbs[item] = (struct Thumb){
@@ -2206,7 +2229,7 @@ setthumbnail(Widget wid, char *path, int item)
 		0
 	);
 	if (wid->thumbs[item]->img == NULL) {
-		warn(wid, "%s: could not allocate XImage", path);
+		warnx("%s: could not allocate XImage", path);
 		goto error;
 	}
 	XInitImage(wid->thumbs[item]->img);
@@ -2214,7 +2237,9 @@ setthumbnail(Widget wid, char *path, int item)
 	if (item >= wid->row * wid->ncols && item < wid->row * wid->ncols + wid->nrows * wid->ncols) {
 		drawitem(wid, item);
 		commitdraw(wid);
+		etlock(&wid->lock);
 		XFlush(wid->dpy);
+		etunlock(&wid->lock);
 	}
 	return;
 error:
