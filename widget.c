@@ -979,7 +979,7 @@ drawscroller(Widget wid, int y)
 }
 
 static int
-scroll(struct Widget *wid, int y)
+scroll(Widget wid, int y)
 {
 	int prevhand, newhand;          /* position of the scroller handle */
 	int prevrow, newrow;
@@ -1315,7 +1315,7 @@ mapwidget(Widget wid)
 }
 
 static void
-selectitem(struct Widget *wid, int index, int select, int redraw)
+selectitem(Widget wid, int index, int select, int redraw)
 {
 	struct Selection *sel;
 
@@ -1352,7 +1352,7 @@ selectitem(struct Widget *wid, int index, int select, int redraw)
 }
 
 static void
-selectitems(struct Widget *wid, int a, int b, int select)
+selectitems(Widget wid, int a, int b, int select)
 {
 	int i, min, max;
 
@@ -1371,7 +1371,7 @@ selectitems(struct Widget *wid, int a, int b, int select)
 }
 
 static void
-unselectitems(struct Widget *wid)
+unselectitems(Widget wid)
 {
 	while (wid->sel) {
 		selectitem(wid, wid->sel->index, FALSE, TRUE);
