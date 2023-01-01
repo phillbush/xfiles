@@ -579,7 +579,7 @@ main(int argc, char *argv[])
 	struct FM fm;
 	size_t nicons;
 	int ch, index, state;
-	int saveargc;
+	int saveargc, exitval;
 	char *geom, *name, *path, *home, *iconpatts;
 	char **saveargv;
 	char **icons;
@@ -638,8 +638,13 @@ main(int argc, char *argv[])
 	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
+	exitval = EXIT_SUCCESS;
 	while ((state = pollwidget(fm.wid, &index)) != WIDGET_CLOSE) {
 		switch (state) {
+		case WIDGET_ERROR:
+			exitval = EXIT_FAILURE;
+			goto done;
+			break;
 		case WIDGET_OPEN:
 			if (index < 0 || index >= fm.nentries)
 				break;
@@ -647,7 +652,10 @@ main(int argc, char *argv[])
 				widgetcursor(fm.wid, CURSOR_WATCH);
 				closethumbthread(&fm);
 				diropen(&fm, fm.entries[index][STATE_PATH], 1);
-				setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
+				if (setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries) == RET_ERROR) {
+					exitval = EXIT_FAILURE;
+					goto done;
+				}
 				createthumbthread(&fm);
 				widgetcursor(fm.wid, CURSOR_NORMAL);
 			} else if (fm.entries[index][STATE_MODE][0] == '-') {
@@ -656,6 +664,7 @@ main(int argc, char *argv[])
 			break;
 		}
 	}
+done:
 	closethumbthread(&fm);
 	freeentries(&fm);
 	free(fm.entries);

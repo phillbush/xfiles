@@ -91,6 +91,9 @@ void openicons(Widget wid, char *paths[], int nicons);
 /*
  * Set the current state of a widget and its current list of items.
  *
+ * It returns 0 if successful; or -1 if an error occurred.  If an error
+ * has uccurred, the widget must not be used again, and must be closed.
+ *
  * This function can be called at any time for each widget, after it has
  * been created.  Whenever it is called, the list of items displayed on
  * the widget is reset.
@@ -125,7 +128,7 @@ void openicons(Widget wid, char *paths[], int nicons);
  *   Size variable setting the number of members of the "items" and
  *   "itemicons" parameter arrays.
  */
-void setwidget(
+int setwidget(
 	Widget wid,
 	const char *title,
 	char **items[],

@@ -1276,7 +1276,7 @@ error:
 	return NULL;
 }
 
-void
+int
 setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems)
 {
 	size_t i;
@@ -1291,17 +1291,31 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 	wid->title = title;
 	wid->lastitem = -1;
 	(void)calcsize(wid, -1, -1);
-	wid->issel = calloc(wid->nitems, sizeof(*wid->issel));
-	wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens));
-	if ((wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) != NULL) {
-		for (i = 0; i < nitems; i++)
-			wid->thumbs[i] = NULL;
-		wid->thumbhead = NULL;
+	if ((wid->issel = calloc(wid->nitems, sizeof(*wid->issel))) == NULL) {
+		warn("calloc");
+		goto error;
 	}
+	if ((wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens))) == NULL) {
+		warn("calloc");
+		goto error;
+	}
+	if ((wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) == NULL) {
+		warn("calloc");
+		goto error;
+	}
+	for (i = 0; i < nitems; i++)
+		wid->thumbs[i] = NULL;
+	wid->thumbhead = NULL;
 	settitle(wid);
 	drawitems(wid);
 	commitdraw(wid);
 	XFlush(wid->dpy);
+	return RET_OK;
+error:
+	free(wid->issel);
+	free(wid->linelens);
+	free(wid->thumbs);
+	return RET_ERROR;
 }
 
 void
