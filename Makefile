@@ -19,7 +19,8 @@ ${PROG}: ${OBJS}
 	${CC} ${LIBS} ${LDFLAGS} -o $@ ${OBJS}
 
 .c.o:
-	${CC} -std=c99 -pedantic ${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
+	${CC} -std=c99 -pedantic -D_POSIX_C_SOURCE=200809L \
+	${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
 
 xfiles.o: util.h widget.h
 widget.o: util.h widget.h winicon.data fileicon.xpm

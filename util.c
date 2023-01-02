@@ -60,12 +60,12 @@ estrdup(const char *s)
 }
 
 void *
-ereallocarray(void *ptr, size_t nmemb, size_t size)
+erealloc(void *ptr, size_t size)
 {
 	void *p;
 
-	if ((p = reallocarray(ptr, nmemb, size)) == NULL)
-		err(1, "reallocarray");
+	if ((p = realloc(ptr, size)) == NULL)
+		err(1, "realloc");
 	return p;
 }
 

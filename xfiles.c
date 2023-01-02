@@ -435,9 +435,9 @@ diropen(struct FM *fm, const char *path, int savecwd)
 	freeentries(fm);
 	fm->nentries = escandir(fm->path, &array, direntselect, NULL);
 	if (fm->nentries > fm->capacity) {
-		fm->foundicons = ereallocarray(fm->foundicons, fm->nentries, sizeof(*fm->foundicons));
-		fm->selitems = ereallocarray(fm->selitems, fm->nentries, sizeof(*fm->selitems));
-		fm->entries = ereallocarray(fm->entries, fm->nentries, sizeof(*fm->entries));
+		fm->foundicons = erealloc(fm->foundicons, fm->nentries * sizeof(*fm->foundicons));
+		fm->selitems = erealloc(fm->selitems, fm->nentries * sizeof(*fm->selitems));
+		fm->entries = erealloc(fm->entries, fm->nentries * sizeof(*fm->entries));
 		fm->capacity = fm->nentries;
 	}
 	for (i = 0; i < fm->nentries; i++) {
@@ -467,10 +467,10 @@ diropen(struct FM *fm, const char *path, int savecwd)
 				continue;
 			for (patt = icon->patt; patt != NULL; patt = patt->next) {
 				if (strchr(patt->s, '/') != NULL) {
-					flags = FNM_CASEFOLD | FNM_PATHNAME;
+					flags = FNM_PATHNAME;
 					s = fm->entries[i][STATE_PATH];
 				} else {
-					flags = FNM_CASEFOLD;
+					flags = 0;
 					s = fm->entries[i][STATE_NAME];
 				}
 				if (s != NULL && !fnmatch(patt->s, s, flags)) {

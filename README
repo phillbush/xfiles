@@ -37,7 +37,7 @@ whose, and "-" matches any regular file.
 
 GLOB1 til GLOBN are bar-delimited glob strings that must match the entry
 being displayed by XFiles, for example, "*.png|*.jpg" matches files with
-the png or jpg extensions.  Globing matching is case insensitive.
+the png or jpg extensions.
 
 PATH is the path to the icon in .xpm format.
 

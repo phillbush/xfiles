@@ -26,7 +26,7 @@ int escandir(const char *dirname, struct dirent ***namelist, int (*select)(const
 void *emalloc(size_t size);
 void *ecalloc(size_t nmemb, size_t size);
 char *estrdup(const char *s);
-void *ereallocarray(void *ptr, size_t nmemb, size_t size);
+void *erealloc(void *ptr, size_t size);
 void egetcwd(char *path, size_t size);
 void eexec(char *const argv[]);
 void etcreate(pthread_t *tid, void *(*thrfn)(void *), void *arg);
