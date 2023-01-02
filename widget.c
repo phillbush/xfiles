@@ -11,6 +11,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xresource.h>
+#include <X11/XKBlib.h>
 #include <X11/cursorfont.h>
 #include <X11/xpm.h>
 #include <X11/Xft/Xft.h>
@@ -1370,7 +1371,7 @@ selectitem(Widget wid, int index, int select, int flags)
 }
 
 static void
-selectitems(Widget wid, int a, int b, int select)
+selectitems(Widget wid, int a, int b)
 {
 	int i, min, max;
 
@@ -1384,7 +1385,7 @@ selectitems(Widget wid, int a, int b, int select)
 		max = a;
 	}
 	for (i = min; i <= max; i++) {
-		selectitem(wid, i, select, 0);
+		selectitem(wid, i, TRUE, 0);
 	}
 }
 
@@ -1635,7 +1636,7 @@ mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 	if ((wid->lastitem = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
 	if (previtem != -1 && ev->state & ShiftMask) {
-		selectitems(wid, wid->lastitem, previtem, 1);
+		selectitems(wid, wid->lastitem, previtem);
 		redrawall = TRUE;
 	} else {
 		selectitem(wid, wid->lastitem, ((ev->state & ControlMask) ? wid->issel[wid->lastitem] == NULL : TRUE), REDRAW);
@@ -1656,21 +1657,20 @@ done:
 	return ret;
 }
 
-static int
+static void
 mouse3click(Widget wid, int x, int y)
 {
 	int index;
 
 	if (wid->sel != NULL) {
 		/* there's already something selected; do nothing */
-		return -1;
+		return;
 	}
 	if ((index = getpointerclick(wid, x, y)) != -1) {
 		/* we clicked on an item; select it */
 		selectitem(wid, index, TRUE, REDRAW);
 		commitdraw(wid);
 	}
-	return index;
 }
 
 static void
@@ -2092,10 +2092,115 @@ fillselitems(Widget wid, int *selitems, int clicked)
 	return nitems;
 }
 
+static int
+keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
+{
+	KeySym ksym;
+	unsigned int state;
+	int previtem, index, row, n;
+
+	if (!XkbLookupKeySym(wid->dpy, xev->keycode, xev->state, &state, &ksym))
+		return WIDGET_CONTINUE;
+	switch (ksym) {
+	case XK_KP_Enter:       ksym = XK_Return;       break;
+	case XK_KP_Space:       ksym = XK_space;        break;
+	case XK_KP_Home:        ksym = XK_Home;         break;
+	case XK_KP_End:         ksym = XK_End;          break;
+	case XK_KP_Left:        ksym = XK_Left;         break;
+	case XK_KP_Right:       ksym = XK_Right;        break;
+	case XK_KP_Up:          ksym = XK_Up;           break;
+	case XK_KP_Down:        ksym = XK_Down;         break;
+	case XK_KP_Prior:       ksym = XK_Prior;        break;
+	case XK_KP_Next:        ksym = XK_Next;         break;
+	default:                                        break;
+	}
+	switch (ksym) {
+	case XK_Escape:
+		unselectitems(wid);
+		drawitems(wid);
+		commitdraw(wid);
+		break;
+	case XK_Return:
+		if (wid->lastitem == -1)
+			break;
+		*nitems = fillselitems(wid, selitems, wid->lastitem);
+		return WIDGET_OPEN;
+	case XK_Menu:
+		*nitems = fillselitems(wid, selitems, -1);
+		return WIDGET_CONTEXT;
+	case XK_space:
+		if (wid->lastitem == -1)
+			break;
+		selectitem(wid, wid->lastitem, wid->issel[wid->lastitem] == NULL, REDRAW);
+		commitdraw(wid);
+		break;
+	case XK_Prior:
+	case XK_Next:
+		if (scroll(wid, (ksym == XK_Prior ? -1 : 1) * (wid->h / 2)))
+			drawitems(wid);
+		commitdraw(wid);
+		break;
+	case XK_Home:
+	case XK_End:
+	case XK_Up:
+	case XK_Down:
+	case XK_Left:
+	case XK_Right:
+		if (ksym == XK_Home) {
+			index = 0;
+			wid->ydiff = 0;
+			setrow(wid, 0);
+			goto draw;
+		}
+		if (ksym == XK_End) {
+			index = wid->nitems - 1;
+			wid->ydiff = 0;
+			setrow(wid, wid->nscreens);
+			goto draw;
+		}
+		if (wid->lastitem == -1) {
+			wid->lastitem = 0;
+			setrow(wid, 0);
+			drawitem(wid, 0);
+			commitdraw(wid);
+			break;
+		}
+		if (ksym == XK_Up)
+			n = -wid->ncols;
+		else if (ksym == XK_Down)
+			n = wid->ncols;
+		else if (ksym == XK_Left)
+			n = -1;
+		else
+			n = 1;
+		if ((index = wid->lastitem + n) < 0 || index >= wid->nitems)
+			break;
+		row = index / wid->ncols;
+		if (row < wid->row)
+			setrow(wid, wid->row - 1);
+		else if (row >= wid->row + wid->h / wid->itemh)
+			setrow(wid, wid->row + 1);
+draw:
+		previtem = wid->lastitem;
+		wid->lastitem = index;
+		if (xev->state & ShiftMask) {
+			selectitems(wid, index, previtem);
+		} else if (xev->state & ControlMask) {
+			selectitem(wid, index, TRUE, 0);
+		}
+		drawitems(wid);
+		commitdraw(wid);
+		break;
+	default:
+		break;
+	}
+	return WIDGET_CONTINUE;
+}
+
 /*
  * Check widget.h for description on the interface of the following
  * public functions.  Some of them rely on the existence of objects
- * in the given addresses, during their lifetime.
+ * in the given addresses, during Widget's lifetime.
  */
 
 WidgetEvent
@@ -2108,6 +2213,7 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 	int clickx = 0;
 	int clicky = 0;
 	int clicki;
+	int state;
 
 	while (wid->start && XPending(wid->dpy) > 0) {
 		(void)XNextEvent(wid->dpy, &ev);
@@ -2126,6 +2232,11 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 			continue;
 		}
 		switch (ev.type) {
+		case KeyPress:
+			state = keypress(wid, &ev.xkey, selitems, nitems);
+			if (state != WIDGET_CONTINUE)
+				return state;
+			break;
 		case ButtonPress:
 			if (ev.xbutton.window != wid->win)
 				break;
@@ -2143,12 +2254,13 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 					drawitems(wid);
 				commitdraw(wid);
 			} else if (ev.xbutton.button == Button2) {
-				if (scrollmotion(wid, ev.xmotion.x, ev.xmotion.y) == WIDGET_CLOSE)
-					return WIDGET_CLOSE;
+				state = scrollmotion(wid, ev.xmotion.x, ev.xmotion.y);
+				if (state != WIDGET_CONTINUE)
+					return state;
 				ignoremotion = TRUE;
 			} else if (ev.xbutton.button == Button3) {
-				clicki = mouse3click(wid, ev.xbutton.x, ev.xbutton.y);
-				*nitems = fillselitems(wid, selitems, clicki);
+				mouse3click(wid, ev.xbutton.x, ev.xbutton.y);
+				*nitems = fillselitems(wid, selitems, -1);
 				XUngrabPointer(wid->dpy, ev.xbutton.time);
 				XFlush(wid->dpy);
 				return WIDGET_CONTEXT;
@@ -2173,8 +2285,9 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 				break;
 			if (wid->lastitem != -1)
 				break;
-			if (rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky) == WIDGET_CLOSE)
-				return WIDGET_CLOSE;
+			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
+			if (state != WIDGET_CONTINUE)
+				return state;
 			wid->lastitem = -1;
 			break;
 		}

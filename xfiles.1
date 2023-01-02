@@ -64,13 +64,11 @@ opens at the current directory.
 Otherwise, it opens at the given directory.
 .Sh USAGE
 .Nm
-is controlled by the mouse as follows:
-.Pp
-The first mouse button (usually the left one) is used for selection and activation.
+The first mouse button (usually the left one) is used for selection and opening.
 Selecting one or more files copies their paths into the PRIMARY X selection.
-Activating a single file invokes the command specified by the
+Opening a single file invokes the command specified by the
 .Ev OPENER
-environment variable with the path to the activated file as argument
+environment variable with the path to the open file as argument
 (a double dash
 .Ns ( Qq "--" )
 is added before the path in the argument list).
@@ -78,7 +76,7 @@ is added before the path in the argument list).
 .It
 A single click with no modifier on a file's icon selects it (deselecting any other file).
 .It
-A double click with no modifier selects and activates it (deselecting any other file).
+A double click with no modifier selects and opens it (deselecting any other file).
 .It
 A single click with a Control modifier does not deselect previously selected files,
 but adds the clicked file to the selection list instead.
@@ -136,6 +134,38 @@ selects that file and invokes the context command with its path passed as argume
 .It
 Pressing the third button on nothing while there's no file selected
 invokes the context command with no argument.
+.El
+.Pp
+The following keys (and their number keyboard counterparts) can control
+.Nm .
+.Bl -tag -width Ds
+.It Escape
+Deselect everything.
+.It Enter/Return
+Select and open highlighted file.
+.It Menu
+Invoke context command on selected files.
+.It Space
+Select highlighted file.
+.It PageUp
+Scroll up.
+.It PageDown
+Scroll down.
+.It Home
+Highlight and select the first file (deselecting any other file).
+If modified by Control, does not deselect previously selected files.
+If modified by Shift, does not deselect previously selected files,
+and select any file between the first file and the previously highlighted one.
+.It End
+Highlight and select the last file (deselecting any other file).
+If modified by Control, does not deselect previously selected files.
+If modified by Shift, does not deselect previously selected files,
+and select any file between the last file and the previously highlighted one.
+.It Left, Down, Up, Right
+Highlight and select the file in the given direction (deselecting any other file).
+If modified by Control, does not deselect previously selected files.
+If modified by Shift, does not deselect previously selected files,
+and select any file between the target file and the previously highlighted one.
 .El
 .Sh RESOURCES
 .Nm understands the following X resources.
