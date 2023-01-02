@@ -1671,8 +1671,6 @@ mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 done:
 	*lasttime = ev->time;
 	settitle(wid);
-	//if (previtem >= 0 )
-	//	drawitem(wid, previtem);
 	return ret;
 }
 
@@ -2317,7 +2315,7 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 				break;
 			if (ignoremotion)
 				break;
-			if (wid->highlight != -1)
+			if (getpointerclick(wid, ev.xmotion.x, ev.xmotion.y) != -1)
 				break;
 			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
 			if (state != WIDGET_CONTINUE)
