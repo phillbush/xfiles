@@ -46,6 +46,9 @@
 #define FLAG(f, b)      (((f) & (b)) == (b))
 #define ATOI(c)         (((c) >= '0' && (c) <= '9') ? (c) - '0' : -1)
 
+/* how much to scroll on PageUp/PageDown (half the window height) */
+#define PAGE_STEP(w)    ((w)->h / 2)
+
 enum {
 	/* one byte was 8 bits in size last time I checked */
 	BYTE            = 8,
@@ -61,8 +64,10 @@ enum {
 	RES_BUFSIZE     = 512,                  /* resource buffer size */
 
 	/* hardcoded object sizes in pixels */
+	/* there's no ITEM_HEIGHT for it is computed at runtime from font height */
 	THUMBSIZE       = 64,                   /* maximum thumbnail size */
-	MIN_WIDTH       = (THUMBSIZE * 2),      /* minimum window width */
+	ITEM_WIDTH      = (THUMBSIZE * 2),      /* width of an item (icon + margins) */
+	MIN_WIDTH       = ITEM_WIDTH,           /* minimum window width */
 	MIN_HEIGHT      = (THUMBSIZE * 3),      /* minimum window height */
 	DEF_WIDTH       = 600,                  /* default window width */
 	DEF_HEIGHT      = 460,                  /* default window height */
@@ -77,9 +82,9 @@ enum {
 	/* we only save this much icons */
 	MAXICONS        = 255,
 
-	/* each NLINES line of label text is up to LABELWIDTH pixels long */
-	NLINES          = 2,
-	LABELWIDTH      = THUMBSIZE + (THUMBSIZE * 2) / 3,
+	/* draw up to NLINES lines of label; each one up to LABELWIDTH pixels long */
+	NLINES          = 2,                    /* change it for more lines below icons */
+	LABELWIDTH      = ITEM_WIDTH - 16,      /* save 8 pixels each side around label */
 
 	/* times in milliseconds */
 	DOUBLECLICK     = 250,                  /* time of a doubleclick, in milliseconds */
@@ -169,21 +174,16 @@ struct Widget {
 
 	/*
 	 * .items is an array of arrays of strings.
-	 *
 	 * For each index i, .items[i] contains (at least) three elements:
 	 * - .items[i][ITEM_NAME]   -- The label displayed for the item.
 	 * - .items[i][ITEM_PATH]   -- The path given in PRIMARY selection.
 	 * - .items[i][ITEM_STATUS] -- The status string displayed on the
 	 *                             titlebar when the item is selected.
-	 *
-	 * .linelens is an array of pairs of integers.
-	 *
-	 * For each index i, .linelens[i] contains the width of each one
-	 * of the two label lines drawn on the window.
 	 */
-	char ***items;
-	int nitems;
-	int (*linelens)[2];             /* length of first and second text lines */
+	char ***items;                  /* see comment above */
+	int nitems;                     /* number of items */
+	int *linelen;                   /* for each item, the lengths of its largest label line */
+	int *nlines;                    /* for each item, the number of label lines */
 
 	/*
 	 * Items can be selected with the mouse and the Control and Shift modifiers.
@@ -528,8 +528,8 @@ done:
 	if (goterror)
 		goto error;
 	wid->fonth = wid->font->height;
-	wid->itemw = THUMBSIZE * 2;
-	wid->itemh = THUMBSIZE + 3 * wid->fonth;
+	wid->itemw = ITEM_WIDTH;
+	wid->itemh = THUMBSIZE + (NLINES + 1) * wid->fonth;
 	wid->ellipsisw = textwidth(wid, ELLIPSIS, strlen(ELLIPSIS));
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
@@ -705,7 +705,7 @@ static void
 drawlabel(Widget wid, int index, int x, int y)
 {
 	XftColor *color;
-	int i, nlines;
+	int i;
 	int textx, maxw;
 	int textw, w, textlen, len;
 	int extensionw, extensionlen;
@@ -713,37 +713,42 @@ drawlabel(Widget wid, int index, int x, int y)
 
 	color = wid->colors[(wid->issel != NULL && wid->issel[index]) ? SELECT_YES : SELECT_NOT];
 	text = wid->items[index][ITEM_NAME];
-	textlen = strlen(text);
-	textw = textwidth(wid, text, textlen);
-	nlines = 1;
+	wid->nlines[index] = 1;
 	textx = x + wid->itemw / 2 - LABELWIDTH / 2;
 	extension = NULL;
-	if (textw >= LABELWIDTH) {
-		textlen = len = 0;
-		w = 0;
-		while (w < LABELWIDTH) {
-			textlen = len;
-			textw = w;
-			while (isspace(text[len]))
-				len++;
-			while (isbreakable(text[len]))
-				len++;
-			while (text[len] != '\0' && !isspace(text[len]) && !isbreakable(text[len]))
-				len++;
-			w = textwidth(wid, text, len);
-			if (text[len] == '\0') {
-				break;
+	maxw = 0;
+	textlen = 0;
+	wid->linelen[index] = 0;
+	for (i = 0; i < wid->nlines[index]; i++) {
+		while (isspace(text[textlen]))
+			textlen++;
+		text += textlen;
+		textlen = strlen(text);
+		textw = textwidth(wid, text, textlen);
+		if (wid->nlines[index] < NLINES && textw >= LABELWIDTH) {
+			textlen = len = 0;
+			w = 0;
+			while (w < LABELWIDTH) {
+				textlen = len;
+				textw = w;
+				while (isspace(text[len]))
+					len++;
+				while (isbreakable(text[len]))
+					len++;
+				while (text[len] != '\0' && !isspace(text[len]) && !isbreakable(text[len]))
+					len++;
+				w = textwidth(wid, text, len);
+				if (text[len] == '\0') {
+					break;
+				}
+			}
+			if (textw > 0) {
+				wid->nlines[index] = min(wid->nlines[index] + 1, NLINES);
+			} else {
+				textlen = len;
+				textw = w;
 			}
 		}
-		if (textw > 0) {
-			nlines++;
-		} else {
-			textlen = len;
-			textw = w;
-		}
-	}
-	maxw = 0;
-	for (i = 0; i < nlines; i++) {
 		textw = min(LABELWIDTH, textw);
 		maxw = max(textw, maxw);
 		drawtext(
@@ -752,23 +757,16 @@ drawlabel(Widget wid, int index, int x, int y)
 			max(LABELWIDTH / 2 - textw / 2, 0),
 			text, textlen
 		);
-		if (wid->linelens != NULL)
-			wid->linelens[index][i] = min(LABELWIDTH, textw);
+		textw = min(textw, LABELWIDTH);
+		wid->linelen[index] = max(wid->linelen[index], textw);
 		XCopyArea(
 			wid->dpy,
 			wid->namepix, wid->pix,
 			wid->gc,
 			0, 0,
 			LABELWIDTH, wid->fonth,
-			textx, y + wid->itemh - (2.5 - i) * wid->fonth
+			textx, y + wid->itemh - (NLINES - i + 0.5) * wid->fonth
 		);
-		if (i + 1 < nlines) {
-			while (isspace(text[textlen]))
-				textlen++;
-			text += textlen;
-			textlen = strlen(text);
-			textw = textwidth(wid, text, textlen);
-		}
 	}
 	if (index == wid->highlight) {
 		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
@@ -777,7 +775,7 @@ drawlabel(Widget wid, int index, int x, int y)
 			wid->pix,
 			wid->gc,
 			x + wid->itemw / 2 - maxw / 2 - 1,
-			y + wid->itemh - 2.5 * wid->fonth - 1,
+			y + wid->itemh - (NLINES + 0.5) * wid->fonth - 1,
 			maxw + 1, i * wid->fonth + 1
 		);
 	}
@@ -802,7 +800,7 @@ drawlabel(Widget wid, int index, int x, int y)
 			0, 0,
 			wid->ellipsisw, wid->fonth,
 			textx + textw - extensionw - wid->ellipsisw,
-			y + wid->itemh - (3.5 - nlines) * wid->fonth
+			y + wid->itemh - (NLINES + 1 - wid->nlines[index] + 0.5) * wid->fonth
 		);
 
 		/* draw extension */
@@ -818,7 +816,7 @@ drawlabel(Widget wid, int index, int x, int y)
 			0, 0,
 			extensionw, wid->fonth,
 			textx + textw - extensionw,
-			y + wid->itemh - (3.5 - nlines) * wid->fonth
+			y + wid->itemh - (NLINES + 1 - wid->nlines[index] + 0.5) * wid->fonth
 		);
 	}
 }
@@ -1069,8 +1067,7 @@ getitem(Widget wid, int row, int ydiff, int *x, int *y)
 static int
 getpointerclick(Widget wid, int x, int y)
 {
-	int i, j;
-	int iconx, textx, texty;
+	int iconx, textx, texty, i;
 
 	if ((i = getitem(wid, wid->row, wid->ydiff, &x, &y)) < 0)
 		return -1;
@@ -1079,15 +1076,13 @@ getpointerclick(Widget wid, int x, int y)
 	iconx = (wid->itemw - THUMBSIZE) / 2;
 	if (x >= iconx && x < iconx + THUMBSIZE && y >= 0 && y < THUMBSIZE + wid->fonth / 2)
 		return i;
-	if (wid->linelens == NULL)
+	if (wid->linelen == NULL)
 		return -1;
-	for (j = 0; j < NLINES; j++) {
-		textx = (wid->itemw - wid->linelens[i][j]) / 2;
-		texty = wid->itemh - (2.5 - j) * wid->fonth;
-		if (x >= textx && x < textx + wid->linelens[i][j] &&
-		    y >= texty && y < texty + wid->fonth) {
-			return i;
-		}
+	textx = (wid->itemw - wid->linelen[i]) / 2;
+	texty = wid->itemh - (NLINES - 0.5) * wid->fonth;
+	if (x >= textx && x < textx + wid->linelen[i] &&
+	    y >= texty && y < texty + wid->nlines[i] * wid->fonth) {
+		return i;
 	}
 	return -1;
 }
@@ -1116,8 +1111,10 @@ cleanwidget(Widget wid)
 	wid->rectsel = NULL;
 	free(wid->thumbs);
 	wid->thumbs = NULL;
-	free(wid->linelens);
-	wid->linelens = NULL;
+	free(wid->linelen);
+	wid->linelen = NULL;
+	free(wid->nlines);
+	wid->nlines = NULL;
 	free(wid->issel);
 	wid->issel = NULL;
 }
@@ -1154,7 +1151,8 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.lock = PTHREAD_MUTEX_INITIALIZER,
 		.thumbs = NULL,
 		.thumbhead = NULL,
-		.linelens = NULL,
+		.linelen = NULL,
+		.nlines = NULL,
 		.icons = NULL,
 		.highlight = -1,
 		.title = "",
@@ -1303,7 +1301,11 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 		warn("calloc");
 		goto error;
 	}
-	if ((wid->linelens = calloc(wid->nitems, sizeof(*wid->linelens))) == NULL) {
+	if ((wid->linelen = calloc(wid->nitems, sizeof(*wid->linelen))) == NULL) {
+		warn("calloc");
+		goto error;
+	}
+	if ((wid->nlines = calloc(wid->nitems, sizeof(*wid->nlines))) == NULL) {
 		warn("calloc");
 		goto error;
 	}
@@ -1321,10 +1323,12 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 	return RET_OK;
 error:
 	free(wid->issel);
-	free(wid->linelens);
+	free(wid->linelen);
+	free(wid->nlines);
 	free(wid->thumbs);
 	wid->issel = NULL;
-	wid->linelens = NULL;
+	wid->linelen = NULL;
+	wid->nlines = NULL;
 	wid->thumbs = NULL;
 	return RET_ERROR;
 }
@@ -1779,7 +1783,9 @@ rectselect(Widget wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, i
 		row = i / wid->ncols;
 		col = i % wid->ncols;
 		x = wid->x0 + col * wid->itemw + (wid->itemw - THUMBSIZE) / 2;
-		y = (row - wid->row + 1) * wid->itemh - 1.5 * wid->fonth + MARGIN - wid->ydiff;
+		y = (row - wid->row + 1) * wid->itemh -
+		    (NLINES - wid->nlines[i] + 0.5) * wid->fonth +
+		    MARGIN - wid->ydiff;
 		if (i < indexmin || i > indexmax) {
 			sel = FALSE;
 		} else if ((col == colmin || col == colmax) && (minx > x + THUMBSIZE || maxx < x)) {
@@ -2000,10 +2006,10 @@ scrollmotion(Widget wid, int x, int y)
 {
 	XSyncAlarm alarm;
 	XEvent ev;
-	int ydiff, pos, close, left;
+	int grabpos, pos, close, left;
 
 	wid->state = STATE_SCROLLING;
-	ydiff = wid->handlew / 2;
+	grabpos = wid->handlew / 2;             /* we grab the handle in its middle */
 	drawscroller(wid, gethandlepos(wid));
 	XMoveWindow(wid->dpy, wid->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
 	XMapRaised(wid->dpy, wid->scroller);
@@ -2029,7 +2035,7 @@ scrollmotion(Widget wid, int x, int y)
 		switch (ev.type) {
 		case MotionNotify:
 			if (ev.xmotion.window == wid->scroller && (ev.xmotion.state & Button1Mask)) {
-				scrollerset(wid, ev.xmotion.y - ydiff);
+				scrollerset(wid, ev.xmotion.y - grabpos);
 			} else if (ev.xmotion.window == wid->win &&
 			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
 				left = TRUE;
@@ -2048,10 +2054,12 @@ scrollmotion(Widget wid, int x, int y)
 				left = TRUE;
 				pos = gethandlepos(wid);
 				if (ev.xmotion.y < pos || ev.xmotion.y > pos + wid->handlew) {
-					ydiff = wid->handlew / 2;
-					scrollerset(wid, ev.xmotion.y - ydiff);
+					/* grab handle in the middle */
+					grabpos = wid->handlew / 2;
+					scrollerset(wid, ev.xmotion.y - grabpos);
 				} else {
-					ydiff = ev.xmotion.y - pos;
+					/* grab handle in position under pointer */
+					grabpos = ev.xmotion.y - pos;
 				}
 			}
 			break;
@@ -2166,7 +2174,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		break;
 	case XK_Prior:
 	case XK_Next:
-		if (scroll(wid, (ksym == XK_Prior ? -1 : 1) * (wid->h / 2)))
+		if (scroll(wid, (ksym == XK_Prior ? -1 : 1) * PAGE_STEP(wid)))
 			drawitems(wid);
 		commitdraw(wid);
 		break;
