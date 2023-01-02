@@ -152,6 +152,7 @@ struct Selection {
 struct Widget {
 	char *progname;
 	int start;
+	int redraw;
 
 	/* X11 stuff */
 	Display *dpy;
@@ -856,6 +857,7 @@ drawitem(Widget wid, int index)
 	drawlabel(wid, index, x, y);
 done:
 	etunlock(&wid->lock);
+	wid->redraw = TRUE;
 }
 
 static void
@@ -1146,6 +1148,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.progname = progname,
 		.dpy = NULL,
 		.start = FALSE,
+		.redraw = FALSE,
 		.win = None,
 		.scroller = None,
 		.lock = PTHREAD_MUTEX_INITIALIZER,
@@ -1374,9 +1377,22 @@ selectitem(Widget wid, int index, int select, int flags)
 	} else {
 		return;
 	}
-	if (flags & REDRAW) {
+	drawitem(wid, index);
+}
+
+static void
+highlight(Widget wid, int index, int redraw)
+{
+	int prevhili;
+
+	if (wid->highlight == index)
+		return;
+	prevhili = wid->highlight;
+	wid->highlight = index;
+	if (redraw)
 		drawitem(wid, index);
-	}
+	/* we still have to redraw the previous one */
+	drawitem(wid, prevhili);
 }
 
 static void
@@ -1498,10 +1514,8 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 		return True;
 	}
 	if (target == wid->atoms[DELETE]) {
-		if (wid->sel != NULL) {
+		if (wid->sel != NULL)
 			unselectitems(wid);
-			drawitems(wid);
-		}
 		XChangeProperty(
 			wid->dpy,
 			requestor,
@@ -1635,20 +1649,18 @@ done:
 static int
 mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 {
-	int previtem, ret, redrawall;
+	int previtem, index, ret;
 
 	ret = -1;
-	redrawall = FALSE;
 	if (!(ev->state & (ControlMask | ShiftMask)) && wid->sel != NULL) {
 		unselectitems(wid);
-		redrawall = TRUE;
 	}
 	previtem = wid->highlight;
-	if ((wid->highlight = getpointerclick(wid, ev->x, ev->y)) == -1)
+	if ((index = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
+	highlight(wid, index, FALSE);
 	if (previtem != -1 && ev->state & ShiftMask) {
 		selectitems(wid, wid->highlight, previtem);
-		redrawall = TRUE;
 	} else {
 		selectitem(wid, wid->highlight, ((ev->state & ControlMask) ? wid->issel[wid->highlight] == NULL : TRUE), REDRAW);
 	}
@@ -1659,12 +1671,8 @@ mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 done:
 	*lasttime = ev->time;
 	settitle(wid);
-	if (redrawall)
-		drawitems(wid);
-	else if (previtem >= 0)
-		drawitem(wid, previtem);
-	if (redrawall || wid->highlight >= 0)
-		commitdraw(wid);
+	//if (previtem >= 0 )
+	//	drawitem(wid, previtem);
 	return ret;
 }
 
@@ -1680,7 +1688,6 @@ mouse3click(Widget wid, int x, int y)
 	if ((index = getpointerclick(wid, x, y)) != -1) {
 		/* we clicked on an item; select it */
 		selectitem(wid, index, TRUE, REDRAW);
-		commitdraw(wid);
 	}
 }
 
@@ -1850,7 +1857,6 @@ processevent(Widget wid, XEvent *ev, int *close)
 			if (wid->row >= wid->nscreens)
 				setrow(wid, wid->nscreens - 1);
 			drawitems(wid);
-			commitdraw(wid);
 		}
 		return TRUE;
 	case SelectionRequest:
@@ -1861,8 +1867,6 @@ processevent(Widget wid, XEvent *ev, int *close)
 		if (wid->sel == NULL)
 			return TRUE;
 		unselectitems(wid);
-		drawitems(wid);
-		commitdraw(wid);
 		return TRUE;
 	default:
 		return FALSE;
@@ -1995,10 +1999,10 @@ scrollerset(Widget wid, int pos)
 	prevrow = wid->row;
 	setrow(wid, newrow);
 	drawscroller(wid, pos);
-	if (prevrow != newrow)
+	if (prevrow != newrow) {
 		settitle(wid);
-	drawitems(wid);
-	commitdraw(wid);
+		drawitems(wid);
+	}
 }
 
 static int
@@ -2024,11 +2028,8 @@ scrollmotion(Widget wid, int x, int y)
 			continue;
 		}
 		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
-			if ((pos = scrollerpos(wid)) != 0) {
-				if (scroll(wid, pos))
-					drawitems(wid);
-				commitdraw(wid);
-			}
+			if ((pos = scrollerpos(wid)) != 0 && scroll(wid, pos))
+				drawitems(wid);
 			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
 			continue;
 		}
@@ -2067,8 +2068,6 @@ scrollmotion(Widget wid, int x, int y)
 	}
 done:
 	wid->state = STATE_NORMAL;
-	drawitems(wid);
-	commitdraw(wid);
 	XSyncDestroyAlarm(wid->dpy, alarm);
 	XUnmapWindow(wid->dpy, wid->scroller);
 	return WIDGET_CONTINUE;
@@ -2133,7 +2132,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 {
 	KeySym ksym;
 	unsigned int state;
-	int previtem, index, row, n;
+	int redrawall, previtem, index, row, n;
 
 	if (!XkbLookupKeySym(wid->dpy, xev->keycode, xev->state, &state, &ksym))
 		return WIDGET_CONTINUE;
@@ -2155,8 +2154,6 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		if (wid->sel == NULL)
 			break;
 		unselectitems(wid);
-		drawitems(wid);
-		commitdraw(wid);
 		break;
 	case XK_Return:
 		if (wid->highlight == -1)
@@ -2170,13 +2167,11 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		if (wid->highlight == -1)
 			break;
 		selectitem(wid, wid->highlight, wid->issel[wid->highlight] == NULL, REDRAW);
-		commitdraw(wid);
 		break;
 	case XK_Prior:
 	case XK_Next:
 		if (scroll(wid, (ksym == XK_Prior ? -1 : 1) * PAGE_STEP(wid)))
 			drawitems(wid);
-		commitdraw(wid);
 		break;
 	case XK_Home:
 	case XK_End:
@@ -2184,6 +2179,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 	case XK_Down:
 	case XK_Left:
 	case XK_Right:
+		redrawall = TRUE;
 		if (ksym == XK_Home) {
 			index = 0;
 			wid->ydiff = 0;
@@ -2215,16 +2211,17 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 			setrow(wid, wid->row - 1);
 		else if (row >= wid->row + wid->h / wid->itemh)
 			setrow(wid, wid->row + 1);
+		else
+			redrawall = FALSE;
 draw:
 		previtem = wid->highlight;
-		wid->highlight = index;
-		if (xev->state & ShiftMask) {
+		highlight(wid, index, TRUE);
+		if (xev->state & ShiftMask)
 			selectitems(wid, index, previtem);
-		} else if (xev->state & ControlMask) {
+		else if (xev->state & ControlMask)
 			selectitem(wid, index, TRUE, 0);
-		}
-		drawitems(wid);
-		commitdraw(wid);
+		if (redrawall)
+			drawitems(wid);
 		break;
 	default:
 		break;
@@ -2260,9 +2257,12 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 	wid->start = TRUE;
 	ignoremotion = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
+		wid->redraw = FALSE;
 		if (processevent(wid, &ev, &close)) {
 			if (close)
 				return WIDGET_CLOSE;
+			if (wid->redraw)
+				commitdraw(wid);
 			continue;
 		}
 		switch (ev.type) {
@@ -2322,8 +2322,11 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
 			if (state != WIDGET_CONTINUE)
 				return state;
-			wid->highlight = -1;
+			highlight(wid, -1, TRUE);
 			break;
+		}
+		if (wid->redraw) {
+			commitdraw(wid);
 		}
 	}
 	return WIDGET_CLOSE;
