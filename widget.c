@@ -2161,9 +2161,6 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		if (wid->lastitem == -1) {
 			wid->lastitem = 0;
 			setrow(wid, 0);
-			drawitem(wid, 0);
-			commitdraw(wid);
-			break;
 		}
 		if (ksym == XK_Up)
 			n = -wid->ncols;
