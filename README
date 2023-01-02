@@ -77,8 +77,8 @@ script depends on the following programs:
 
 § Opening
 
-The opener program is called with two arguments: dash-dash "--" and the
-file's path.  If not specified with the OPENER environment variable, it
+The opener program is called with the highlighted file's path as
+argument.  If not specified with the OPENER environment variable, it
 defaults to xdg-open (I recommend you to use plumb[1] instead).
 
 [1]: https://github.com/phillbush/plumb

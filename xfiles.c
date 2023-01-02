@@ -24,7 +24,6 @@
 #define XFILES_CONTEXTCMD "XFILES_CONTEXTCMD"
 #define DEV_NULL        "/dev/null"
 #define DOTDOT          ".."
-#define LAST_ARG        "--"
 #define UNIT_LAST       7
 #define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
 #define TIME_BUFSIZE    128
@@ -588,7 +587,6 @@ fileopen(struct FM *fm, char *path)
 	forkexec(
 		(char *[]){
 			fm->opener,
-			LAST_ARG,
 			path,
 			NULL,
 		}
