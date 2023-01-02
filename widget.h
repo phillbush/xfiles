@@ -20,7 +20,7 @@ enum {
 	ITEM_LAST,
 };
 
-typedef struct Widget *Widget;;
+typedef struct Widget *Widget;
 
 /*
  * Create and initialize a widget, and returns a pointer to it.

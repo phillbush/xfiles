@@ -79,7 +79,7 @@ enum {
 
 	/* each NLINES line of label text is up to LABELWIDTH pixels long */
 	NLINES          = 2,
-	LABELWIDTH      = ((int)(THUMBSIZE * 1.75)),
+	LABELWIDTH      = THUMBSIZE + (THUMBSIZE * 2) / 3,
 
 	/* times in milliseconds */
 	DOUBLECLICK     = 250,                  /* time of a doubleclick, in milliseconds */
@@ -322,8 +322,9 @@ static char *atomnames[ATOM_LAST] = {
 static int
 createwin(Widget wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
 {
+	unsigned int dw, dh;
 	int x, y;
-	int dx, dy, dw, dh;
+	int dx, dy;
 	int flags, sizehints;
 	pid_t pid;
 
@@ -393,7 +394,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		wid->dpy, wid->win,
 		wid->atoms[_NET_WM_NAME],
 		wid->atoms[UTF8_STRING], 8, PropModeReplace,
-		class,
+		(unsigned char *)class,
 		strlen(class) + 1
 	);
 	XChangeProperty(
@@ -457,7 +458,7 @@ textwidth(Widget wid, const char *text, int len)
 {
 	XGlyphInfo box;
 
-	XftTextExtentsUtf8(wid->dpy, wid->font, text, len, &box);
+	XftTextExtentsUtf8(wid->dpy, wid->font, (const FcChar8 *)text, len, &box);
 	return box.width;
 }
 
@@ -609,7 +610,7 @@ drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int
 	XSetForeground(wid->dpy, wid->gc, color[COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, x, 0, w, wid->fonth);
 	draw = XftDrawCreate(wid->dpy, pix, VISUAL(wid->dpy), COLORMAP(wid->dpy));
-	XftDrawStringUtf8(draw, &color[COLOR_FG], wid->font, x, wid->font->ascent, text, len);
+	XftDrawStringUtf8(draw, &color[COLOR_FG], wid->font, x, wid->font->ascent, (const FcChar8 *)text, len);
 	XftDrawDestroy(draw);
 }
 
@@ -940,7 +941,7 @@ settitle(Widget wid)
 		wid->atoms[UTF8_STRING],
 		8,
 		PropModeReplace,
-		title,
+		(unsigned char *)title,
 		strlen(title)
 	);
 }
@@ -1496,7 +1497,7 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 			wid->atoms[_NULL],
 			8L,
 			PropModeReplace,
-			"",
+			(unsigned char *)"",
 			0
 		);
 		return True;
@@ -1523,7 +1524,7 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 				wid->atoms[UTF8_STRING],
 				8L,
 				PropModeAppend,
-				wid->items[sel->index][ITEM_PATH],
+				(unsigned char *)wid->items[sel->index][ITEM_PATH],
 				strlen(wid->items[sel->index][ITEM_PATH])
 			);
 			XChangeProperty(
@@ -1533,7 +1534,7 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 				wid->atoms[UTF8_STRING],
 				8L,
 				PropModeAppend,
-				"\n",
+				(unsigned char *)"\n",
 				1
 			);
 		}
