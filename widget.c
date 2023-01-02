@@ -2331,7 +2331,6 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
 			if (state != WIDGET_CONTINUE)
 				return state;
-			highlight(wid, -1, TRUE);
 			break;
 		}
 		if (wid->redraw) {
