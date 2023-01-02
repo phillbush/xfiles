@@ -96,7 +96,7 @@ varible, nothing is used.  I recommend you to use xmenu[2] or pmenu[3].
 
 § Questions
 
-.Why all icons are the X logo?
+.How do I set custom icons?
 You must set the FILE_ICONS environment variable.
 
 .Why there are no thumbnail/miniatures?

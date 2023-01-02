@@ -19,7 +19,7 @@
 
 #include "util.h"
 #include "widget.h"
-#include "fileicon.xpm"         /* default icon for unknown items */
+#include "icons/x.xpm"          /* default item fallback icon */
 #include "winicon.data"         /* window icon, for the window manager */
 
 /* default theme configuration */
@@ -75,7 +75,7 @@ enum {
 	PPM_BUFSIZE     = 8,
 
 	/* we only save this much icons */
-	MAXICONS        = 256,
+	MAXICONS        = 255,
 
 	/* each NLINES line of label text is up to LABELWIDTH pixels long */
 	NLINES          = 2,
@@ -242,7 +242,7 @@ struct Widget {
 	/*
 	 * We use icons for items that do not have a thumbnail.
 	 */
-	struct Icon deficon;            /* default icon, check fileicon.xpm */
+	struct Icon deficon;            /* default icon, check icons/x.xpm */
 	struct Icon *icons;             /* array of icons set by the user */
 	int nicons;                     /* number of icons set by the user */
 
@@ -627,11 +627,17 @@ drawicon(Widget wid, int index, int x, int y)
 {
 	XGCValues val;
 	Pixmap pix, mask;
+	int try, def;
 
-	if (wid->itemicons[index] >= 0 && wid->itemicons[index] < wid->nicons &&
-	    wid->icons[wid->itemicons[index]].pix != None && wid->icons[wid->itemicons[index]].mask != None) {
-		pix = wid->icons[wid->itemicons[index]].pix;
-		mask = wid->icons[wid->itemicons[index]].mask;
+	try = ICON_FIRSTTRY(wid->itemicons[index]);
+	def = ICON_FALLBACK(wid->itemicons[index]);
+	if (try >= 0 && try < wid->nicons &&
+	    wid->icons[try].pix != None && wid->icons[try].mask != None) {
+		pix = wid->icons[try].pix;
+		mask = wid->icons[try].mask;
+	} else if (def >= 0 && def < wid->nicons) {
+		pix = wid->icons[def].pix;
+		mask = wid->icons[def].mask;
 	} else {
 		pix = wid->deficon.pix;
 		mask = wid->deficon.mask;
@@ -1222,7 +1228,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		goto error;
 	}
 	memset(&xa, 0, sizeof(xa));
-	if (XpmCreatePixmapFromData(wid->dpy, ROOT(wid->dpy), fileicon_xpm, &wid->deficon.pix, &wid->deficon.mask, &xa) != XpmSuccess) {
+	if (XpmCreatePixmapFromData(wid->dpy, ROOT(wid->dpy), x_xpm, &wid->deficon.pix, &wid->deficon.mask, &xa) != XpmSuccess) {
 		warnx("could not open default icon pixmap");
 		goto error;
 	}
@@ -1488,8 +1494,10 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 		return True;
 	}
 	if (target == wid->atoms[DELETE]) {
-		unselectitems(wid);
-		drawitems(wid);
+		if (wid->sel != NULL) {
+			unselectitems(wid);
+			drawitems(wid);
+		}
 		XChangeProperty(
 			wid->dpy,
 			requestor,
@@ -1627,7 +1635,7 @@ mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 
 	ret = -1;
 	redrawall = FALSE;
-	if (!(ev->state & (ControlMask | ShiftMask))) {
+	if (!(ev->state & (ControlMask | ShiftMask)) && wid->sel != NULL) {
 		unselectitems(wid);
 		redrawall = TRUE;
 	}
@@ -1844,6 +1852,8 @@ processevent(Widget wid, XEvent *ev, int *close)
 			sendselection(wid, &ev->xselectionrequest);
 		return TRUE;
 	case SelectionClear:
+		if (wid->sel == NULL)
+			return TRUE;
 		unselectitems(wid);
 		drawitems(wid);
 		commitdraw(wid);
@@ -2062,15 +2072,28 @@ checkheader(FILE *fp, char *header, size_t size)
 	return RET_OK;
 }
 
+static int
+pixmapfromdata(Widget wid, char **data, Pixmap *pix, Pixmap *mask)
+{
+	XpmAttributes xa = { 0 };
+
+	if (XpmCreatePixmapFromData(wid->dpy, ROOT(wid->dpy), data, pix, mask, &xa) != XpmSuccess) {
+		*pix = None;
+		*mask = None;
+		return RET_ERROR;
+	}
+	return RET_OK;
+}
+
 static void
-xpmtopixmap(Widget wid, char *path, Pixmap *pix, Pixmap *mask)
+pixmapfromfile(Widget wid, char *path, Pixmap *pix, Pixmap *mask)
 {
 	XpmAttributes xa = { 0 };
 
 	if (XpmReadFileToPixmap(wid->dpy, ROOT(wid->dpy), path, pix, mask, &xa) != XpmSuccess) {
 		*pix = None;
 		*mask = None;
-		warnx("%s: could load icon file", path);
+		warnx("%s: could not load icon file", path);
 	}
 }
 
@@ -2115,6 +2138,8 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 	}
 	switch (ksym) {
 	case XK_Escape:
+		if (wid->sel == NULL)
+			break;
 		unselectitems(wid);
 		drawitems(wid);
 		commitdraw(wid);
@@ -2322,19 +2347,29 @@ closewidget(Widget wid)
 	free(wid);
 }
 
-void
-openicons(Widget wid, char *paths[], int nicons)
+int
+openicons(Widget wid, char **datas[], char *paths[], int ndatas, int npaths)
 {
-	int i;
+	int retval, n, i;
 
-	if (nicons > MAXICONS)
-		nicons = MAXICONS;
-	if ((wid->icons = calloc(nicons, sizeof(*wid->icons))) == NULL)
-		return;
-	wid->nicons = nicons;
-	for (i = 0; i < nicons; i++) {
-		xpmtopixmap(wid, paths[i], &wid->icons[i].pix, &wid->icons[i].mask);
+	wid->nicons = ndatas + npaths;
+	if (wid->nicons > MAXICONS)
+		wid->nicons = MAXICONS;
+	if ((wid->icons = calloc(wid->nicons, sizeof(*wid->icons))) == NULL) {
+		warn("calloc");
+		return RET_ERROR;
 	}
+	retval = RET_OK;
+	for (i = 0; i < ndatas && i < wid->nicons; i++) {
+		if (pixmapfromdata(wid, datas[i], &wid->icons[i].pix, &wid->icons[i].mask) == RET_ERROR) {
+			warnx("could not open %d-th default icon pixmap", i);
+			retval = RET_ERROR;
+		}
+	}
+	n = i;
+	for (i = 0; i < npaths && i < wid->nicons; i++)
+		pixmapfromfile(wid, paths[i], &wid->icons[n + i].pix, &wid->icons[n + i].mask);
+	return retval;
 }
 
 void

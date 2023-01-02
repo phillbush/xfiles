@@ -13,6 +13,8 @@
 
 #include "util.h"
 #include "widget.h"
+#include "icons/file.xpm"
+#include "icons/folder.xpm"
 
 #define HOME            "HOME"
 #define FILE_ICONS      "FILE_ICONS"
@@ -27,6 +29,12 @@
 #define UNIT_LAST       7
 #define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
 #define TIME_BUFSIZE    128
+
+enum {
+	FILE_XPM,
+	FOLDER_XPM,
+	XPM_LAST
+};
 
 enum {
 	STATE_NAME,     /* entry used by widget.c */
@@ -455,13 +463,16 @@ diropen(struct FM *fm, const char *path, int savecwd)
 			fm->entries[i][STATE_MODE] = modefmt(sb.st_mode);
 			fm->entries[i][STATE_OWNER] = ownerfmt(sb.st_uid, sb.st_gid);
 		}
-		fm->foundicons[i] = -1;
 		free(array[i]);
 	}
 	free(array);
 	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycmp);
 	for (i = 0; i < fm->nentries; i++) {
-		for (j = 0, icon = fm->icons; fm->foundicons[i] == -1 && icon != NULL; icon = icon->next, j++) {
+		if (fm->entries[i][STATE_MODE] != NULL && fm->entries[i][STATE_MODE][0] == 'd')
+			fm->foundicons[i] = ICON_PACK(FOLDER_XPM, FOLDER_XPM);
+		else
+			fm->foundicons[i] = ICON_PACK(FILE_XPM, FILE_XPM);
+		for (j = 0, icon = fm->icons; icon != NULL; icon = icon->next, j++) {
 			if (icon->mode != '\0' && (fm->entries[i][STATE_MODE] == NULL || fm->entries[i][STATE_MODE][0] != icon->mode))
 				continue;
 			for (patt = icon->patt; patt != NULL; patt = patt->next) {
@@ -473,9 +484,12 @@ diropen(struct FM *fm, const char *path, int savecwd)
 					s = fm->entries[i][STATE_NAME];
 				}
 				if (s != NULL && !fnmatch(patt->s, s, flags)) {
-					fm->foundicons[i] = j;
 					break;
 				}
+			}
+			if (patt != NULL) {
+				fm->foundicons[i] = ICON_PACK(XPM_LAST + j, fm->foundicons[i]);
+				break;
 			}
 		}
 	}
@@ -675,7 +689,13 @@ main(int argc, char *argv[])
 	initthumbnailer(&fm);
 	if ((fm.wid = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
-	openicons(fm.wid, icons, nicons);
+	openicons(
+		fm.wid,
+		(char **[]){ file_xpm, folder_xpm },
+		icons,
+		XPM_LAST,
+		nicons
+	);
 	free(icons);
 	diropen(&fm, path, 1);
 	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);

@@ -1,5 +1,5 @@
 /* XPM */
-static char * fileicon_xpm[] = {
+static char * x_xpm[] = {
 "64 64 5 1",
 " 	c None",
 ".	c #A40000",

@@ -22,8 +22,8 @@ ${PROG}: ${OBJS}
 	${CC} -std=c99 -pedantic -D_POSIX_C_SOURCE=200809L \
 	${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
 
-xfiles.o: util.h widget.h
-widget.o: util.h widget.h winicon.data fileicon.xpm
+xfiles.o: util.h widget.h icons/file.xpm icons/folder.xpm
+widget.o: util.h widget.h winicon.data icons/x.xpm
 
 tags: ${SRCS}
 	ctags ${SRCS}
