@@ -257,12 +257,10 @@ struct Widget {
 	const char *class;
 
 	/*
-	 * Index of the last item clicked by the user; or -1 if none.
-	 * Although it is set at the main loop (see pollwidget), it is
-	 * necessary in drawing functions to draw a dashed border around
-	 * the item's label.
+	 * Index of highlighted item (usually the last item clicked by
+	 * the user); or -1 if none.
 	 */
-	int lastitem;
+	int highlight;
 
 	/*
 	 * The scroller how this code calls the widget that replaces the
@@ -765,7 +763,7 @@ drawlabel(Widget wid, int index, int x, int y)
 			textw = textwidth(wid, text, textlen);
 		}
 	}
-	if (index == wid->lastitem) {
+	if (index == wid->highlight) {
 		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
 		XDrawRectangle(
 			wid->dpy,
@@ -922,8 +920,8 @@ settitle(Widget wid)
 	(void)snprintf(nitems, STATUS_BUFSIZE, "%d items", wid->nitems - 1);
 	selitem = "";
 	status = nitems;
-	selitem = (wid->lastitem > 0 ? wid->items[wid->lastitem][ITEM_NAME] : "");
-	status = (wid->lastitem > 0 ? wid->items[wid->lastitem][ITEM_STATUS] : nitems);
+	selitem = (wid->highlight > 0 ? wid->items[wid->highlight][ITEM_NAME] : "");
+	status = (wid->highlight > 0 ? wid->items[wid->highlight][ITEM_STATUS] : nitems);
 	(void)snprintf(
 		title, TITLE_BUFSIZE,
 		"%s%s%s (%s) - %s (%d%%)",
@@ -1151,7 +1149,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.thumbhead = NULL,
 		.linelens = NULL,
 		.icons = NULL,
-		.lastitem = -1,
+		.highlight = -1,
 		.title = "",
 		.class = class,
 		.sel = NULL,
@@ -1292,7 +1290,7 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 	wid->row = 0;
 	wid->ydiff = 0;
 	wid->title = title;
-	wid->lastitem = -1;
+	wid->highlight = -1;
 	(void)calcsize(wid, -1, -1);
 	if ((wid->issel = calloc(wid->nitems, sizeof(*wid->issel))) == NULL) {
 		warn("calloc");
@@ -1632,18 +1630,18 @@ mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 		unselectitems(wid);
 		redrawall = TRUE;
 	}
-	previtem = wid->lastitem;
-	if ((wid->lastitem = getpointerclick(wid, ev->x, ev->y)) == -1)
+	previtem = wid->highlight;
+	if ((wid->highlight = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
 	if (previtem != -1 && ev->state & ShiftMask) {
-		selectitems(wid, wid->lastitem, previtem);
+		selectitems(wid, wid->highlight, previtem);
 		redrawall = TRUE;
 	} else {
-		selectitem(wid, wid->lastitem, ((ev->state & ControlMask) ? wid->issel[wid->lastitem] == NULL : TRUE), REDRAW);
+		selectitem(wid, wid->highlight, ((ev->state & ControlMask) ? wid->issel[wid->highlight] == NULL : TRUE), REDRAW);
 	}
 	if (!(ev->state & (ControlMask | ShiftMask)) &&
 	    ev->time - (*lasttime) <= DOUBLECLICK) {
-		ret = wid->lastitem;
+		ret = wid->highlight;
 	}
 done:
 	*lasttime = ev->time;
@@ -1652,7 +1650,7 @@ done:
 		drawitems(wid);
 	else if (previtem >= 0)
 		drawitem(wid, previtem);
-	if (redrawall || wid->lastitem >= 0)
+	if (redrawall || wid->highlight >= 0)
 		commitdraw(wid);
 	return ret;
 }
@@ -2121,17 +2119,17 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		commitdraw(wid);
 		break;
 	case XK_Return:
-		if (wid->lastitem == -1)
+		if (wid->highlight == -1)
 			break;
-		*nitems = fillselitems(wid, selitems, wid->lastitem);
+		*nitems = fillselitems(wid, selitems, wid->highlight);
 		return WIDGET_OPEN;
 	case XK_Menu:
 		*nitems = fillselitems(wid, selitems, -1);
 		return WIDGET_CONTEXT;
 	case XK_space:
-		if (wid->lastitem == -1)
+		if (wid->highlight == -1)
 			break;
-		selectitem(wid, wid->lastitem, wid->issel[wid->lastitem] == NULL, REDRAW);
+		selectitem(wid, wid->highlight, wid->issel[wid->highlight] == NULL, REDRAW);
 		commitdraw(wid);
 		break;
 	case XK_Prior:
@@ -2158,8 +2156,8 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 			setrow(wid, wid->nscreens);
 			goto draw;
 		}
-		if (wid->lastitem == -1) {
-			wid->lastitem = 0;
+		if (wid->highlight == -1) {
+			wid->highlight = 0;
 			setrow(wid, 0);
 		}
 		if (ksym == XK_Up)
@@ -2170,7 +2168,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 			n = -1;
 		else
 			n = 1;
-		if ((index = wid->lastitem + n) < 0 || index >= wid->nitems)
+		if ((index = wid->highlight + n) < 0 || index >= wid->nitems)
 			break;
 		row = index / wid->ncols;
 		if (row < wid->row)
@@ -2178,8 +2176,8 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		else if (row >= wid->row + wid->h / wid->itemh)
 			setrow(wid, wid->row + 1);
 draw:
-		previtem = wid->lastitem;
-		wid->lastitem = index;
+		previtem = wid->highlight;
+		wid->highlight = index;
 		if (xev->state & ShiftMask) {
 			selectitems(wid, index, previtem);
 		} else if (xev->state & ControlMask) {
@@ -2220,7 +2218,6 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 		}
 	}
 	wid->start = TRUE;
-	wid->lastitem = -1;
 	ignoremotion = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		if (processevent(wid, &ev, &close)) {
@@ -2280,12 +2277,12 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 				break;
 			if (ignoremotion)
 				break;
-			if (wid->lastitem != -1)
+			if (wid->highlight != -1)
 				break;
 			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
 			if (state != WIDGET_CONTINUE)
 				return state;
-			wid->lastitem = -1;
+			wid->highlight = -1;
 			break;
 		}
 	}
