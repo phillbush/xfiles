@@ -2143,7 +2143,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 {
 	KeySym ksym;
 	unsigned int state;
-	int redrawall, previtem, index, row, n;
+	int redrawall, previtem, index, row[2], newrow, n, i;
 
 	if (!XkbLookupKeySym(wid->dpy, xev->keycode, xev->state, &state, &ksym))
 		return WIDGET_CONTINUE;
@@ -2210,20 +2210,35 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		if (ksym == XK_Up)
 			n = -wid->ncols;
 		else if (ksym == XK_Down)
-			n = wid->ncols;
+			n = min(wid->ncols, wid->nitems - wid->highlight - 1);
 		else if (ksym == XK_Left)
 			n = -1;
 		else
 			n = 1;
 		if ((index = wid->highlight + n) < 0 || index >= wid->nitems)
 			break;
-		row = index / wid->ncols;
-		if (row < wid->row)
-			setrow(wid, wid->row - 1);
-		else if (row >= wid->row + wid->h / wid->itemh)
-			setrow(wid, wid->row + 1);
-		else
-			redrawall = FALSE;
+		row[0] = wid->highlight / wid->ncols;
+		row[1] = index / wid->ncols;
+		newrow = wid->row;
+		for (i = 0; i < 2; i++) {
+			/*
+			 * Try to make both previously highlighted item
+			 * and new highlighted item visible.
+			 */
+			if (row[i] < newrow) {
+				newrow = row[i];
+			} else if (row[i] >= newrow + wid->h / wid->itemh) {
+				newrow = row[i] - wid->h / wid->itemh + 1;
+			}
+		}
+		if (wid->row != newrow) {
+			wid->ydiff = 0;
+			setrow(wid, newrow);
+			redrawall = TRUE;
+		} else if (wid->row == index / wid->ncols) {
+			wid->ydiff = 0;
+			wid->redraw = TRUE;
+		}
 draw:
 		previtem = wid->highlight;
 		highlight(wid, index, TRUE);
