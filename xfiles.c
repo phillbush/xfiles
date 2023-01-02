@@ -425,7 +425,7 @@ createthumbthread(struct FM *fm)
 	etcreate(&fm->thumbthread, thumbnailer, (void *)fm);
 }
 
-static void
+static int
 diropen(struct FM *fm, const char *path, int savecwd)
 {
 	struct IconPattern *icon;
@@ -435,8 +435,8 @@ diropen(struct FM *fm, const char *path, int savecwd)
 	int flags, i, j;
 	char *s;
 
-	if (path != NULL && wchdir(path) == -1)
-		return;
+	if (path != NULL && wchdir(path) == RET_ERROR)
+		return RET_ERROR;
 	egetcwd(fm->path, sizeof(fm->path));
 	(void)savecwd;                  // XXX: delete-me
 	freeentries(fm);
@@ -497,6 +497,7 @@ diropen(struct FM *fm, const char *path, int savecwd)
 		snprintf(fm->here, PATH_MAX, "~%s", fm->path + fm->homelen);
 	else
 		snprintf(fm->here, PATH_MAX, "%s", fm->path);
+	return RET_OK;
 }
 
 static char **
@@ -697,7 +698,7 @@ main(int argc, char *argv[])
 		nicons
 	);
 	free(icons);
-	diropen(&fm, path, 1);
+	(void)diropen(&fm, path, 1);
 	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
@@ -721,7 +722,8 @@ main(int argc, char *argv[])
 			if (fm.entries[fm.selitems[0]][STATE_MODE][0] == 'd') {
 				widgetcursor(fm.wid, CURSOR_WATCH);
 				closethumbthread(&fm);
-				diropen(&fm, fm.entries[fm.selitems[0]][STATE_PATH], 1);
+				if (diropen(&fm, fm.entries[fm.selitems[0]][STATE_PATH], 1) == RET_ERROR)
+					break;
 				if (setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries) == RET_ERROR) {
 					exitval = EXIT_FAILURE;
 					goto done;
