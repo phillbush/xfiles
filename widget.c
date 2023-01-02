@@ -1079,7 +1079,7 @@ getpointerclick(Widget wid, int x, int y)
 	if (wid->linelen == NULL)
 		return -1;
 	textx = (wid->itemw - wid->linelen[i]) / 2;
-	texty = wid->itemh - (NLINES - 0.5) * wid->fonth;
+	texty = wid->itemh - (NLINES + 0.5) * wid->fonth;
 	if (x >= textx && x < textx + wid->linelen[i] &&
 	    y >= texty && y < texty + wid->nlines[i] * wid->fonth) {
 		return i;
