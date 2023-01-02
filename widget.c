@@ -1077,7 +1077,7 @@ getpointerclick(Widget wid, int x, int y)
 	if (i < 0 || i >= wid->nitems)
 		return -1;
 	iconx = (wid->itemw - THUMBSIZE) / 2;
-	if (x >= iconx && x < iconx + THUMBSIZE && y >= 0 && y < THUMBSIZE)
+	if (x >= iconx && x < iconx + THUMBSIZE && y >= 0 && y < THUMBSIZE + wid->fonth / 2)
 		return i;
 	if (wid->linelens == NULL)
 		return -1;
