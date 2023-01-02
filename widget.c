@@ -1845,31 +1845,33 @@ processevent(Widget wid, XEvent *ev, int *close)
 	case ClientMessage:
 		if ((Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
 			*close = TRUE;
-		return TRUE;
+		break;
 	case Expose:
 		if (ev->xexpose.count == 0)
 			commitdraw(wid);
-		return TRUE;
+		break;
 	case ConfigureNotify:
 		if (calcsize(wid, ev->xconfigure.width, ev->xconfigure.height)) {
 			if (wid->row >= wid->nscreens)
 				setrow(wid, wid->nscreens - 1);
 			drawitems(wid);
 		}
-		return TRUE;
+		break;
 	case SelectionRequest:
 		if (ev->xselectionrequest.selection == XA_PRIMARY)
 			sendselection(wid, &ev->xselectionrequest);
-		return TRUE;
+		break;
 	case SelectionClear:
 		if (wid->sel == NULL)
-			return TRUE;
+			break;
 		unselectitems(wid);
-		return TRUE;
+		break;
 	default:
 		return FALSE;
 	}
-	return FALSE;
+	if (wid->redraw)
+		commitdraw(wid);
+	return TRUE;
 }
 
 static int
@@ -1906,6 +1908,7 @@ rectmotion(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 	moved = FALSE;
 	ownsel = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
+		wid->redraw = FALSE;
 		if (processevent(wid, &ev, &close)) {
 			if (close) {
 				XSyncDestroyAlarm(wid->dpy, alarm);
@@ -1948,6 +1951,9 @@ rectmotion(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 			commitdraw(wid);
 			lasttime = ev.xmotion.time;
 			break;
+		}
+		if (wid->redraw) {
+			commitdraw(wid);
 		}
 	}
 done:
@@ -2018,6 +2024,7 @@ scrollmotion(Widget wid, int x, int y)
 	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
 	left = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
+		wid->redraw = FALSE;
 		if (processevent(wid, &ev, &close)) {
 			if (close) {
 				XSyncDestroyAlarm(wid->dpy, alarm);
@@ -2026,8 +2033,11 @@ scrollmotion(Widget wid, int x, int y)
 			continue;
 		}
 		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
-			if ((pos = scrollerpos(wid)) != 0 && scroll(wid, pos))
-				drawitems(wid);
+			if ((pos = scrollerpos(wid)) != 0) {
+				if (scroll(wid, pos))
+					drawitems(wid);
+				commitdraw(wid);
+			}
 			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
 			continue;
 		}
@@ -2062,6 +2072,9 @@ scrollmotion(Widget wid, int x, int y)
 				}
 			}
 			break;
+		}
+		if (wid->redraw) {
+			commitdraw(wid);
 		}
 	}
 done:
@@ -2259,8 +2272,6 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 		if (processevent(wid, &ev, &close)) {
 			if (close)
 				return WIDGET_CLOSE;
-			if (wid->redraw)
-				commitdraw(wid);
 			continue;
 		}
 		switch (ev.type) {
