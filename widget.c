@@ -1975,7 +1975,6 @@ scrollerset(Widget wid, int pos)
 		/* all files are visible, there's nothing to scroll */
 		return;
 	}
-	pos -= wid->handlew / 2;
 	pos = max(pos, 0);
 	pos = min(pos, maxpos);
 	newrow = pos * wid->nscreens / maxpos;
@@ -2001,9 +2000,10 @@ scrollmotion(Widget wid, int x, int y)
 {
 	XSyncAlarm alarm;
 	XEvent ev;
-	int pos, close, left;
+	int ydiff, pos, close, left;
 
 	wid->state = STATE_SCROLLING;
+	ydiff = wid->handlew / 2;
 	drawscroller(wid, gethandlepos(wid));
 	XMoveWindow(wid->dpy, wid->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
 	XMapRaised(wid->dpy, wid->scroller);
@@ -2029,7 +2029,7 @@ scrollmotion(Widget wid, int x, int y)
 		switch (ev.type) {
 		case MotionNotify:
 			if (ev.xmotion.window == wid->scroller && (ev.xmotion.state & Button1Mask)) {
-				scrollerset(wid, ev.xmotion.y);
+				scrollerset(wid, ev.xmotion.y - ydiff);
 			} else if (ev.xmotion.window == wid->win &&
 			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
 				left = TRUE;
@@ -2045,8 +2045,14 @@ scrollmotion(Widget wid, int x, int y)
 			if (ev.xbutton.window == wid->win)
 				goto done;
 			if (ev.xbutton.window == wid->scroller) {
-				scrollerset(wid, ev.xmotion.y);
 				left = TRUE;
+				pos = gethandlepos(wid);
+				if (ev.xmotion.y < pos || ev.xmotion.y > pos + wid->handlew) {
+					ydiff = wid->handlew / 2;
+					scrollerset(wid, ev.xmotion.y - ydiff);
+				} else {
+					ydiff = ev.xmotion.y - pos;
+				}
 			}
 			break;
 		}
