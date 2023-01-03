@@ -2207,14 +2207,18 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 			wid->highlight = 0;
 			setrow(wid, 0);
 		}
-		if (ksym == XK_Up)
+		if (ksym == XK_Up) {
 			n = -wid->ncols;
-		else if (ksym == XK_Down)
-			n = min(wid->ncols, wid->nitems - wid->highlight - 1);
-		else if (ksym == XK_Left)
+		} else if (ksym == XK_Down) {
+			n = wid->highlight < (wid->nitems / wid->ncols) * wid->ncols
+			  ? wid->nitems - wid->highlight - 1
+			  : 0;
+			n = min(wid->ncols, n);
+		} else if (ksym == XK_Left) {
 			n = -1;
-		else
+		} else {
 			n = 1;
+		}
 		if ((index = wid->highlight + n) < 0 || index >= wid->nitems)
 			break;
 		row[0] = wid->highlight / wid->ncols;
