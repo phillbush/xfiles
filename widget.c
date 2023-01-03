@@ -2307,7 +2307,7 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 					lasttime = ev.xbutton.time;
 					break;
 				}
-				*nitems = fillselitems(wid, selitems, clicki);
+				*nitems = fillselitems(wid, selitems, wid->highlight);
 				return WIDGET_OPEN;
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
 				if (scroll(wid, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
