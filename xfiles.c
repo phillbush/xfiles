@@ -20,6 +20,7 @@
 #define FILE_ICONS      "FILE_ICONS"
 #define APPCLASS        "XFiles"
 #define DEF_OPENER      "xdg-open"
+#define WINDOWID        "WINDOWID"
 #define OPENER          "OPENER"
 #define THUMBNAILER     "THUMBNAILER"
 #define THUMBNAILDIR    "THUMBNAILDIR"
@@ -29,6 +30,7 @@
 #define UNIT_LAST       7
 #define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
 #define TIME_BUFSIZE    128
+#define WINDOWID_BUFSIZE        16
 
 enum {
 	FILE_XPM,
@@ -630,7 +632,8 @@ main(int argc, char *argv[])
 	struct FM fm;
 	size_t nicons;
 	int ch, nitems, state;
-	int saveargc, exitval;
+	int saveargc;
+	int exitval = EXIT_SUCCESS;
 	char *geom = NULL;
 	char *name = NULL;
 	char *path = NULL;
@@ -639,6 +642,7 @@ main(int argc, char *argv[])
 	char *contextcmd = NULL;
 	char **saveargv;
 	char **icons;
+	char winid[WINDOWID_BUFSIZE];
 
 	saveargv = argv;
 	saveargc = argc;
@@ -690,6 +694,12 @@ main(int argc, char *argv[])
 	initthumbnailer(&fm);
 	if ((fm.wid = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
+	snprintf(winid, WINDOWID_BUFSIZE, "%lu", widgetwinid(fm.wid));
+	if (setenv(WINDOWID, winid, TRUE) == RET_ERROR) {
+		warn("setenv");
+		exitval = EXIT_FAILURE;
+		goto error;
+	}
 	openicons(
 		fm.wid,
 		(char **[]){ file_xpm, folder_xpm },
@@ -702,7 +712,6 @@ main(int argc, char *argv[])
 	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
-	exitval = EXIT_SUCCESS;
 	while ((state = pollwidget(fm.wid, fm.selitems, &nitems)) != WIDGET_CLOSE) {
 		switch (state) {
 		case WIDGET_ERROR:
@@ -738,6 +747,7 @@ main(int argc, char *argv[])
 	}
 done:
 	closethumbthread(&fm);
+error:
 	freeentries(&fm);
 	free(fm.entries);
 	free(fm.foundicons);

@@ -66,6 +66,13 @@ Widget initwidget(
 	char *argv[]
 );
 
+/* Return the id of the widget's window as an unsigned long.
+ *
+ * - wid:
+ *   Widget previously created with initwidget().
+ */
+unsigned long widgetwinid(Widget wid);
+
 /*
  * Try to open a sequence of .xpm icons for displaying the items on the
  * widget.  This function can only be called once for each widget, after

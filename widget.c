@@ -373,6 +373,8 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 			            | ButtonReleaseMask | ButtonPressMask,
 		}
 	);
+	if (wid->win == None)
+		return RET_ERROR;
 	wid->namepix = XCreatePixmap(
 		wid->dpy,
 		wid->win,
@@ -380,7 +382,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		wid->fonth,
 		DEPTH(wid->dpy)
 	);
-	if (wid->win == None)
+	if (wid->namepix == None)
 		return RET_ERROR;
 	XmbSetWMProperties(
 		wid->dpy, wid->win,
@@ -2506,4 +2508,10 @@ widgetcursor(Widget wid, int cursor)
 		cursor = CURSOR_NORMAL;
 	XDefineCursor(wid->dpy, wid->win, wid->cursors[cursor]);
 	XFlush(wid->dpy);
+}
+
+unsigned long
+widgetwinid(Widget wid)
+{
+	return (unsigned long)wid->win;
 }

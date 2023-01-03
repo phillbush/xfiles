@@ -69,6 +69,15 @@ Selecting one or more files copies their paths into the PRIMARY X selection.
 Opening a single file invokes the command specified by the
 .Ev OPENER
 environment variable with the path to the open file as argument.
+The
+.Ev OPENER
+program is invoked in the directory currently open at
+.Nm ;
+and the environment variable
+.Ev "WINDOWID" ,
+containing the window id of
+.Nm ,
+is visible to its process.
 .Bl -bullet
 .It
 A single click with no modifier on a file's icon selects it (deselecting any other file).
@@ -119,7 +128,12 @@ command-line option or the
 environment variable.
 This program is invoked after pressing the third mouse button.
 It is invoked in the directory currently open at
-.Nm .
+.Nm ;
+and the environment variable
+.Ev "WINDOWID" ,
+containing the window id of
+.Nm ,
+is visible to its process.
 No modifier applies to that button.
 .Bl -bullet
 .It
@@ -232,6 +246,19 @@ Path to the directory where thumbnails must be saved.
 Name of the command to be run on right clicking when the
 .Fl -c
 option is not given.
+.El
+.Pp
+The following environment variables are set by
+.Nm
+and can affect the execution of the commands run by it.
+.Bl -tag -width Ds
+.It Ev "WINDOWID"
+A string containing the id number, in decimal ASCII characters,
+of the X Window created by the current
+.Nm
+process.
+Note that this string contains the number in decimal notation,
+not in hexadecimal (as is usually exchanged by a few X applications).
 .El
 .Sh BUGS
 Yes.
