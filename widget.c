@@ -1393,6 +1393,7 @@ highlight(Widget wid, int index, int redraw)
 		drawitem(wid, index);
 	/* we still have to redraw the previous one */
 	drawitem(wid, prevhili);
+	settitle(wid);
 }
 
 static void
@@ -1658,7 +1659,11 @@ mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 	previtem = wid->highlight;
 	if ((index = getpointerclick(wid, ev->x, ev->y)) == -1)
 		goto done;
-	highlight(wid, index, FALSE);
+	/*
+	 * If index != 0, there's no need to ask highlight() to redraw the item,
+	 * as selectitem() or selectitems() will already redraw it.
+	 */
+	highlight(wid, index, (index == 0));
 	if (previtem != -1 && ev->state & ShiftMask) {
 		selectitems(wid, wid->highlight, previtem);
 	} else {
@@ -1670,7 +1675,6 @@ mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 	}
 done:
 	*lasttime = ev->time;
-	settitle(wid);
 	return ret;
 }
 
