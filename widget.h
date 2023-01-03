@@ -1,5 +1,6 @@
 typedef enum {
-	WIDGET_CONTINUE,
+	WIDGET_NONE,
+	WIDGET_INTERNAL,
 	WIDGET_CONTEXT,
 	WIDGET_CLOSE,
 	WIDGET_OPEN,
@@ -188,9 +189,13 @@ void mapwidget(Widget wid);
  * It return a `WidgetEvent` value depending on the result of the event
  * processing:
  *
- * - WIDGET_CONTINUE:
- *   This value is never returned, and is only used internally by
- *   widget.c
+ * - WIDGET_NONE:
+ *   No event occurred.  This value is never returned, and is only used
+ *   internally by widget.c.
+ *
+ * - WIDGET_INTERNAL:
+ *   An internal event occurred.  This value is never returned, and is
+ *   only used internally by widget.c.
  *
  * - WIDGET_CONTEXT:
  *   The Button 3 was pressed.

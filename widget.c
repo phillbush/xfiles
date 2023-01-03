@@ -1839,19 +1839,14 @@ endevent(Widget wid)
 	}
 }
 
-static int
-processevent(Widget wid, XEvent *ev, int *close)
+static WidgetEvent
+processevent(Widget wid, XEvent *ev)
 {
-	/*
-	 * Return TRUE if an event was processed.
-	 * Set *close to TRUE if we were asked to close the window.
-	 */
 	wid->redraw = FALSE;
-	*close = FALSE;
 	switch (ev->type) {
 	case ClientMessage:
 		if ((Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
-			*close = TRUE;
+			return WIDGET_CLOSE;
 		break;
 	case Expose:
 		if (ev->xexpose.count == 0)
@@ -1874,10 +1869,10 @@ processevent(Widget wid, XEvent *ev, int *close)
 		unselectitems(wid);
 		break;
 	default:
-		return FALSE;
+		return WIDGET_NONE;
 	}
 	endevent(wid);
-	return TRUE;
+	return WIDGET_INTERNAL;
 }
 
 static int
@@ -1897,15 +1892,12 @@ querypointer(Widget wid, Window win, int *x, int *y)
 	) == True;
 }
 
-static int
+static WidgetEvent
 rectmotion(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 {
 	XEvent ev;
 	XSyncAlarm alarm;
-	int rectrow, rectydiff;
-	int moved, close;
-	int x, y;
-	int ownsel;
+	int rectrow, rectydiff, ownsel, moved, x, y;
 
 	wid->state = STATE_SELECTING;
 	rectrow = wid->row;
@@ -1914,11 +1906,13 @@ rectmotion(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 	moved = FALSE;
 	ownsel = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
-		if (processevent(wid, &ev, &close)) {
-			if (close) {
-				XSyncDestroyAlarm(wid->dpy, alarm);
-				return WIDGET_CLOSE;
-			}
+		switch (processevent(wid, &ev)) {
+		case WIDGET_CLOSE:
+			XSyncDestroyAlarm(wid->dpy, alarm);
+			return WIDGET_CLOSE;
+		case WIDGET_NONE:
+			break;
+		default:
 			continue;
 		}
 		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
@@ -1964,7 +1958,7 @@ done:
 	wid->state = STATE_NORMAL;
 	commitdraw(wid);
 	XSyncDestroyAlarm(wid->dpy, alarm);
-	return WIDGET_CONTINUE;
+	return WIDGET_NONE;
 }
 
 static int
@@ -2012,12 +2006,12 @@ scrollerset(Widget wid, int pos)
 	}
 }
 
-static int
+static WidgetEvent
 scrollmotion(Widget wid, int x, int y)
 {
 	XSyncAlarm alarm;
 	XEvent ev;
-	int grabpos, pos, close, left;
+	int grabpos, pos, left;
 
 	wid->state = STATE_SCROLLING;
 	grabpos = wid->handlew / 2;             /* we grab the handle in its middle */
@@ -2027,11 +2021,13 @@ scrollmotion(Widget wid, int x, int y)
 	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
 	left = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
-		if (processevent(wid, &ev, &close)) {
-			if (close) {
-				XSyncDestroyAlarm(wid->dpy, alarm);
-				return WIDGET_CLOSE;
-			}
+		switch (processevent(wid, &ev)) {
+		case WIDGET_CLOSE:
+			XSyncDestroyAlarm(wid->dpy, alarm);
+			return WIDGET_CLOSE;
+		case WIDGET_NONE:
+			break;
+		default:
 			continue;
 		}
 		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
@@ -2081,7 +2077,7 @@ done:
 	wid->state = STATE_NORMAL;
 	XSyncDestroyAlarm(wid->dpy, alarm);
 	XUnmapWindow(wid->dpy, wid->scroller);
-	return WIDGET_CONTINUE;
+	return WIDGET_NONE;
 }
 
 static int
@@ -2138,7 +2134,7 @@ fillselitems(Widget wid, int *selitems, int clicked)
 	return nitems;
 }
 
-static int
+static WidgetEvent
 keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 {
 	KeySym ksym;
@@ -2146,7 +2142,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 	int redrawall, previtem, index, row[2], newrow, n, i;
 
 	if (!XkbLookupKeySym(wid->dpy, xev->keycode, xev->state, &state, &ksym))
-		return WIDGET_CONTINUE;
+		return WIDGET_NONE;
 	switch (ksym) {
 	case XK_KP_Enter:       ksym = XK_Return;       break;
 	case XK_KP_Space:       ksym = XK_space;        break;
@@ -2256,7 +2252,7 @@ draw:
 	default:
 		break;
 	}
-	return WIDGET_CONTINUE;
+	return WIDGET_NONE;
 }
 
 /*
@@ -2270,29 +2266,30 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 {
 	XEvent ev;
 	Time lasttime = 0;
-	int close = FALSE;
 	int ignoremotion = FALSE;
 	int clicki = -1;
 	int state;
 
 	while (wid->start && XPending(wid->dpy) > 0) {
 		(void)XNextEvent(wid->dpy, &ev);
-		(void)processevent(wid, &ev, &close);
-		if (close) {
+		if (processevent(wid, &ev) == WIDGET_CLOSE) {
 			return WIDGET_CLOSE;
 		}
 	}
 	wid->start = TRUE;
 	while (!XNextEvent(wid->dpy, &ev)) {
-		if (processevent(wid, &ev, &close)) {
-			if (close)
-				return WIDGET_CLOSE;
+		switch (processevent(wid, &ev)) {
+		case WIDGET_CLOSE:
+			return WIDGET_CLOSE;
+		case WIDGET_NONE:
+			break;
+		default:
 			continue;
 		}
 		switch (ev.type) {
 		case KeyPress:
 			state = keypress(wid, &ev.xkey, selitems, nitems);
-			if (state != WIDGET_CONTINUE)
+			if (state != WIDGET_NONE)
 				return state;
 			break;
 		case ButtonPress:
@@ -2315,7 +2312,7 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 				commitdraw(wid);
 			} else if (ev.xbutton.button == Button2) {
 				state = scrollmotion(wid, ev.xmotion.x, ev.xmotion.y);
-				if (state != WIDGET_CONTINUE)
+				if (state != WIDGET_NONE)
 					return state;
 				ignoremotion = TRUE;
 			} else if (ev.xbutton.button == Button3) {
@@ -2346,7 +2343,7 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 			if (clicki != -1)
 				break;
 			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), ev.xmotion.x, ev.xmotion.y);
-			if (state != WIDGET_CONTINUE)
+			if (state != WIDGET_NONE)
 				return state;
 			break;
 		}
