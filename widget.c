@@ -2271,8 +2271,8 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 	XEvent ev;
 	Time lasttime = 0;
 	int close = FALSE;
-	int ignoremotion;
-	int clicki;
+	int ignoremotion = FALSE;
+	int clicki = -1;
 	int state;
 
 	while (wid->start && XPending(wid->dpy) > 0) {
@@ -2283,7 +2283,6 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 		}
 	}
 	wid->start = TRUE;
-	ignoremotion = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		if (processevent(wid, &ev, &close)) {
 			if (close)
