@@ -1648,11 +1648,10 @@ done:
 }
 
 static int
-mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
+mouse1click(Widget wid, XButtonPressedEvent *ev)
 {
-	int previtem, index, ret;
+	int previtem, index;
 
-	ret = -1;
 	if (!(ev->state & (ControlMask | ShiftMask)) && wid->sel != NULL) {
 		unselectitems(wid);
 	}
@@ -1669,13 +1668,8 @@ mouse1click(Widget wid, XButtonPressedEvent *ev, Time *lasttime)
 	} else {
 		selectitem(wid, wid->highlight, ((ev->state & ControlMask) ? wid->issel[wid->highlight] == NULL : TRUE), REDRAW);
 	}
-	if (!(ev->state & (ControlMask | ShiftMask)) &&
-	    ev->time - (*lasttime) <= DOUBLECLICK) {
-		ret = wid->highlight;
-	}
 done:
-	*lasttime = ev->time;
-	return ret;
+	return index;
 }
 
 static void
@@ -1837,6 +1831,14 @@ commitrectsel(Widget wid)
 	}
 }
 
+static void
+endevent(Widget wid)
+{
+	if (wid->redraw) {
+		commitdraw(wid);
+	}
+}
+
 static int
 processevent(Widget wid, XEvent *ev, int *close)
 {
@@ -1844,6 +1846,7 @@ processevent(Widget wid, XEvent *ev, int *close)
 	 * Return TRUE if an event was processed.
 	 * Set *close to TRUE if we were asked to close the window.
 	 */
+	wid->redraw = FALSE;
 	*close = FALSE;
 	switch (ev->type) {
 	case ClientMessage:
@@ -1873,8 +1876,7 @@ processevent(Widget wid, XEvent *ev, int *close)
 	default:
 		return FALSE;
 	}
-	if (wid->redraw)
-		commitdraw(wid);
+	endevent(wid);
 	return TRUE;
 }
 
@@ -1912,7 +1914,6 @@ rectmotion(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 	moved = FALSE;
 	ownsel = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
-		wid->redraw = FALSE;
 		if (processevent(wid, &ev, &close)) {
 			if (close) {
 				XSyncDestroyAlarm(wid->dpy, alarm);
@@ -1956,9 +1957,7 @@ rectmotion(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 			lasttime = ev.xmotion.time;
 			break;
 		}
-		if (wid->redraw) {
-			commitdraw(wid);
-		}
+		endevent(wid);
 	}
 done:
 	commitrectsel(wid);
@@ -2028,7 +2027,6 @@ scrollmotion(Widget wid, int x, int y)
 	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
 	left = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
-		wid->redraw = FALSE;
 		if (processevent(wid, &ev, &close)) {
 			if (close) {
 				XSyncDestroyAlarm(wid->dpy, alarm);
@@ -2077,9 +2075,7 @@ scrollmotion(Widget wid, int x, int y)
 			}
 			break;
 		}
-		if (wid->redraw) {
-			commitdraw(wid);
-		}
+		endevent(wid);
 	}
 done:
 	wid->state = STATE_NORMAL;
@@ -2276,8 +2272,6 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 	Time lasttime = 0;
 	int close = FALSE;
 	int ignoremotion;
-	int clickx = 0;
-	int clicky = 0;
 	int clicki;
 	int state;
 
@@ -2291,7 +2285,6 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 	wid->start = TRUE;
 	ignoremotion = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
-		wid->redraw = FALSE;
 		if (processevent(wid, &ev, &close)) {
 			if (close)
 				return WIDGET_CLOSE;
@@ -2307,12 +2300,14 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 			if (ev.xbutton.window != wid->win)
 				break;
 			if (ev.xbutton.button == Button1) {
-				clicki = mouse1click(wid, &ev.xbutton, &lasttime);
+				clicki = mouse1click(wid, &ev.xbutton);
 				ownselection(wid, ev.xbutton.time);
-				clickx = ev.xbutton.x;
-				clicky = ev.xbutton.y;
-				if (clicki == -1)
+				if (clicki == -1 ||
+				    (ev.xbutton.state & (ControlMask | ShiftMask)) ||
+				    ev.xbutton.time - lasttime > DOUBLECLICK) {
+					lasttime = ev.xbutton.time;
 					break;
+				}
 				*nitems = fillselitems(wid, selitems, clicki);
 				return WIDGET_OPEN;
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
@@ -2349,16 +2344,14 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 				break;
 			if (ignoremotion)
 				break;
-			if (getpointerclick(wid, ev.xmotion.x, ev.xmotion.y) != -1)
+			if (clicki != -1)
 				break;
-			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
+			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), ev.xmotion.x, ev.xmotion.y);
 			if (state != WIDGET_CONTINUE)
 				return state;
 			break;
 		}
-		if (wid->redraw) {
-			commitdraw(wid);
-		}
+		endevent(wid);
 	}
 	return WIDGET_CLOSE;
 }
