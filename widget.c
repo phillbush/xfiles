@@ -1052,12 +1052,12 @@ getitem(Widget wid, int row, int ydiff, int *x, int *y)
 	int i, w, h;
 
 	*y -= MARGIN;
+	*y += ydiff;
 	*x -= wid->x0;
 	if (*x < 0 || *x >= wid->ncols * wid->itemw)
 		return -1;
 	if (*y < 0 || *y >= wid->h)
 		return -1;
-	*y += ydiff;
 	w = *x / wid->itemw;
 	h = *y / wid->itemh;
 	row *= wid->ncols;
@@ -1304,6 +1304,10 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 	wid->title = title;
 	wid->highlight = -1;
 	(void)calcsize(wid, -1, -1);
+	if (keepscroll && wid->row >= wid->nscreens) {
+		wid->ydiff = 0;
+		setrow(wid, wid->nscreens);
+	}
 	if ((wid->issel = calloc(wid->nitems, sizeof(*wid->issel))) == NULL) {
 		warn("calloc");
 		goto error;
@@ -1680,13 +1684,15 @@ mouse3click(Widget wid, int x, int y)
 {
 	int index;
 
-	if (wid->sel != NULL) {
-		/* there's already something selected; do nothing */
-		return;
-	}
-	if ((index = getpointerclick(wid, x, y)) != -1) {
-		/* we clicked on an item; select it */
-		selectitem(wid, index, TRUE, REDRAW);
+	index = getpointerclick(wid, x, y);
+	if (index != -1) {
+		if (wid->issel[index] == NULL) {
+			highlight(wid, index, FALSE);
+			unselectitems(wid);
+			selectitem(wid, index, TRUE, REDRAW);
+		} else {
+			highlight(wid, index, TRUE);
+		}
 	}
 }
 
@@ -2308,6 +2314,7 @@ mainmode(Widget wid, int *selitems, int *nitems)
 			} else if (ev.xbutton.button == Button3) {
 				mouse3click(wid, ev.xbutton.x, ev.xbutton.y);
 				*nitems = fillselitems(wid, selitems, -1);
+				commitdraw(wid);
 				XUngrabPointer(wid->dpy, ev.xbutton.time);
 				XFlush(wid->dpy);
 				return WIDGET_CONTEXT;
