@@ -166,13 +166,18 @@ int openicons(Widget wid, char **datas[], char *paths[], int ndatas, int npaths)
  * - nitems:
  *   Size variable setting the number of members of the "items" and
  *   "itemicons" parameter arrays.
+ *
+ * - keepscroll
+ *   Integer which, if non-zero, specifies to keep the same scroll
+ *   position previously used.
  */
 int setwidget(
 	Widget wid,
 	const char *title,
 	char **items[],
 	int itemicons[],
-	size_t nitems
+	size_t nitems,
+	int reconfigure
 );
 
 /*

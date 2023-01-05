@@ -567,10 +567,10 @@ calcsize(Widget wid, int w, int h)
 	if (w >= 0 && h >= 0) {
 		wid->w = w;
 		wid->h = h;
+		wid->ydiff = 0;
 	}
 	wid->ncols = max(wid->w / wid->itemw, 1);
 	wid->nrows = max(wid->h / wid->itemh + (wid->h % wid->itemh ? 2 : 1), 1);
-	wid->ydiff = 0;
 	wid->x0 = max((wid->w - wid->ncols * wid->itemw) / 2, 0);
 	wid->nscreens = wid->nitems / wid->ncols - wid->h / wid->itemh + (wid->nitems % wid->ncols != 0 ? 1 : 0);
 	wid->nscreens = max(wid->nscreens, 1);
@@ -910,6 +910,7 @@ commitdraw(Widget wid)
 			.clip_mask = None,
 		}
 	);
+	XFlush(wid->dpy);
 done:
 	etunlock(&wid->lock);
 }
@@ -1288,7 +1289,7 @@ error:
 }
 
 int
-setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems)
+setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems, int keepscroll)
 {
 	size_t i;
 
@@ -1296,9 +1297,10 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 	wid->items = items;
 	wid->nitems = nitems;
 	wid->itemicons = itemicons;
-	wid->ydiff = 0;
-	wid->row = 0;
-	wid->ydiff = 0;
+	if (!keepscroll) {
+		wid->ydiff = 0;
+		wid->row = 0;
+	}
 	wid->title = title;
 	wid->highlight = -1;
 	(void)calcsize(wid, -1, -1);
@@ -1324,7 +1326,6 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 	settitle(wid);
 	drawitems(wid);
 	commitdraw(wid);
-	XFlush(wid->dpy);
 	return RET_OK;
 error:
 	free(wid->issel);
@@ -2257,14 +2258,8 @@ draw:
 	return WIDGET_NONE;
 }
 
-/*
- * Check widget.h for description on the interface of the following
- * public functions.  Some of them rely on the existence of objects
- * in the given addresses, during Widget's lifetime.
- */
-
-WidgetEvent
-pollwidget(Widget wid, int *selitems, int *nitems)
+static WidgetEvent
+mainmode(Widget wid, int *selitems, int *nitems)
 {
 	XEvent ev;
 	Time lasttime = 0;
@@ -2272,13 +2267,6 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 	int clicki = -1;
 	int state;
 
-	while (wid->start && XPending(wid->dpy) > 0) {
-		(void)XNextEvent(wid->dpy, &ev);
-		if (processevent(wid, &ev) == WIDGET_CLOSE) {
-			return WIDGET_CLOSE;
-		}
-	}
-	wid->start = TRUE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		switch (processevent(wid, &ev)) {
 		case WIDGET_CLOSE:
@@ -2352,6 +2340,31 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 		endevent(wid);
 	}
 	return WIDGET_CLOSE;
+}
+
+/*
+ * Check widget.h for description on the interface of the following
+ * public functions.  Some of them rely on the existence of objects
+ * in the given addresses, during Widget's lifetime.
+ */
+
+WidgetEvent
+pollwidget(Widget wid, int *selitems, int *nitems)
+{
+	XEvent ev;
+	int retval;
+
+	while (wid->start && XPending(wid->dpy) > 0) {
+		(void)XNextEvent(wid->dpy, &ev);
+		if (processevent(wid, &ev) == WIDGET_CLOSE) {
+			endevent(wid);
+			return WIDGET_CLOSE;
+		}
+	}
+	wid->start = TRUE;
+	retval = mainmode(wid, selitems, nitems);
+	endevent(wid);
+	return retval;
 }
 
 void
@@ -2488,9 +2501,6 @@ setthumbnail(Widget wid, char *path, int item)
 	if (item >= wid->row * wid->ncols && item < wid->row * wid->ncols + wid->nrows * wid->ncols) {
 		drawitem(wid, item);
 		commitdraw(wid);
-		etlock(&wid->lock);
-		XFlush(wid->dpy);
-		etunlock(&wid->lock);
 	}
 	return;
 error:

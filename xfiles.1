@@ -64,6 +64,42 @@ opens at the current directory.
 Otherwise, it opens at the given directory.
 .Sh USAGE
 .Nm
+is controlled mainly with the mouse,
+but some actions can also be performed with the keyboard.
+.Pp
+.Nm
+has four modes of operation, activated via mouse.
+In each mode, some mouse or keyboard actions are allowed while others are not.
+The modes of operation are as follows.
+.Bl -tag -width Ds
+.It Normal Mode
+This is the mode which
+.Nm
+starts in.
+All actions, except rectangular selection and scroller manipulation,
+can be performed while in this mode.
+All other modes are accessible from the normal mode.
+.It Selection Mode
+This mode is entered after dragging the pointer with the first button in normal mode.
+In this mode, a rectangle can be drawn, in which any file inside it can be selected.
+No action other than the rectangular selection can be performed while in this mode.
+To exit this mode, release the first mouse button.
+.It Scroll Mode
+This mode is entered after opening the scroller with the second button in normal mode.
+In this mode, the file list can be scrolled up and down by moving the mouse.
+No action other than scrolling can be performed while in this mode.
+To exit this mode, press the second mouse button
+(or release it, if the pointer had not been released nor moved outside the scroller).
+.It Context Mode
+This mode is entered after pressing the third mouse button or the Menu key.
+In this mode,
+.Nm
+is waiting for the context command to exit.
+No action can be performed while in this mode.
+To exit this mode, the context command must return.
+.El
+.Ss Mouse
+.Nm
 The first mouse button (usually the left one) is used for selection and opening.
 Selecting one or more files copies their paths into the PRIMARY X selection.
 Opening a single file invokes the command specified by the
@@ -146,7 +182,7 @@ selects that file and invokes the context command with its path passed as argume
 Pressing the third button on nothing while there's no file selected
 invokes the context command with no argument.
 .El
-.Pp
+.Ss Keyboard
 The following keys (and their number keyboard counterparts) can control
 .Nm .
 .Bl -tag -width Ds

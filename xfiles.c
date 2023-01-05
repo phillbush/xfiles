@@ -70,6 +70,7 @@ struct FM {
 	char *home;
 	size_t homelen;
 	struct IconPattern *icons;
+	struct timespec time;   /* ctime of current directory */
 
 	pthread_mutex_t thumblock;
 	pthread_t thumbthread;
@@ -428,7 +429,7 @@ createthumbthread(struct FM *fm)
 }
 
 static int
-diropen(struct FM *fm, const char *path, int savecwd)
+diropen(struct FM *fm, const char *path)
 {
 	struct IconPattern *icon;
 	struct Pattern *patt;
@@ -440,7 +441,9 @@ diropen(struct FM *fm, const char *path, int savecwd)
 	if (path != NULL && wchdir(path) == RET_ERROR)
 		return RET_ERROR;
 	egetcwd(fm->path, sizeof(fm->path));
-	(void)savecwd;                  // XXX: delete-me
+	if (stat(fm->path, &sb) == -1)
+		err(EXIT_FAILURE, "stat");
+	fm->time = sb.st_ctim;
 	freeentries(fm);
 	fm->nentries = escandir(fm->path, &array, direntselect, NULL);
 	if (fm->nentries > fm->capacity) {
@@ -578,13 +581,13 @@ initthumbnailer(struct FM *fm)
 }
 
 static void
-forkexec(char *const argv[])
+forkexec(char *const argv[], int doublefork)
 {
 	pid_t pid1, pid2;
 	int fd;
 
 	if ((pid1 = efork()) == 0) {
-		if ((pid2 = efork()) == 0) {
+		if (!doublefork || (pid2 = efork()) == 0) {
 			fd = open(DEV_NULL, O_RDWR);
 			(void)dup2(fd, STDOUT_FILENO);
 			(void)dup2(fd, STDIN_FILENO);
@@ -593,7 +596,9 @@ forkexec(char *const argv[])
 			eexec(argv);
 			exit(EXIT_FAILURE);
 		}
-		exit(EXIT_SUCCESS);
+		if (doublefork) {
+			exit(EXIT_SUCCESS);
+		}
 	}
 	waitpid(pid1, NULL, 0);
 }
@@ -606,7 +611,8 @@ fileopen(struct FM *fm, char *path)
 			fm->opener,
 			path,
 			NULL,
-		}
+		},
+		TRUE
 	);
 }
 
@@ -618,12 +624,42 @@ runcontext(struct FM *fm, char *contextcmd, int nselitems)
 
 	argv = emalloc((nselitems + 2) * sizeof(*argv));
 	argv[0] = contextcmd;
-	nselitems++;
-	for (i = 1; i < nselitems; i++)
-		argv[i] = fm->entries[i][STATE_PATH];
-	argv[i] = NULL;
-	forkexec(argv);
+	for (i = 0; i < nselitems; i++)
+		argv[i+1] = fm->entries[fm->selitems[i]][STATE_PATH];
+	argv[i+1] = NULL;
+	forkexec(argv, FALSE);
 	free(argv);
+}
+
+static int
+changedir(struct FM *fm, const char *path, int keepscroll)
+{
+	struct stat sb;
+	int retval;
+
+	if (path == fm->path) {
+		/*
+		 * We're cd'ing to the place we are currently at; only
+		 * continue if the directory's ctime has changed
+		 */
+		if (stat(fm->path, &sb) == -1) {
+			return RET_ERROR;
+		}
+		if (!timespeclt(&fm->time, &sb.st_ctim)) {
+			return RET_OK;
+		}
+	}
+	retval = RET_OK;
+	closethumbthread(fm);
+	if (diropen(fm, path) == RET_ERROR)
+		goto done;
+	if (setwidget(fm->wid, fm->here, fm->entries, fm->foundicons, fm->nentries, keepscroll) == RET_ERROR) {
+		retval = RET_ERROR;
+		goto done;
+	}
+done:
+	createthumbthread(fm);
+	return retval;
 }
 
 int
@@ -708,8 +744,8 @@ main(int argc, char *argv[])
 		nicons
 	);
 	free(icons);
-	(void)diropen(&fm, path, 1);
-	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries);
+	(void)diropen(&fm, path);
+	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries, FALSE);
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
 	while ((state = pollwidget(fm.wid, fm.selitems, &nitems)) != WIDGET_CLOSE) {
@@ -722,6 +758,10 @@ main(int argc, char *argv[])
 			if (contextcmd == NULL)
 				break;
 			runcontext(&fm, contextcmd, nitems);
+			if (changedir(&fm, fm.path, TRUE) == RET_ERROR) {
+				exitval = EXIT_FAILURE;
+				goto done;
+			}
 			break;
 		case WIDGET_OPEN:
 			if (nitems < 1)
@@ -730,14 +770,10 @@ main(int argc, char *argv[])
 				break;
 			if (fm.entries[fm.selitems[0]][STATE_MODE][0] == 'd') {
 				widgetcursor(fm.wid, CURSOR_WATCH);
-				closethumbthread(&fm);
-				if (diropen(&fm, fm.entries[fm.selitems[0]][STATE_PATH], 1) == RET_ERROR)
-					break;
-				if (setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries) == RET_ERROR) {
+				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RET_ERROR) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
-				createthumbthread(&fm);
 				widgetcursor(fm.wid, CURSOR_NORMAL);
 			} else if (fm.entries[fm.selitems[0]][STATE_MODE][0] == '-') {
 				fileopen(&fm, fm.entries[fm.selitems[0]][STATE_PATH]);
