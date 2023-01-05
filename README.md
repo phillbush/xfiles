@@ -72,11 +72,12 @@ must be in the .ppm format and must be at most 64x64 in size.
 
 XFiles comes with a thumbnailer script for generating thumbnails.  Such
 script depends on the following programs:
-• ImageMagick's convert(1): To generate thumbnail for images.
-• ffmpegthumbnail(1): To generate thumbnail for videos.
-• rsvg-convert(1): To generate thumbnail for svg files.
-• pdftoppm(1): To generate thumbnail for pdf.
-• ffmpeg(1): To generate thumbnail for audio files.
+
+* ImageMagick's convert(1): To generate thumbnail for images.
+* ffmpegthumbnail(1): To generate thumbnail for videos.
+* rsvg-convert(1): To generate thumbnail for svg files.
+* pdftoppm(1): To generate thumbnail for pdf.
+* ffmpeg(1): To generate thumbnail for audio files.
 
 
 ## Opening
