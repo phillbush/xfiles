@@ -16,7 +16,7 @@ LIBS = -L${LOCALLIB} -L${X11LIB} -lfontconfig -lXft -lX11 -lXext -lXpm -lpthread
 all: ${PROG}
 
 ${PROG}: ${OBJS}
-	${CC} ${LIBS} ${LDFLAGS} -o $@ ${OBJS}
+	${CC} -o $@ ${OBJS} ${LIBS} ${LDFLAGS}
 
 .c.o:
 	${CC} -std=c99 -pedantic -D_POSIX_C_SOURCE=200809L \
