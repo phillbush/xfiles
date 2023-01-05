@@ -48,6 +48,14 @@ enum {
 	STATE_LAST,
 };
 
+enum {
+	MODE_TYPE     = 0,
+	MODE_READ     = 1,
+	MODE_WRITE    = 2,
+	MODE_EXEC     = 3,
+	MODE_BUFSIZE  = 5,      /* +1 for the nul byte */
+};
+
 struct IconPattern {
 	struct IconPattern *next;
 	struct Pattern {
@@ -55,7 +63,7 @@ struct IconPattern {
 		char *s;
 	} *patt;
 	char *path;
-	char mode;
+	char *mode;
 };
 
 struct FM {
@@ -71,6 +79,11 @@ struct FM {
 	size_t homelen;
 	struct IconPattern *icons;
 	struct timespec time;   /* ctime of current directory */
+
+	uid_t uid;
+	gid_t gid;
+	gid_t grps[NGROUPS_MAX];
+	int ngrps;
 
 	pthread_mutex_t thumblock;
 	pthread_t thumbthread;
@@ -193,22 +206,11 @@ timefmt(time_t time)
 }
 
 static char *
-modefmt(mode_t m)
+modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid)
 {
-	enum {
-		MODE_TYPE = 0,
-		MODE_RUSR = 1,
-		MODE_WUSR = 2,
-		MODE_XUSR = 3,
-		MODE_RGRP = 4,
-		MODE_WGRP = 5,
-		MODE_XGRP = 6,
-		MODE_ROTH = 7,
-		MODE_WOTH = 8,
-		MODE_XOTH = 9,
-	};
+	char buf[MODE_BUFSIZE] = "    ";
+	int i, ismember;
 
-	char buf[] = "----------";
 	if (S_ISBLK(m))
 		buf[MODE_TYPE] = 'b';
 	else if (S_ISCHR(m))
@@ -221,40 +223,47 @@ modefmt(mode_t m)
 		buf[MODE_TYPE] = 'p';
 	else if (S_ISSOCK(m))
 		buf[MODE_TYPE] = 's';
-
-	if (m & S_IRUSR)
-		buf[MODE_RUSR] = 'r';
-	if (m & S_IWUSR)
-		buf[MODE_WUSR] = 'w';
-	if ((m & S_IXUSR) && (m & S_ISUID))
-		buf[MODE_XUSR] = 's';
-	else if (m & S_ISUID)
-		buf[MODE_XUSR] = 'S';
-	else if (m & S_IXUSR)
-		buf[MODE_XUSR] = 'x';
-
-	if (m & S_IRGRP)
-		buf[MODE_RGRP] = 'r';
-	if (m & S_IWGRP)
-		buf[MODE_WGRP] = 'w';
-	if ((m & S_IXGRP) && (m & S_ISGID))
-		buf[MODE_XGRP] = 's';
-	else if (m & S_ISUID)
-		buf[MODE_XGRP] = 'S';
-	else if (m & S_IXGRP)
-		buf[MODE_XGRP] = 'x';
-
-	if (m & S_IROTH)
-		buf[MODE_ROTH] = 'r';
-	if (m & S_IWOTH)
-		buf[MODE_WOTH] = 'w';
-	if ((m & S_IXOTH) && (m & S_ISVTX))
-		buf[MODE_XOTH] = 't';
-	else if (m & S_ISUID)
-		buf[MODE_XOTH] = 'T';
-	else if (m & S_IXOTH)
-		buf[MODE_XOTH] = 'x';
-
+	else
+		buf[MODE_TYPE] = '-';
+	ismember = FALSE;
+	for (i = 0; i < fm->ngrps; i++) {
+		if (fm->grps[i] == gid) {
+			ismember = TRUE;
+			break;
+		}
+	}
+	if (uid == fm->uid) {
+		if (m & S_IRUSR) {
+			buf[MODE_READ] = 'r';
+		}
+		if (m & S_IWUSR) {
+			buf[MODE_WRITE] = 'w';
+		}
+		if (m & S_IXUSR) {
+			buf[MODE_EXEC] = 'x';
+		}
+	} else if (gid == fm->gid || ismember) {
+		if (m & S_IRGRP) {
+			buf[MODE_READ] = 'r';
+		}
+		if (m & S_IWGRP) {
+			buf[MODE_WRITE] = 'w';
+		}
+		if (m & S_IXGRP) {
+			buf[MODE_EXEC] = 'x';
+		}
+	} else {
+		if (m & S_IROTH) {
+			buf[MODE_READ] = 'r';
+		}
+		if (m & S_IWOTH) {
+			buf[MODE_WRITE] = 'w';
+		}
+		if (m & S_IXOTH) {
+			buf[MODE_EXEC] = 'x';
+		}
+	}
+	buf[MODE_BUFSIZE - 1] = '\0';
 	return estrdup(buf);
 }
 
@@ -429,6 +438,19 @@ createthumbthread(struct FM *fm)
 }
 
 static int
+strchrs(const char *a, const char *b)
+{
+	size_t i;
+
+	/* return nonzero iff a contains all characters in b */
+
+	for (i = 0; b[i] != '\0'; i++)
+		if (strchr(a, b[i]) == NULL)
+			return FALSE;
+	return TRUE;
+}
+
+static int
 diropen(struct FM *fm, const char *path)
 {
 	struct IconPattern *icon;
@@ -465,7 +487,7 @@ diropen(struct FM *fm, const char *path)
 		} else {
 			fm->entries[i][STATE_SIZE] = sizefmt(sb.st_size);
 			fm->entries[i][STATE_TIME] = timefmt(sb.st_mtim.tv_sec);
-			fm->entries[i][STATE_MODE] = modefmt(sb.st_mode);
+			fm->entries[i][STATE_MODE] = modefmt(fm, sb.st_mode, sb.st_uid, sb.st_gid);
 			fm->entries[i][STATE_OWNER] = ownerfmt(sb.st_uid, sb.st_gid);
 		}
 		free(array[i]);
@@ -478,8 +500,9 @@ diropen(struct FM *fm, const char *path)
 		else
 			fm->foundicons[i] = ICON_PACK(FILE_XPM, FILE_XPM);
 		for (j = 0, icon = fm->icons; icon != NULL; icon = icon->next, j++) {
-			if (icon->mode != '\0' && (fm->entries[i][STATE_MODE] == NULL || fm->entries[i][STATE_MODE][0] != icon->mode))
-				continue;
+			if (icon->mode != NULL && fm->entries[i][STATE_MODE] != NULL)
+				if (!strchrs(fm->entries[i][STATE_MODE], icon->mode))
+					continue;
 			for (patt = icon->patt; patt != NULL; patt = patt->next) {
 				if (strchr(patt->s, '/') != NULL) {
 					flags = FNM_PATHNAME;
@@ -537,11 +560,13 @@ parseicons(struct FM *fm, const char *s, size_t *nicons)
 			.next = NULL,
 			.patt = NULL,
 			.path = estrdup(path),
-			.mode = '\0',
+			.mode = NULL,
 		};
-		if (p[0] != '\0' && p[1] == ':') {
-			icon->mode = p[0];
-			p += 2;
+		q = strchr(p, ':');
+		if (q != NULL) {
+			*q = '\0';
+			icon->mode = estrdup(p);
+			p = q + 1;
 		}
 		for (q = strtok_r(p, "|", &in); q != NULL; q = strtok_r(NULL, "|", &in)) {
 			patt = emalloc(sizeof(*patt));
@@ -662,6 +687,27 @@ done:
 	return retval;
 }
 
+static void
+freeicons(struct FM *fm)
+{
+	struct IconPattern *icon;
+	struct Pattern *patt;
+
+	while (fm->icons != NULL) {
+		icon = fm->icons;
+		fm->icons = fm->icons->next;
+		while (icon->patt != NULL) {
+			patt = icon->patt;
+			icon->patt = icon->patt->next;
+			free(patt->s);
+			free(patt);
+		}
+		free(icon->path);
+		free(icon->mode);
+		free(icon);
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -694,11 +740,15 @@ main(int argc, char *argv[])
 		.home = home,
 		.homelen = ((home != NULL) ? strlen(home) : 0),
 
+		.uid = getuid(),
+		.gid = getgid(),
+
 		.thumblock = PTHREAD_MUTEX_INITIALIZER,
 		.thumbexit = 0,
 		.thumbnailer = NULL,
 		.thumbnaildir = NULL,
 	};
+	fm.ngrps = getgroups(NGROUPS_MAX, fm.grps);
 	if ((fm.opener = getenv(OPENER)) == NULL)
 		fm.opener = DEF_OPENER;
 	while ((ch = getopt(argc, argv, "ac:g:n:")) != -1) {
@@ -785,6 +835,7 @@ done:
 	closethumbthread(&fm);
 error:
 	freeentries(&fm);
+	freeicons(&fm);
 	free(fm.entries);
 	free(fm.foundicons);
 	free(fm.selitems);

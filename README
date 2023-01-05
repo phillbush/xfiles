@@ -31,9 +31,9 @@ following format:
 	[TYPE:][GLOB1|GLOB2|...|GLOBN]=PATH
 }
 
-TYPE is a character that must match the file's type as specified by the
-first column of `ls -l`.  For example, the TYPE "d" matches a directory
-whose, and "-" matches any regular file.
+TYPE is a string of characters that must be in the file's type as
+specified by the first column of `ls -l`.  For example, the TYPE "d"
+matches a directory, and "-x" matches any regular executable file.
 
 GLOB1 til GLOBN are bar-delimited glob strings that must match the entry
 being displayed by XFiles, for example, "*.png|*.jpg" matches files with
