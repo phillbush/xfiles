@@ -1056,7 +1056,7 @@ getitem(Widget wid, int row, int ydiff, int *x, int *y)
 	*x -= wid->x0;
 	if (*x < 0 || *x >= wid->ncols * wid->itemw)
 		return -1;
-	if (*y < 0 || *y >= wid->h)
+	if (*y < 0 || *y >= wid->h + ydiff)
 		return -1;
 	w = *x / wid->itemw;
 	h = *y / wid->itemh;
