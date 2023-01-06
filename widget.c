@@ -32,6 +32,9 @@
 /* ellipsis has two dots rather than three; the third comes from the extension */
 #define ELLIPSIS        ".."
 
+/* what to display when item's status is unknown */
+#define STATUS_UNKNOWN  "?"
+
 /* constants to check a .ppm file */
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
@@ -935,7 +938,12 @@ settitle(Widget wid)
 	selitem = "";
 	status = nitems;
 	selitem = (wid->highlight > 0 ? wid->items[wid->highlight][ITEM_NAME] : "");
-	status = (wid->highlight > 0 ? wid->items[wid->highlight][ITEM_STATUS] : nitems);
+	if (wid->highlight <= 0)
+		status = nitems;
+	else if (wid->items[wid->highlight][ITEM_STATUS] == NULL)
+		status = STATUS_UNKNOWN;
+	else
+		status = wid->items[wid->highlight][ITEM_STATUS];
 	if (wid->title != NULL) {
 		(void)snprintf(
 			title, TITLE_BUFSIZE,
