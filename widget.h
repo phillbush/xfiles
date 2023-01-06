@@ -1,9 +1,16 @@
+typedef struct Scroll {
+	/* scroll position */
+	int row, ydiff;
+} Scroll;
+
 typedef enum {
 	WIDGET_NONE,
 	WIDGET_INTERNAL,
 	WIDGET_CONTEXT,
 	WIDGET_CLOSE,
 	WIDGET_OPEN,
+	WIDGET_PREV,
+	WIDGET_NEXT,
 	WIDGET_ERROR,
 } WidgetEvent;
 
@@ -167,9 +174,9 @@ int openicons(Widget wid, char **datas[], char *paths[], int ndatas, int npaths)
  *   Size variable setting the number of members of the "items" and
  *   "itemicons" parameter arrays.
  *
- * - keepscroll
- *   Integer which, if non-zero, specifies to keep the same scroll
- *   position previously used.
+ * - scrl
+ *   Pointer which, if non-zero, pointers to a scroll state to place the
+ *   icon list.
  */
 int setwidget(
 	Widget wid,
@@ -177,7 +184,7 @@ int setwidget(
 	char **items[],
 	int itemicons[],
 	size_t nitems,
-	int reconfigure
+	Scroll *scrl
 );
 
 /*
@@ -244,8 +251,11 @@ void mapwidget(Widget wid);
  *   Pointer to an integer counting the number of members of the
  *   selitems array filled by this function when it returns WIDGET_OPEN
  *   or WIDGET_CONTEXT.
+ *
+ * - scrl
+ *   Pointer to a scroll state to fill with last scroll information.
  */
-WidgetEvent pollwidget(Widget wid, int *selitems, int *nselitems);
+WidgetEvent pollwidget(Widget wid, int *selitems, int *nselitems, Scroll *scrl);
 
 /*
  * Set the thumbnail (aka miniature) of a given item.

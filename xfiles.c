@@ -66,6 +66,13 @@ struct IconPattern {
 	char *mode;
 };
 
+struct Cwd {
+	struct Cwd *prev, *next;
+	Scroll state;
+	char *path;
+	char *here;
+};
+
 struct FM {
 	Widget wid;
 	char ***entries;
@@ -73,10 +80,11 @@ struct FM {
 	int *selitems;          /* array of indices to selected items */
 	int capacity;           /* capacity of entries */
 	int nentries;           /* number of entries */
-	char path[PATH_MAX];
-	char here[PATH_MAX];
 	char *home;
 	size_t homelen;
+	struct Cwd *cwd;        /* pointer to current working directories */
+	struct Cwd *hist;       /* list of working directories */
+	struct Cwd *last;       /* last working directories */
 	struct IconPattern *icons;
 	struct timespec time;   /* ctime of current directory */
 
@@ -451,7 +459,7 @@ strchrs(const char *a, const char *b)
 }
 
 static int
-diropen(struct FM *fm, const char *path)
+diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 {
 	struct IconPattern *icon;
 	struct Pattern *patt;
@@ -459,15 +467,19 @@ diropen(struct FM *fm, const char *path)
 	struct stat sb;
 	int flags, i, j;
 	char *s;
+	char buf[PATH_MAX];
 
 	if (path != NULL && wchdir(path) == RET_ERROR)
 		return RET_ERROR;
-	egetcwd(fm->path, sizeof(fm->path));
-	if (stat(fm->path, &sb) == -1)
+	free(cwd->path);
+	free(cwd->here);
+	egetcwd(buf, sizeof(buf));
+	if (stat(buf, &sb) == -1)
 		err(EXIT_FAILURE, "stat");
+	cwd->path = estrdup(buf);
 	fm->time = sb.st_ctim;
 	freeentries(fm);
-	fm->nentries = escandir(fm->path, &array, direntselect, NULL);
+	fm->nentries = escandir(cwd->path, &array, direntselect, NULL);
 	if (fm->nentries > fm->capacity) {
 		fm->foundicons = erealloc(fm->foundicons, fm->nentries * sizeof(*fm->foundicons));
 		fm->selitems = erealloc(fm->selitems, fm->nentries * sizeof(*fm->selitems));
@@ -477,9 +489,9 @@ diropen(struct FM *fm, const char *path)
 	for (i = 0; i < fm->nentries; i++) {
 		fm->entries[i] = emalloc(sizeof(*fm->entries[i]) * STATE_LAST);
 		fm->entries[i][STATE_NAME] = estrdup(array[i]->d_name);
-		fm->entries[i][STATE_PATH] = fullpath(fm->path, array[i]->d_name);
+		fm->entries[i][STATE_PATH] = fullpath(cwd->path, array[i]->d_name);
 		if (stat(array[i]->d_name, &sb) == -1) {
-			warn("%s", fm->path);
+			warn("%s", cwd->path);
 			fm->entries[i][STATE_SIZE] = NULL;
 			fm->entries[i][STATE_TIME] = NULL;
 			fm->entries[i][STATE_MODE] = NULL;
@@ -521,10 +533,11 @@ diropen(struct FM *fm, const char *path)
 			}
 		}
 	}
-	if (strstr(fm->path, fm->home) == fm->path)
-		snprintf(fm->here, PATH_MAX, "~%s", fm->path + fm->homelen);
+	if (strstr(cwd->path, fm->home) == cwd->path)
+		snprintf(buf, PATH_MAX, "~%s", cwd->path + fm->homelen);
 	else
-		snprintf(fm->here, PATH_MAX, "%s", fm->path);
+		snprintf(buf, PATH_MAX, "%s", cwd->path);
+	cwd->here = estrdup(buf);
 	return RET_OK;
 }
 
@@ -656,34 +669,85 @@ runcontext(struct FM *fm, char *contextcmd, int nselitems)
 	free(argv);
 }
 
+static void
+clearcwd(struct Cwd *cwd)
+{
+	struct Cwd *tmp;
+
+	while (cwd != NULL) {
+		tmp = cwd;
+		cwd = cwd->next;
+		free(tmp->path);
+		free(tmp->here);
+		free(tmp);
+	}
+}
+
+static void
+newcwd(struct FM *fm)
+{
+	struct Cwd *cwd;
+
+	clearcwd(fm->cwd->next);
+	cwd = emalloc(sizeof(*cwd));
+	*cwd = (struct Cwd){
+		.next = NULL,
+		.prev = fm->cwd,
+		.path = NULL,
+		.here = NULL,
+	};
+	fm->cwd->next = cwd;
+	fm->cwd = cwd;
+}
+
 static int
 changedir(struct FM *fm, const char *path, int keepscroll)
 {
+	Scroll *scrl;
 	struct stat sb;
 	int retval;
+	struct Cwd cwd = {
+		.prev = NULL,
+		.next = NULL,
+		.path = NULL,
+		.here = NULL,
+	};
 
-	if (path == fm->path) {
+	if (fm->last != NULL && path == fm->last->path) {
 		/*
 		 * We're cd'ing to the place we are currently at; only
 		 * continue if the directory's ctime has changed
 		 */
-		if (stat(fm->path, &sb) == -1) {
+		if (stat(path, &sb) == -1) {
 			return RET_ERROR;
 		}
 		if (!timespeclt(&fm->time, &sb.st_ctim)) {
 			return RET_OK;
 		}
 	}
+	widgetcursor(fm->wid, CURSOR_WATCH);
 	retval = RET_OK;
 	closethumbthread(fm);
-	if (diropen(fm, path) == RET_ERROR)
+	if (diropen(fm, &cwd, path) == RET_ERROR)
 		goto done;
-	if (setwidget(fm->wid, fm->here, fm->entries, fm->foundicons, fm->nentries, keepscroll) == RET_ERROR) {
+	if (fm->cwd->prev != NULL && fm->cwd->prev->path != NULL
+	    && strcmp(cwd.path, fm->cwd->prev->path) == 0) {
+		fm->cwd = fm->cwd->prev;
+		keepscroll = TRUE;
+	} else {
+		newcwd(fm);
+	}
+	fm->cwd->path = cwd.path;
+	fm->cwd->here = cwd.here;
+	fm->last = fm->cwd;
+	scrl = keepscroll ? &fm->cwd->state : NULL;
+	if (setwidget(fm->wid, fm->cwd->here, fm->entries, fm->foundicons, fm->nentries, scrl) == RET_ERROR) {
 		retval = RET_ERROR;
 		goto done;
 	}
 done:
 	createthumbthread(fm);
+	widgetcursor(fm->wid, CURSOR_NORMAL);
 	return retval;
 }
 
@@ -712,6 +776,7 @@ int
 main(int argc, char *argv[])
 {
 	struct FM fm;
+	struct Cwd *cwd;
 	size_t nicons;
 	int ch, nitems, state;
 	int saveargc;
@@ -734,6 +799,8 @@ main(int argc, char *argv[])
 	fm = (struct FM){
 		.capacity = 0,
 		.nentries = 0,
+		.cwd = emalloc(sizeof(*fm.cwd)),
+		.last = NULL,
 		.entries = NULL,
 		.selitems = NULL,
 		.foundicons = NULL,
@@ -748,6 +815,13 @@ main(int argc, char *argv[])
 		.thumbnailer = NULL,
 		.thumbnaildir = NULL,
 	};
+	(*fm.cwd) = (struct Cwd){
+		.next = NULL,
+		.prev = NULL,
+		.path = NULL,
+		.here = NULL,
+	};
+	fm.hist = fm.cwd;
 	fm.ngrps = getgroups(NGROUPS_MAX, fm.grps);
 	if ((fm.opener = getenv(OPENER)) == NULL)
 		fm.opener = DEF_OPENER;
@@ -794,11 +868,12 @@ main(int argc, char *argv[])
 		nicons
 	);
 	free(icons);
-	(void)diropen(&fm, path);
-	setwidget(fm.wid, fm.here, fm.entries, fm.foundicons, fm.nentries, FALSE);
+	(void)diropen(&fm, fm.cwd, path);
+	fm.last = fm.cwd;
+	setwidget(fm.wid, fm.cwd->here, fm.entries, fm.foundicons, fm.nentries, NULL);
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
-	while ((state = pollwidget(fm.wid, fm.selitems, &nitems)) != WIDGET_CLOSE) {
+	while ((state = pollwidget(fm.wid, fm.selitems, &nitems, &fm.cwd->state)) != WIDGET_CLOSE) {
 		switch (state) {
 		case WIDGET_ERROR:
 			exitval = EXIT_FAILURE;
@@ -808,7 +883,21 @@ main(int argc, char *argv[])
 			if (contextcmd == NULL)
 				break;
 			runcontext(&fm, contextcmd, nitems);
-			if (changedir(&fm, fm.path, TRUE) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, TRUE) == RET_ERROR) {
+				exitval = EXIT_FAILURE;
+				goto done;
+			}
+			break;
+		case WIDGET_PREV:
+		case WIDGET_NEXT:
+			if (state == WIDGET_PREV)
+				cwd = fm.cwd->prev;
+			else
+				cwd = fm.cwd->next;
+			if (cwd == NULL)
+				break;
+			fm.cwd = cwd;
+			if (changedir(&fm, cwd->path, TRUE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -819,12 +908,10 @@ main(int argc, char *argv[])
 			if (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries)
 				break;
 			if (fm.entries[fm.selitems[0]][STATE_MODE][0] == 'd') {
-				widgetcursor(fm.wid, CURSOR_WATCH);
 				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RET_ERROR) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
-				widgetcursor(fm.wid, CURSOR_NORMAL);
 			} else if (fm.entries[fm.selitems[0]][STATE_MODE][0] == '-') {
 				fileopen(&fm, fm.entries[fm.selitems[0]][STATE_PATH]);
 			}
@@ -834,6 +921,7 @@ main(int argc, char *argv[])
 done:
 	closethumbthread(&fm);
 error:
+	clearcwd(fm.hist);
 	freeentries(&fm);
 	freeicons(&fm);
 	free(fm.entries);
