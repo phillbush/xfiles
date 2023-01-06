@@ -163,6 +163,8 @@ fullpath(char *dir, char *file)
 {
 	char buf[PATH_MAX];
 
+	if (strcmp(dir, "/") == 0)
+		dir = "";
 	(void)snprintf(buf, sizeof(buf), "%s/%s", dir, file);
 	return estrdup(buf);
 }
