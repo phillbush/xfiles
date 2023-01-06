@@ -308,8 +308,8 @@ entrycmp(const void *ap, const void *bp)
 		return 1;
 
 	/* directories first */
-	aisdir = a[STATE_MODE] != NULL && a[STATE_MODE][0] == 'd';
-	bisdir = b[STATE_MODE] != NULL && b[STATE_MODE][0] == 'd';
+	aisdir = a[STATE_MODE] != NULL && a[STATE_MODE][MODE_TYPE] == 'd';
+	bisdir = b[STATE_MODE] != NULL && b[STATE_MODE][MODE_TYPE] == 'd';
 	if (aisdir && !bisdir)
 		return -1;
 	if (bisdir && !aisdir)
@@ -507,7 +507,7 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 	free(array);
 	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycmp);
 	for (i = 0; i < fm->nentries; i++) {
-		if (fm->entries[i][STATE_MODE] != NULL && fm->entries[i][STATE_MODE][0] == 'd')
+		if (fm->entries[i][STATE_MODE] != NULL && fm->entries[i][STATE_MODE][MODE_TYPE] == 'd')
 			fm->foundicons[i] = ICON_PACK(FOLDER_XPM, FOLDER_XPM);
 		else
 			fm->foundicons[i] = ICON_PACK(FILE_XPM, FILE_XPM);
@@ -907,12 +907,12 @@ main(int argc, char *argv[])
 				break;
 			if (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries)
 				break;
-			if (fm.entries[fm.selitems[0]][STATE_MODE][0] == 'd') {
+			if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
 				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RET_ERROR) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
-			} else if (fm.entries[fm.selitems[0]][STATE_MODE][0] == '-') {
+			} else if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == '-') {
 				fileopen(&fm, fm.entries[fm.selitems[0]][STATE_PATH]);
 			}
 			break;
