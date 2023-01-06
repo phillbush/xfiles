@@ -50,6 +50,10 @@
 #define PAGE_STEP(w)    ((w)->h / 2)
 
 enum {
+	/* buttons not defined by X.h */
+	BUTTON8         = 8,
+	BUTTON9         = 9,
+
 	/* one byte was 8 bits in size last time I checked */
 	BYTE            = 8,
 
@@ -932,16 +936,18 @@ settitle(Widget wid)
 	status = nitems;
 	selitem = (wid->highlight > 0 ? wid->items[wid->highlight][ITEM_NAME] : "");
 	status = (wid->highlight > 0 ? wid->items[wid->highlight][ITEM_STATUS] : nitems);
-	(void)snprintf(
-		title, TITLE_BUFSIZE,
-		"%s%s%s (%s) - %s (%d%%)",
-		wid->title,
-		(strcmp(wid->title, "/") != 0 ? "/" : ""),
-		selitem,
-		status,
-		wid->class,
-		scrollpct
-	);
+	if (wid->title != NULL) {
+		(void)snprintf(
+			title, TITLE_BUFSIZE,
+			"%s%s%s (%s) - %s (%d%%)",
+			wid->title,
+			(strcmp(wid->title, "/") != 0 ? "/" : ""),
+			selitem,
+			status,
+			wid->class,
+			scrollpct
+		);
+	}
 	XmbSetWMProperties(wid->dpy, wid->win, title, title, NULL, 0, NULL, NULL, NULL);
 	XChangeProperty(
 		wid->dpy,
@@ -1289,7 +1295,7 @@ error:
 }
 
 int
-setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems, int keepscroll)
+setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
 {
 	size_t i;
 
@@ -1297,14 +1303,17 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 	wid->items = items;
 	wid->nitems = nitems;
 	wid->itemicons = itemicons;
-	if (!keepscroll) {
+	if (scrl == NULL) {
 		wid->ydiff = 0;
 		wid->row = 0;
+	} else {
+		wid->ydiff = scrl->ydiff;
+		wid->row = scrl->row;
 	}
 	wid->title = title;
 	wid->highlight = -1;
 	(void)calcsize(wid, -1, -1);
-	if (keepscroll && wid->row >= wid->nscreens) {
+	if (scrl != NULL && wid->row >= wid->nscreens) {
 		wid->ydiff = 0;
 		setrow(wid, wid->nscreens);
 	}
@@ -2318,6 +2327,10 @@ mainmode(Widget wid, int *selitems, int *nitems)
 				XUngrabPointer(wid->dpy, ev.xbutton.time);
 				XFlush(wid->dpy);
 				return WIDGET_CONTEXT;
+			} else if (ev.xbutton.button == BUTTON8) {
+				return WIDGET_PREV;
+			} else if (ev.xbutton.button == BUTTON9) {
+				return WIDGET_NEXT;
 			}
 			break;
 		case ButtonRelease:
@@ -2356,7 +2369,7 @@ mainmode(Widget wid, int *selitems, int *nitems)
  */
 
 WidgetEvent
-pollwidget(Widget wid, int *selitems, int *nitems)
+pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl)
 {
 	XEvent ev;
 	int retval;
@@ -2371,6 +2384,8 @@ pollwidget(Widget wid, int *selitems, int *nitems)
 	wid->start = TRUE;
 	retval = mainmode(wid, selitems, nitems);
 	endevent(wid);
+	scrl->ydiff = wid->ydiff;
+	scrl->row = wid->row;
 	return retval;
 }
 
