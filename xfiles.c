@@ -505,10 +505,12 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 			}
 		}
 	}
-	if (strstr(cwd->path, fm->home) == cwd->path)
+	if (strstr(cwd->path, fm->home) == cwd->path &&
+	    (cwd->path[fm->homelen] == '/' || cwd->path[fm->homelen] == '\0')) {
 		snprintf(buf, PATH_MAX, "~%s", cwd->path + fm->homelen);
-	else
+	} else {
 		snprintf(buf, PATH_MAX, "%s", cwd->path);
+	}
 	cwd->here = estrdup(buf);
 	return RET_OK;
 }
