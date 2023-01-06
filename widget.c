@@ -568,7 +568,7 @@ calcsize(Widget wid, int w, int h)
 	etlock(&wid->lock);
 	ncols = wid->ncols;
 	nrows = wid->nrows;
-	if (w >= 0 && h >= 0) {
+	if (w > 0 && h > 0) {
 		wid->w = w;
 		wid->h = h;
 		wid->ydiff = 0;
