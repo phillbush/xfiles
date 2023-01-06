@@ -533,7 +533,8 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 			}
 		}
 	}
-	if (strstr(cwd->path, fm->home) == cwd->path)
+	if (strcmp(cwd->path, fm->home) == 0 ||
+			(strstr(cwd->path, fm->home) == cwd->path && cwd->path[fm->homelen] == '/'))
 		snprintf(buf, PATH_MAX, "~%s", cwd->path + fm->homelen);
 	else
 		snprintf(buf, PATH_MAX, "%s", cwd->path);
