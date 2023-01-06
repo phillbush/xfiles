@@ -881,6 +881,8 @@ main(int argc, char *argv[])
 				break;
 			if (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries)
 				break;
+			if (fm.entries[fm.selitems[0]][STATE_MODE] == NULL)
+				break;
 			if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
 				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RET_ERROR) {
 					exitval = EXIT_FAILURE;
