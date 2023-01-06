@@ -215,59 +215,32 @@ modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid)
 {
 	char buf[MODE_BUFSIZE] = "    ";
 	int i, ismember;
+	size_t perm_off;
 
-	if (S_ISBLK(m))
-		buf[MODE_TYPE] = 'b';
-	else if (S_ISCHR(m))
-		buf[MODE_TYPE] = 'c';
-	else if (S_ISDIR(m))
-		buf[MODE_TYPE] = 'd';
-	else if (S_ISLNK(m))
-		buf[MODE_TYPE] = 'l';
-	else if (S_ISFIFO(m))
-		buf[MODE_TYPE] = 'p';
-	else if (S_ISSOCK(m))
-		buf[MODE_TYPE] = 's';
-	else
-		buf[MODE_TYPE] = '-';
-	ismember = FALSE;
-	for (i = 0; i < fm->ngrps; i++) {
+	switch (m & S_IFMT) {
+	case S_IFBLK:   buf[MODE_TYPE] = 'b'; break;
+	case S_IFCHR:   buf[MODE_TYPE] = 'c'; break;
+	case S_IFDIR:   buf[MODE_TYPE] = 'd'; break;
+	case S_IFLNK:   buf[MODE_TYPE] = 'l'; break;
+	case S_IFIFO:   buf[MODE_TYPE] = 'p'; break;
+	case S_IFSOCK:  buf[MODE_TYPE] = 's'; break;
+	default:        buf[MODE_TYPE] = '-'; break;
+	}
+
+	for (i = 0, ismember = FALSE; i < fm->ngrps && !ismember; i++) {
 		if (fm->grps[i] == gid) {
 			ismember = TRUE;
-			break;
 		}
 	}
-	if (uid == fm->uid) {
-		if (m & S_IRUSR) {
-			buf[MODE_READ] = 'r';
-		}
-		if (m & S_IWUSR) {
-			buf[MODE_WRITE] = 'w';
-		}
-		if (m & S_IXUSR) {
-			buf[MODE_EXEC] = 'x';
-		}
-	} else if (gid == fm->gid || ismember) {
-		if (m & S_IRGRP) {
-			buf[MODE_READ] = 'r';
-		}
-		if (m & S_IWGRP) {
-			buf[MODE_WRITE] = 'w';
-		}
-		if (m & S_IXGRP) {
-			buf[MODE_EXEC] = 'x';
-		}
-	} else {
-		if (m & S_IROTH) {
-			buf[MODE_READ] = 'r';
-		}
-		if (m & S_IWOTH) {
-			buf[MODE_WRITE] = 'w';
-		}
-		if (m & S_IXOTH) {
-			buf[MODE_EXEC] = 'x';
-		}
-	}
+
+	if (uid == fm->uid) perm_off = 0;
+	else if (gid == fm->gid || ismember) perm_off = 3;
+	else perm_off = 6;
+
+	if (m & (S_IRUSR >> perm_off)) buf[MODE_READ]  = 'r';
+	if (m & (S_IWUSR >> perm_off)) buf[MODE_WRITE] = 'w';
+	if (m & (S_IXUSR >> perm_off)) buf[MODE_EXEC]  = 'x';
+
 	buf[MODE_BUFSIZE - 1] = '\0';
 	return estrdup(buf);
 }
