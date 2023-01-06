@@ -10,11 +10,10 @@ thumbnails, and call a command to run on right mouse button click.
 
 XFiles depends on a few environment variables to be usable:
 
-* `HOME`: You probably already have `$HOME` set on your system.
-* `FILE_ICONS`: Newline-separated list of icon specifications (see below).
 * `OPENER`: Program to be called to open files.  Defaults to `xdg-open`.
-* `THUMBNAILER`: Program to be called for generating thumbnails.
-* `THUMBNAILDIR`: Path to directory where thumbnails must be cached.
+* `XFILES_ICONS`: Newline-separated list of icon specifications (see below).
+* `XFILES_THUMBNAILER`: Program to be called for generating thumbnails.
+* `XFILES_THUMBNAILDIR`: Path to directory where thumbnails must be cached.
 * `XFILES_CONTEXTCMD`: Program to be called when right clicking.
 
 XFiles can be customized by setting the following X resources:

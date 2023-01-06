@@ -16,21 +16,18 @@
 #include "icons/file.xpm"
 #include "icons/folder.xpm"
 
-#define HOME            "HOME"
-#define FILE_ICONS      "FILE_ICONS"
-#define APPCLASS        "XFiles"
-#define DEF_OPENER      "xdg-open"
-#define WINDOWID        "WINDOWID"
-#define OPENER          "OPENER"
-#define THUMBNAILER     "THUMBNAILER"
-#define THUMBNAILDIR    "THUMBNAILDIR"
-#define XFILES_CONTEXTCMD "XFILES_CONTEXTCMD"
-#define DEV_NULL        "/dev/null"
-#define DOTDOT          ".."
-#define UNIT_LAST       7
-#define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
-#define TIME_BUFSIZE    128
-#define WINDOWID_BUFSIZE        16
+#define APPCLASS         "XFiles"
+#define WINDOWID         "WINDOWID"
+#define WINDOWID_BUFSIZE 16
+#define ICONS            "XFILES_ICONS"
+#define DEF_OPENER       "xdg-open"
+#define THUMBNAILER      "XFILES_THUMBNAILER"
+#define THUMBNAILDIR     "XFILES_THUMBNAILDIR"
+#define CONTEXTCMD       "XFILES_CONTEXTCMD"
+#define DEV_NULL         "/dev/null"
+#define UNIT_LAST        7
+#define SIZE_BUFSIZE     6       /* 4 digits + suffix char + nul */
+#define TIME_BUFSIZE     128
 
 enum {
 	FILE_XPM,
@@ -728,9 +725,9 @@ main(int argc, char *argv[])
 
 	saveargv = argv;
 	saveargc = argc;
-	contextcmd = getenv(XFILES_CONTEXTCMD);
-	iconpatts = getenv(FILE_ICONS);
-	home = getenv(HOME);
+	contextcmd = getenv(CONTEXTCMD);
+	iconpatts = getenv(ICONS);
+	home = getenv("HOME");
 	fm = (struct FM){
 		.capacity = 0,
 		.nentries = 0,
@@ -749,7 +746,7 @@ main(int argc, char *argv[])
 		.thumbnaildir = NULL,
 	};
 	fm.ngrps = getgroups(NGROUPS_MAX, fm.grps);
-	if ((fm.opener = getenv(OPENER)) == NULL)
+	if ((fm.opener = getenv("OPENER")) == NULL)
 		fm.opener = DEF_OPENER;
 	while ((ch = getopt(argc, argv, "ac:g:n:")) != -1) {
 		switch (ch) {

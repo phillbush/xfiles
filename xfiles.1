@@ -241,9 +241,7 @@ The following environment variables affect the execution of
 The display to start
 .Nm
 on.
-.It Ev HOME
-Home directory.
-.It FILE_ICONS
+.It XFILE_ICONS
 Newline-separated list of icon specifications.
 Each linemust have the following format:
 .Ic "[TYPE:][GLOB1|GLOB2|...|GLOBN]=PATH"
@@ -273,13 +271,13 @@ is the path to the icon in X Pixmap (xpm) format.
 Program to be called to open files.
 Defaults to
 .Xr xdg-open 1 .
-.It Ev THUMBNAILER
+.It Ev XFILES_THUMBNAILER
 Program to be called to generate thumbnails.
 The first argument passed to such program is the path to the existent file or directory.
 The second argument is the path to the thumbnail image to be created in the PPM format.
-.It Ev THUMBNAILDIR
+.It Ev XFILES_THUMBNAILDIR
 Path to the directory where thumbnails must be saved.
-.It Ev "XFILES_CONTEXTCMD"
+.It Ev XFILES_CONTEXTCMD
 Name of the command to be run on right clicking when the
 .Fl -c
 option is not given.
