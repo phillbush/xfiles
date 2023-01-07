@@ -2421,6 +2421,7 @@ closewidget(Widget wid)
 	XftFontClose(wid->dpy, wid->font);
 	XDestroyWindow(wid->dpy, wid->scroller);
 	XDestroyWindow(wid->dpy, wid->win);
+	XFreeGC(wid->dpy, wid->stipgc);
 	XFreeGC(wid->dpy, wid->gc);
 	XCloseDisplay(wid->dpy);
 	free(wid);

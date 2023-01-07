@@ -715,6 +715,8 @@ changedir(struct FM *fm, const char *path, int keepscroll)
 	} else {
 		newcwd(fm);
 	}
+	free(fm->cwd->path);
+	free(fm->cwd->here);
 	fm->cwd->path = cwd.path;
 	fm->cwd->here = cwd.here;
 	fm->last = fm->cwd;
