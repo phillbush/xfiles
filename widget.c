@@ -135,12 +135,6 @@ enum {
 	ATOM_LAST,
 };
 
-enum {
-	/* flags for selectitem() */
-	REDRAW      = 0x1,
-	RECTANGLE   = 0x2,
-};
-
 struct Icon {
 	Pixmap pix, mask;
 };
@@ -1367,22 +1361,25 @@ mapwidget(Widget wid)
 }
 
 static void
-selectitem(Widget wid, int index, int select, int flags)
+selectitem(Widget wid, int index, int select, int rectsel)
 {
 	struct Selection *sel;
 	struct Selection **header;
 
 	if (wid->issel == NULL || index <= 0 || index >= wid->nitems)
 		return;
-	header = (flags & RECTANGLE) ? &wid->rectsel : &wid->sel;
-
+	/*
+	 * We have two lists of selections: the global list (wid->sel),
+	 * and the list used by rectangular selection (wid->rectsel).
+	 */
+	header = rectsel ? &wid->rectsel : &wid->sel;
 	if (select && wid->issel[index] == NULL) {
 		if ((sel = malloc(sizeof(*sel))) == NULL)
 			return;
 		*sel = (struct Selection){
 			.next = *header,
 			.prev = NULL,
-			.index = ((flags & RECTANGLE) ? -1 : 1) * index,
+			.index = (rectsel ? -1 : 1) * index,
 		};
 		if (*header != NULL)
 			(*header)->prev = sel;
@@ -1690,7 +1687,7 @@ mouse1click(Widget wid, XButtonPressedEvent *ev)
 	if (previtem != -1 && ev->state & ShiftMask) {
 		selectitems(wid, wid->highlight, previtem);
 	} else {
-		selectitem(wid, wid->highlight, ((ev->state & ControlMask) ? wid->issel[wid->highlight] == NULL : TRUE), REDRAW);
+		selectitem(wid, wid->highlight, ((ev->state & ControlMask) ? wid->issel[wid->highlight] == NULL : TRUE), FALSE);
 	}
 done:
 	return index;
@@ -1706,7 +1703,7 @@ mouse3click(Widget wid, int x, int y)
 		if (wid->issel[index] == NULL) {
 			highlight(wid, index, FALSE);
 			unselectitems(wid);
-			selectitem(wid, index, TRUE, REDRAW);
+			selectitem(wid, index, TRUE, FALSE);
 		} else {
 			highlight(wid, index, TRUE);
 		}
@@ -1827,8 +1824,8 @@ rectselect(Widget wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, i
 		if (!sel && (wid->issel[i] == NULL || wid->issel[i]->index > 0))
 			continue;
 		if (sel && wid->issel[i] != NULL && wid->issel[i]->index > 0)
-			selectitem(wid, i, FALSE, REDRAW);
-		selectitem(wid, i, sel, RECTANGLE | REDRAW);
+			selectitem(wid, i, FALSE, FALSE);
+		selectitem(wid, i, sel, TRUE);
 		changed = TRUE;
 	}
 	return changed;
@@ -2199,7 +2196,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 	case XK_space:
 		if (wid->highlight == -1)
 			break;
-		selectitem(wid, wid->highlight, wid->issel[wid->highlight] == NULL, REDRAW);
+		selectitem(wid, wid->highlight, wid->issel[wid->highlight] == NULL, FALSE);
 		break;
 	case XK_Prior:
 	case XK_Next:
