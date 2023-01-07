@@ -53,7 +53,8 @@ enum {
 	MODE_READ     = 1,
 	MODE_WRITE    = 2,
 	MODE_EXEC     = 3,
-	MODE_BUFSIZE  = 5,      /* +1 for the nul byte */
+	MODE_LINK     = 4,
+	MODE_BUFSIZE  = 6,      /* 5 elems +1 for the nul byte */
 };
 
 struct IconPattern {
@@ -216,9 +217,9 @@ timefmt(time_t time)
 }
 
 static char *
-modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid)
+modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid, int islink)
 {
-	char buf[MODE_BUFSIZE] = "    ";
+	char buf[MODE_BUFSIZE] = "     ";
 	int i, ismember;
 	size_t perm_off;
 
@@ -226,7 +227,6 @@ modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid)
 	case S_IFBLK:   buf[MODE_TYPE] = 'b'; break;
 	case S_IFCHR:   buf[MODE_TYPE] = 'c'; break;
 	case S_IFDIR:   buf[MODE_TYPE] = 'd'; break;
-	case S_IFLNK:   buf[MODE_TYPE] = 'l'; break;
 	case S_IFIFO:   buf[MODE_TYPE] = 'p'; break;
 	case S_IFSOCK:  buf[MODE_TYPE] = 's'; break;
 	default:        buf[MODE_TYPE] = '-'; break;
@@ -245,6 +245,9 @@ modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid)
 	if (m & (S_IRUSR >> perm_off)) buf[MODE_READ]  = 'r';
 	if (m & (S_IWUSR >> perm_off)) buf[MODE_WRITE] = 'w';
 	if (m & (S_IXUSR >> perm_off)) buf[MODE_EXEC]  = 'x';
+
+	if (islink)
+		buf[MODE_LINK] = 'l';
 
 	buf[MODE_BUFSIZE - 1] = '\0';
 	return estrdup(buf);
@@ -440,7 +443,7 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 	struct Pattern *patt;
 	struct dirent **array;
 	struct stat sb;
-	int flags, i, j;
+	int islink, flags, i, j;
 	char *s;
 	char buf[PATH_MAX];
 
@@ -465,16 +468,17 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 		fm->entries[i] = emalloc(sizeof(*fm->entries[i]) * STATE_LAST);
 		fm->entries[i][STATE_NAME] = estrdup(array[i]->d_name);
 		fm->entries[i][STATE_PATH] = fullpath(cwd->path, array[i]->d_name);
+		islink = lstat(array[i]->d_name, &sb) != -1 && S_ISLNK(sb.st_mode);
 		if (stat(array[i]->d_name, &sb) == -1) {
 			warn("%s", cwd->path);
 			fm->entries[i][STATE_SIZE] = NULL;
 			fm->entries[i][STATE_TIME] = NULL;
-			fm->entries[i][STATE_MODE] = NULL;
+			fm->entries[i][STATE_MODE] = modefmt(fm, 0x0, 0x0, 0x0, islink);
 			fm->entries[i][STATE_OWNER] = NULL;
 		} else {
 			fm->entries[i][STATE_SIZE] = sizefmt(sb.st_size);
 			fm->entries[i][STATE_TIME] = timefmt(sb.st_mtim.tv_sec);
-			fm->entries[i][STATE_MODE] = modefmt(fm, sb.st_mode, sb.st_uid, sb.st_gid);
+			fm->entries[i][STATE_MODE] = modefmt(fm, sb.st_mode, sb.st_uid, sb.st_gid, islink);
 			fm->entries[i][STATE_OWNER] = ownerfmt(sb.st_uid, sb.st_gid);
 		}
 		free(array[i]);
