@@ -2335,18 +2335,16 @@ mainmode(Widget wid, int *selitems, int *nitems)
 				XUngrabPointer(wid->dpy, ev.xbutton.time);
 				XFlush(wid->dpy);
 				return WIDGET_CONTEXT;
-			} else if (ev.xbutton.button == BUTTON8) {
-				return WIDGET_PREV;
-			} else if (ev.xbutton.button == BUTTON9) {
-				return WIDGET_NEXT;
 			}
 			break;
 		case ButtonRelease:
 			if (ev.xbutton.window != wid->win)
 				break;
-			if (ev.xbutton.button != Button1)
-				break;
-			if (ignoremotion)
+			if (ev.xbutton.button == BUTTON8)
+				return WIDGET_PREV;
+			if (ev.xbutton.button == BUTTON9)
+				return WIDGET_NEXT;
+			if (ev.xbutton.button == Button1)
 				ignoremotion = FALSE;
 			break;
 		case MotionNotify:
