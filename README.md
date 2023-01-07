@@ -27,7 +27,7 @@ XFiles can be customized by setting the following X resources:
 
 ## Icons
 
-Each line of the `$FILE_ICONS` environment variable must have the
+Each line of the `$XFILES_ICONS` environment variable must have the
 following format:
 
 ```
@@ -44,12 +44,12 @@ the png or jpg extensions.
 
 PATH is the path to the icon in .xpm format.
 
-The following is how I set my `FILE_ICONS`.  It sets an icon for the
+The following is how I set my `XFILES_ICONS`.  It sets an icon for the
 directory up (dot-dot) entry, my $HOME, and for arbitrary directories;
 and also icons for some file types and other files.
 
 ```
-export FILE_ICONS="
+export XFILES_ICONS="
 d:..=$ICONPATH/64x64/folder-up.xpm
 d:$HOME=$ICONPATH/64x64/folder-home.xpm
 d:*=$ICONPATH/64x64/folder.xpm
@@ -102,7 +102,7 @@ varible, nothing is used.  I recommend you to use [xmenu] or [pmenu].
 
 ### How do I set custom icons?
 
-You must set the `FILE_ICONS` environment variable.
+You must set the `XFILES_ICONS` environment variable.
 XFiles comes with a set of icons in `./icons`; you can use them,
 or you can use any set of 64x64 `.xpm` icons.
 (Yes, they must be 64x64 pixels wide and in the `.xpm` format).
@@ -121,7 +121,7 @@ XPM files.
 
 ### Why there are no thumbnail/miniatures?
 
-You must set the `THUMBNAILER` and `THUMBNAILDIR` environment variables.
+You must set the `XFILES_THUMBNAILER` and `XFILES_THUMBNAILDIR` environment variables.
 
 ### Why XPM for icons?
 
