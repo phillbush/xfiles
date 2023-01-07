@@ -868,10 +868,13 @@ main(int argc, char *argv[])
 			break;
 		case WIDGET_PREV:
 		case WIDGET_NEXT:
+		case WIDGET_REFRESH:
 			if (state == WIDGET_PREV)
 				cwd = fm.cwd->prev;
-			else
+			else if (state == WIDGET_NEXT)
 				cwd = fm.cwd->next;
+			else
+				cwd = fm.cwd;
 			if (cwd == NULL)
 				break;
 			fm.cwd = cwd;
