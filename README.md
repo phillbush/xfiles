@@ -103,6 +103,21 @@ varible, nothing is used.  I recommend you to use [xmenu] or [pmenu].
 ### How do I set custom icons?
 
 You must set the `FILE_ICONS` environment variable.
+XFiles comes with a set of icons in `./icons`; you can use them,
+or you can use any set of 64x64 `.xpm` icons.
+(Yes, they must be 64x64 pixels wide and in the `.xpm` format).
+
+
+### How can I open/edit xpm icons?
+
+You can open xpm files with [feh](https://feh.finalrewind.org/).
+[Xpm](https://en.wikipedia.org/wiki/X_PixMap) is a file format meant
+solely for icons, and is not intended to be used for general images
+(especially colorful, vivid ones).  It has the feature that it can be
+easily [edited in a text editor](https://upload.wikimedia.org/wikipedia/commons/b/b3/Screenshot-xterm-linux.xpm-GVIM.png).
+The GIMP (GNU Image Manipulation Program) also supports exporting into
+XPM files.
+
 
 ### Why there are no thumbnail/miniatures?
 
@@ -153,3 +168,10 @@ when pasting.  You can check my context script at my [dotfiles].
 
 * Implement drag-and-drop.
 * Use kqueue/inotify to check for directory changes?
+
+## License
+
+The code and manual are under the MIT/X license.
+See `./LICENSE` for more information.
+
+The icons are in CC0/Public Domain.
