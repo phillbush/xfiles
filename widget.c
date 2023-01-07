@@ -2275,6 +2275,8 @@ draw:
 		if (redrawall)
 			drawitems(wid);
 		break;
+	case XK_F5:
+		return WIDGET_REFRESH;
 	default:
 		break;
 	}
