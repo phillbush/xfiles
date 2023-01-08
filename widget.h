@@ -18,6 +18,8 @@ typedef enum {
 enum {
 	CURSOR_NORMAL,
 	CURSOR_WATCH,
+	CURSOR_DRAG,
+	CURSOR_NODROP,
 	CURSOR_LAST,
 };
 

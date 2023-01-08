@@ -15,6 +15,7 @@
 #include <X11/cursorfont.h>
 #include <X11/xpm.h>
 #include <X11/Xft/Xft.h>
+#include <X11/Xcursor/Xcursor.h>
 #include <X11/extensions/sync.h>
 
 #include "util.h"
@@ -53,6 +54,16 @@
 #define PAGE_STEP(w)    ((w)->h / 2)
 
 enum {
+	/* number of members on a the .data.l[] array of a XClientMessageEvent */
+	NCLIENTMSG_DATA = 5,
+
+	/* distance the cursor must move to be considered a drag */
+	DRAG_THRESHOLD  = 8,
+	DRAG_SQUARE     = (DRAG_THRESHOLD * DRAG_THRESHOLD),
+
+	/* XDND protocol version */
+	XDND_VERSION    = 5,
+
 	/* buttons not defined by X.h */
 	BUTTON8         = 8,
 	BUTTON9         = 9,
@@ -95,7 +106,7 @@ enum {
 
 	/* times in milliseconds */
 	DOUBLECLICK     = 250,                  /* time of a doubleclick, in milliseconds */
-	RECTTIME        = 32,                   /* update time rate for rectangular selection */
+	MOTION_TIME     = 32,                   /* update time rate for rectangular selection */
 
 	/* scrolling */
 	SCROLL_STEP     = 5,                    /* pixels per scroll */
@@ -117,21 +128,60 @@ enum {
 };
 
 enum {
-	ATOM_PAIR,
+	/* xdnd window properties */
+	XDND_AWARE,
+	XDND_TYPELIST,
+	XDND_DIRECT_SAVE,
+
+	/* xdnd selections */
+	XDND_SELECTION,
+
+	/* xdnd client messages */
+	XDND_ENTER,
+	XDND_POSITION,
+	XDND_STATUS,
+	XDND_LEAVE,
+	XDND_DROP,
+	XDND_FINISHED,
+
+	/* xdnd actions */
+	XDND_ACTION_COPY,
+	XDND_ACTION_MOVE,
+	XDND_ACTION_LINK,
+	XDND_ACTION_ASK,
+	XDND_ACTION_PRIVATE,
+	XDND_ACTION_DIRECT_SAVE,
+
+	/* xdnd types we accept */
+	XDND_URI_LIST,
+	TEXT_URI_LIST,
+	TEXT_PLAIN,
+
+	/* selection targets */
+	UTF8_STRING,
 	COMPOUND_TEXT,
 	DELETE,
 	MULTIPLE,
 	TARGETS,
 	TEXT,
 	TIMESTAMP,
-	UTF8_STRING,
+
+	/* selection properties */
+	ATOM_PAIR,
+
+	/* window protocols */
 	WM_DELETE_WINDOW,
+
+	/* window properties */
 	_NET_WM_ICON,
 	_NET_WM_NAME,
 	_NET_WM_PID,
 	_NET_WM_WINDOW_TYPE,
 	_NET_WM_WINDOW_TYPE_NORMAL,
+
+	/* others */
 	_NULL,
+
 	ATOM_LAST,
 };
 
@@ -300,10 +350,30 @@ struct Widget {
 		STATE_NORMAL,
 		STATE_SELECTING,
 		STATE_SCROLLING,
+		STATE_DRAGGING,
 	} state;
 };
 
 static char *atomnames[ATOM_LAST] = {
+	[XDND_AWARE]                 = "XdndAware",
+	[XDND_TYPELIST]              = "XdndTypeList",
+	[XDND_DIRECT_SAVE]           = "XdndDirectSave",
+	[XDND_SELECTION]             = "XdndSelection",
+	[XDND_ENTER]                 = "XdndEnter",
+	[XDND_POSITION]              = "XdndPosition",
+	[XDND_STATUS]                = "XdndStatus",
+	[XDND_LEAVE]                 = "XdndLeave",
+	[XDND_DROP]                  = "XdndDrop",
+	[XDND_FINISHED]              = "XdndFinished",
+	[XDND_ACTION_COPY]           = "XdndActionCopy",
+	[XDND_ACTION_MOVE]           = "XdndActionMove",
+	[XDND_ACTION_LINK]           = "XdndActionLink",
+	[XDND_ACTION_ASK]            = "XdndActionAsk",
+	[XDND_ACTION_PRIVATE]        = "XdndActionPrivate",
+	[XDND_ACTION_DIRECT_SAVE]    = "XdndActionDirectSave",
+	[XDND_URI_LIST]              = "XdndUriList",
+	[TEXT_URI_LIST]              = "text/uri-list",
+	[TEXT_PLAIN]                 = "text/plain",
 	[ATOM_PAIR]                  = "ATOM_PAIR",
 	[COMPOUND_TEXT]              = "COMPOUND_TEXT",
 	[UTF8_STRING]                = "UTF8_STRING",
@@ -324,6 +394,7 @@ static char *atomnames[ATOM_LAST] = {
 static int
 createwin(Widget wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
 {
+	Atom version = XDND_VERSION;    /* yes, version is an Atom */
 	unsigned int dw, dh;
 	int x, y;
 	int dx, dy;
@@ -419,6 +490,14 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		wid->atoms[_NET_WM_PID],
 		XA_CARDINAL, 32, PropModeReplace,
 		(unsigned char *)&pid,
+		1
+	);
+	XChangeProperty(
+		wid->dpy, wid->win,
+		wid->atoms[XDND_AWARE],
+		XA_ATOM, 32,
+		PropModeReplace,
+		(unsigned char *)&version,
 		1
 	);
 	return RET_OK;
@@ -1261,8 +1340,9 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	XSetForeground(wid->dpy, wid->stipgc, 1);
 	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, 1, 1);
 	XSetStipple(wid->dpy, wid->gc, wid->stipple);
-	wid->cursors[CURSOR_NORMAL] = XCreateFontCursor(wid->dpy, XC_left_ptr);
 	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
+	wid->cursors[CURSOR_DRAG] = XcursorLibraryLoadCursor(wid->dpy, "dnd-none");
+	wid->cursors[CURSOR_NODROP] = XcursorLibraryLoadCursor(wid->dpy, "forbidden");
 	if ((counters = XSyncListSystemCounters(wid->dpy, &ncounters)) != NULL) {
 		for (i = 0; i < ncounters; i++) {
 			if (strcmp(counters[i].name, "SERVERTIME") == 0) {
@@ -1445,7 +1525,7 @@ unselectitems(Widget wid)
 }
 
 static void
-ownselection(Widget wid, Time time)
+ownprimary(Widget wid, Time time)
 {
 	if (wid->sel == NULL)
 		return;
@@ -1454,26 +1534,55 @@ ownselection(Widget wid, Time time)
 }
 
 static unsigned long
-getatompairs(Widget wid, Window win, Atom prop, Atom **pairs)
+getatomsprop(Widget wid, Window win, Atom prop, Atom *type, Atom **atoms)
 {
 	unsigned char *p;
 	unsigned long len;
 	unsigned long dl;   /* dummy variable */
 	int di;             /* dummy variable */
+	int state;
+
+	p = NULL;
+	state = XGetWindowProperty(
+		wid->dpy, win,
+		prop, 0L, 0x1FFFFFFF,
+		False,
+		*type, type,
+		&di, &len, &dl, &p
+	);
+	if (state != Success || len == 0 || p == NULL) {
+		*atoms = NULL;
+		XFree(p);
+		return 0;
+	}
+	*atoms = (Atom *)p;
+	return len;
+}
+
+static unsigned long
+getatompairs(Widget wid, Window win, Atom prop, Atom **pairs)
+{
+	unsigned long len;
+	Atom *p;
 	Atom type;
 	size_t size;
 
-	if (XGetWindowProperty(wid->dpy, win, prop, 0L, 0x1FFFFFFF, False, wid->atoms[ATOM_PAIR], &type, &di, &len, &dl, &p) != Success ||
-	    len == 0 || p == NULL || type != wid->atoms[ATOM_PAIR]) {
-		XFree(p);
-		*pairs = NULL;
-		return 0;
-	}
+	p = NULL;
+	*pairs = NULL;
+	type = wid->atoms[ATOM_PAIR];
+	if ((len = getatomsprop(wid, win, prop, &type, &p)) == 0)
+		goto error;
+	if (type != wid->atoms[ATOM_PAIR])
+		goto error;
 	size = len * sizeof(**pairs);
-	*pairs = emalloc(size);
+	if ((*pairs = malloc(size)) == NULL)
+		goto error;
 	memcpy(*pairs, p, size);
 	XFree(p);
 	return len;
+error:
+	XFree(p);
+	return 0;
 }
 
 static Bool
@@ -1523,15 +1632,18 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 			XA_ATOM, 32,
 			PropModeReplace,
 			(unsigned char *)(Atom[]){
-				XA_STRING,
+				wid->atoms[XDND_URI_LIST],
+				wid->atoms[TEXT_URI_LIST],
+				wid->atoms[TEXT_PLAIN],
+				wid->atoms[UTF8_STRING],
 				wid->atoms[DELETE],
 				wid->atoms[MULTIPLE],
 				wid->atoms[TARGETS],
 				wid->atoms[TEXT],
 				wid->atoms[TIMESTAMP],
-				wid->atoms[UTF8_STRING],
+				XA_STRING,
 			},
-			7       /* the 7 atoms in the preceding array */
+			10      /* the 10 atoms in the preceding array */
 		);
 		return True;
 	}
@@ -1550,39 +1662,64 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 		);
 		return True;
 	}
-	if (target == wid->atoms[TEXT] ||
-	    target == wid->atoms[UTF8_STRING] ||
-	    target == wid->atoms[COMPOUND_TEXT] ||
-	    target == XA_STRING) {
+	if (target != wid->atoms[XDND_URI_LIST] &&
+	    target != wid->atoms[TEXT_URI_LIST] &&
+	    target != wid->atoms[TEXT_PLAIN] &&
+	    target != wid->atoms[TEXT] &&
+	    target != wid->atoms[UTF8_STRING] &&
+	    target != wid->atoms[COMPOUND_TEXT] &&
+	    target != XA_STRING) {
+		return FALSE;
+	}
+	XChangeProperty(
+		wid->dpy,
+		requestor,
+		property,
+		target,
+		8L,
+		PropModeReplace,
+		NULL,
+		0
+	);
+	for (sel = wid->sel; sel != NULL; sel = sel->next) {
+		if (target == wid->atoms[XDND_URI_LIST] ||
+		    target == wid->atoms[TEXT_URI_LIST]) {
+			XChangeProperty(
+				wid->dpy,
+				requestor,
+				property,
+				target,
+				8L,
+				PropModeAppend,
+				(unsigned char *)"file://",
+				7
+			);
+		}
 		XChangeProperty(
 			wid->dpy,
 			requestor,
 			property,
-			wid->atoms[UTF8_STRING],
+			target,
 			8L,
-			PropModeReplace,
-			NULL,
-			0
+			PropModeAppend,
+			(unsigned char *)wid->items[sel->index][ITEM_PATH],
+			strlen(wid->items[sel->index][ITEM_PATH])
 		);
-		for (sel = wid->sel; sel != NULL; sel = sel->next) {
+		if (target != wid->atoms[XDND_URI_LIST] &&
+		    target != wid->atoms[TEXT_URI_LIST] &&
+		    sel->next == NULL) {
+			break;
+		}
+		if (target == wid->atoms[XDND_URI_LIST] ||
+		    target == wid->atoms[TEXT_URI_LIST]) {
 			XChangeProperty(
 				wid->dpy,
 				requestor,
 				property,
-				wid->atoms[UTF8_STRING],
+				target,
 				8L,
 				PropModeAppend,
-				(unsigned char *)wid->items[sel->index][ITEM_PATH],
-				strlen(wid->items[sel->index][ITEM_PATH])
-			);
-			XChangeProperty(
-				wid->dpy,
-				requestor,
-				property,
-				wid->atoms[UTF8_STRING],
-				8L,
-				PropModeAppend,
-				(unsigned char *)"\n",
+				(unsigned char *)"\r",
 				1
 			);
 		}
@@ -1590,15 +1727,24 @@ convert(Widget wid, Window requestor, Atom target, Atom property)
 			wid->dpy,
 			requestor,
 			property,
-			wid->atoms[UTF8_STRING],
+			target,
 			8L,
 			PropModeAppend,
-			(unsigned char[]){ '\0' },
+			(unsigned char *)"\n",
 			1
 		);
-		return True;
 	}
-	return False;
+	XChangeProperty(
+		wid->dpy,
+		requestor,
+		property,
+		target,
+		8L,
+		PropModeAppend,
+		(unsigned char[]){ '\0' },
+		1
+	);
+	return True;
 }
 
 static void
@@ -1862,126 +2008,30 @@ endevent(Widget wid)
 	}
 }
 
-static WidgetEvent
-processevent(Widget wid, XEvent *ev)
-{
-	wid->redraw = FALSE;
-	switch (ev->type) {
-	case ClientMessage:
-		if ((Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
-			return WIDGET_CLOSE;
-		break;
-	case Expose:
-		if (ev->xexpose.count == 0)
-			commitdraw(wid);
-		break;
-	case ConfigureNotify:
-		if (calcsize(wid, ev->xconfigure.width, ev->xconfigure.height)) {
-			if (wid->row >= wid->nscreens)
-				setrow(wid, wid->nscreens - 1);
-			drawitems(wid);
-		}
-		break;
-	case SelectionRequest:
-		if (ev->xselectionrequest.selection == XA_PRIMARY)
-			sendselection(wid, &ev->xselectionrequest);
-		break;
-	case SelectionClear:
-		if (wid->sel == NULL)
-			break;
-		unselectitems(wid);
-		break;
-	default:
-		return WIDGET_NONE;
-	}
-	endevent(wid);
-	return WIDGET_INTERNAL;
-}
-
 static int
-querypointer(Widget wid, Window win, int *x, int *y)
+querypointer(Widget wid, Window win, int *retx, int *rety, Window *retwin)
 {
 	Window root, child;
 	unsigned int mask;
 	int rootx, rooty;
+	int x, y;
+	int retval;
 
-	return XQueryPointer(
+	retval = XQueryPointer(
 		wid->dpy,
 		win,
 		&root, &child,
 		&rootx, &rooty,
-		x, y,
+		&x, &y,
 		&mask
-	) == True;
-}
-
-static WidgetEvent
-rectmotion(Widget wid, Time lasttime, int shift, int clickx, int clicky)
-{
-	XEvent ev;
-	XSyncAlarm alarm;
-	int rectrow, rectydiff, ownsel, moved, x, y;
-
-	wid->state = STATE_SELECTING;
-	rectrow = wid->row;
-	rectydiff = wid->ydiff;
-	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
-	moved = FALSE;
-	ownsel = FALSE;
-	while (!XNextEvent(wid->dpy, &ev)) {
-		switch (processevent(wid, &ev)) {
-		case WIDGET_CLOSE:
-			XSyncDestroyAlarm(wid->dpy, alarm);
-			return WIDGET_CLOSE;
-		case WIDGET_NONE:
-			break;
-		default:
-			continue;
-		}
-		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
-			if (querypointer(wid, wid->win, &x, &y)) {
-				if (y > wid->h)
-					y -= wid->h;
-				else if (y > 0)
-					y = 0;
-				if (scroll(wid, y)) {
-					drawitems(wid);
-				}
-				if (y != 0) {
-					commitdraw(wid);
-				}
-			}
-			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
-			continue;
-		}
-		switch (ev.type) {
-		case ButtonPress:
-		case ButtonRelease:
-			if (ownsel)
-				ownselection(wid, ev.xbutton.time);
-			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xbutton.x, ev.xbutton.y);
-			goto done;
-		case MotionNotify:
-			if (ev.xmotion.time - lasttime < RECTTIME)
-				break;
-			if (!moved && !shift)
-				unselectitems(wid);
-			moved = TRUE;
-			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
-			if (rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y))
-				ownsel = TRUE;
-			commitdraw(wid);
-			lasttime = ev.xmotion.time;
-			break;
-		}
-		endevent(wid);
-	}
-done:
-	commitrectsel(wid);
-	wid->state = STATE_NORMAL;
-	commitdraw(wid);
-	XSyncDestroyAlarm(wid->dpy, alarm);
-	return WIDGET_NONE;
+	);
+	if (retwin != NULL)
+		*retwin = child;
+	if (retx != NULL)
+		*retx = x;
+	if (rety != NULL)
+		*rety = y;
+	return retval;
 }
 
 static int
@@ -1989,7 +2039,7 @@ scrollerpos(Widget wid)
 {
 	int x, y;
 
-	if (querypointer(wid, wid->scroller, &x, &y) == True) {
+	if (querypointer(wid, wid->scroller, &x, &y, NULL) == True) {
 		if (y > SCROLLER_SIZE)
 			return y - SCROLLER_SIZE;
 		if (y < 0)
@@ -2027,80 +2077,6 @@ scrollerset(Widget wid, int pos)
 		settitle(wid);
 		drawitems(wid);
 	}
-}
-
-static WidgetEvent
-scrollmotion(Widget wid, int x, int y)
-{
-	XSyncAlarm alarm;
-	XEvent ev;
-	int grabpos, pos, left;
-
-	wid->state = STATE_SCROLLING;
-	grabpos = wid->handlew / 2;             /* we grab the handle in its middle */
-	drawscroller(wid, gethandlepos(wid));
-	XMoveWindow(wid->dpy, wid->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
-	XMapRaised(wid->dpy, wid->scroller);
-	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
-	left = FALSE;
-	while (!XNextEvent(wid->dpy, &ev)) {
-		switch (processevent(wid, &ev)) {
-		case WIDGET_CLOSE:
-			XSyncDestroyAlarm(wid->dpy, alarm);
-			return WIDGET_CLOSE;
-		case WIDGET_NONE:
-			break;
-		default:
-			continue;
-		}
-		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
-			if ((pos = scrollerpos(wid)) != 0) {
-				if (scroll(wid, pos))
-					drawitems(wid);
-				commitdraw(wid);
-			}
-			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
-			continue;
-		}
-		switch (ev.type) {
-		case MotionNotify:
-			if (ev.xmotion.window == wid->scroller && (ev.xmotion.state & Button1Mask)) {
-				scrollerset(wid, ev.xmotion.y - grabpos);
-			} else if (ev.xmotion.window == wid->win &&
-			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
-				left = TRUE;
-			}
-			break;
-		case ButtonRelease:
-			if (left)
-				goto done;
-			break;
-		case ButtonPress:
-			if (ev.xbutton.button != Button1)
-				goto done;
-			if (ev.xbutton.window == wid->win)
-				goto done;
-			if (ev.xbutton.window == wid->scroller) {
-				left = TRUE;
-				pos = gethandlepos(wid);
-				if (ev.xmotion.y < pos || ev.xmotion.y > pos + wid->handlew) {
-					/* grab handle in the middle */
-					grabpos = wid->handlew / 2;
-					scrollerset(wid, ev.xmotion.y - grabpos);
-				} else {
-					/* grab handle in position under pointer */
-					grabpos = ev.xmotion.y - pos;
-				}
-			}
-			break;
-		}
-		endevent(wid);
-	}
-done:
-	wid->state = STATE_NORMAL;
-	XSyncDestroyAlarm(wid->dpy, alarm);
-	XUnmapWindow(wid->dpy, wid->scroller);
-	return WIDGET_NONE;
 }
 
 static int
@@ -2156,6 +2132,55 @@ fillselitems(Widget wid, int *selitems, int clicked)
 	}
 	return nitems;
 }
+
+static Window
+getdropwin(Widget wid, Atom *version)
+{
+	Atom type;
+	Atom *p;
+	Window win;
+
+	*version = None;
+	win = ROOT(wid->dpy);
+	type = XA_ATOM;
+	while (querypointer(wid, win, NULL, NULL, &win)) {
+		if (win == None)
+			break;
+		if (getatomsprop(wid, win, wid->atoms[XDND_AWARE], &type, &p) > 0) {
+			*version = *p;
+			XFree(p);
+			return win;
+		}
+	}
+	return None;
+}
+
+static void
+clientmsg(Display *dpy, Window win, Atom atom, long d[5])
+{
+	XEvent ev;
+
+	ev.xclient.type = ClientMessage;
+	ev.xclient.display = dpy;
+	ev.xclient.serial = 0;
+	ev.xclient.send_event = True;
+	ev.xclient.message_type = atom;
+	ev.xclient.window = win;
+	ev.xclient.format = 32;
+	ev.xclient.data.l[0] = d[0];
+	ev.xclient.data.l[1] = d[1];
+	ev.xclient.data.l[2] = d[2];
+	ev.xclient.data.l[3] = d[3];
+	ev.xclient.data.l[4] = d[4];
+	if (!XSendEvent(dpy, win, False, 0x0, &ev)) {
+		warnx("could not send event");
+	}
+}
+
+/*
+ * The following routines check an event, and process then if needed.
+ * They return WIDGET_NONE if the event is not processed.
+ */
 
 static WidgetEvent
 keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
@@ -2281,11 +2306,302 @@ draw:
 }
 
 static WidgetEvent
+processevent(Widget wid, XEvent *ev)
+{
+	wid->redraw = FALSE;
+	switch (ev->type) {
+	case ClientMessage:
+		if ((Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
+			return WIDGET_CLOSE;
+		return WIDGET_NONE;
+	case Expose:
+		if (ev->xexpose.count == 0)
+			commitdraw(wid);
+		break;
+	case ConfigureNotify:
+		if (calcsize(wid, ev->xconfigure.width, ev->xconfigure.height)) {
+			if (wid->row >= wid->nscreens)
+				setrow(wid, wid->nscreens - 1);
+			drawitems(wid);
+		}
+		break;
+	case SelectionRequest:
+		if (ev->xselectionrequest.selection == XA_PRIMARY ||
+		    ev->xselectionrequest.selection == wid->atoms[XDND_SELECTION])
+			sendselection(wid, &ev->xselectionrequest);
+		break;
+	case SelectionClear:
+		if (wid->sel == NULL)
+			break;
+		unselectitems(wid);
+		break;
+	default:
+		return WIDGET_NONE;
+	}
+	endevent(wid);
+	return WIDGET_INTERNAL;
+}
+
+/*
+ * The following are the event loops we use.
+ *
+ * mainmode() is the main event loop; while the others are modes that
+ * the widget can get in before returning to main mode.
+ *
+ * All event loops call processevent to handle events that are common
+ * to all modes.
+ */
+
+static WidgetEvent
+scrollmode(Widget wid, int x, int y)
+{
+	XSyncAlarm alarm;
+	XEvent ev;
+	int grabpos, pos, left;
+
+	wid->state = STATE_SCROLLING;
+	grabpos = wid->handlew / 2;             /* we grab the handle in its middle */
+	drawscroller(wid, gethandlepos(wid));
+	XMoveWindow(wid->dpy, wid->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
+	XMapRaised(wid->dpy, wid->scroller);
+	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
+	left = FALSE;
+	while (!XNextEvent(wid->dpy, &ev)) {
+		switch (processevent(wid, &ev)) {
+		case WIDGET_CLOSE:
+			XSyncDestroyAlarm(wid->dpy, alarm);
+			return WIDGET_CLOSE;
+		case WIDGET_NONE:
+			break;
+		default:
+			continue;
+		}
+		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
+			if ((pos = scrollerpos(wid)) != 0) {
+				if (scroll(wid, pos))
+					drawitems(wid);
+				commitdraw(wid);
+			}
+			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
+			continue;
+		}
+		switch (ev.type) {
+		case MotionNotify:
+			if (ev.xmotion.window == wid->scroller && (ev.xmotion.state & Button1Mask)) {
+				scrollerset(wid, ev.xmotion.y - grabpos);
+			} else if (ev.xmotion.window == wid->win &&
+			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
+				left = TRUE;
+			}
+			break;
+		case ButtonRelease:
+			if (left)
+				goto done;
+			break;
+		case ButtonPress:
+			if (ev.xbutton.button != Button1)
+				goto done;
+			if (ev.xbutton.window == wid->win)
+				goto done;
+			if (ev.xbutton.window == wid->scroller) {
+				left = TRUE;
+				pos = gethandlepos(wid);
+				if (ev.xmotion.y < pos || ev.xmotion.y > pos + wid->handlew) {
+					/* grab handle in the middle */
+					grabpos = wid->handlew / 2;
+					scrollerset(wid, ev.xmotion.y - grabpos);
+				} else {
+					/* grab handle in position under pointer */
+					grabpos = ev.xmotion.y - pos;
+				}
+			}
+			break;
+		}
+		endevent(wid);
+	}
+done:
+	wid->state = STATE_NORMAL;
+	XSyncDestroyAlarm(wid->dpy, alarm);
+	XUnmapWindow(wid->dpy, wid->scroller);
+	return WIDGET_NONE;
+}
+
+static WidgetEvent
+selmode(Widget wid, Time lasttime, int shift, int clickx, int clicky)
+{
+	XEvent ev;
+	XSyncAlarm alarm;
+	int rectrow, rectydiff, ownsel, x, y;
+
+	wid->state = STATE_SELECTING;
+	rectrow = wid->row;
+	rectydiff = wid->ydiff;
+	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
+	ownsel = FALSE;
+	if (!shift)
+		unselectitems(wid);
+	while (!XNextEvent(wid->dpy, &ev)) {
+		switch (processevent(wid, &ev)) {
+		case WIDGET_CLOSE:
+			XSyncDestroyAlarm(wid->dpy, alarm);
+			return WIDGET_CLOSE;
+		case WIDGET_NONE:
+			break;
+		default:
+			continue;
+		}
+		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
+			if (querypointer(wid, wid->win, &x, &y, NULL)) {
+				if (y > wid->h)
+					y -= wid->h;
+				else if (y > 0)
+					y = 0;
+				if (scroll(wid, y)) {
+					drawitems(wid);
+				}
+				if (y != 0) {
+					commitdraw(wid);
+				}
+			}
+			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
+			continue;
+		}
+		switch (ev.type) {
+		case ButtonPress:
+		case ButtonRelease:
+			if (ownsel)
+				ownprimary(wid, ev.xbutton.time);
+			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xbutton.x, ev.xbutton.y);
+			goto done;
+		case MotionNotify:
+			if (ev.xmotion.time - lasttime < MOTION_TIME)
+				break;
+			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
+			if (rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y))
+				ownsel = TRUE;
+			commitdraw(wid);
+			lasttime = ev.xmotion.time;
+			break;
+		}
+		endevent(wid);
+	}
+done:
+	commitrectsel(wid);
+	wid->state = STATE_NORMAL;
+	commitdraw(wid);
+	XSyncDestroyAlarm(wid->dpy, alarm);
+	return WIDGET_NONE;
+}
+
+static WidgetEvent
+dragmode(Widget wid, Time lasttime)
+{
+	XEvent ev;
+	Window lastwin, win;
+	Atom version;
+	int sendposition;
+	int accept, inside, x, y, w, h;
+	long d[NCLIENTMSG_DATA];
+
+	lastwin = None;
+	wid->state = STATE_SELECTING;
+	widgetcursor(wid, CURSOR_DRAG);
+	d[0] = wid->win;
+	accept = TRUE;
+	sendposition = TRUE;
+	x = y = w = h = 0;
+	wid->seltime = lasttime;
+	XSetSelectionOwner(wid->dpy, wid->atoms[XDND_SELECTION], wid->win, lasttime);
+	while (!XNextEvent(wid->dpy, &ev)) {
+		switch (processevent(wid, &ev)) {
+		case WIDGET_CLOSE:
+			return WIDGET_CLOSE;
+		case WIDGET_NONE:
+			break;
+		default:
+			continue;
+		}
+		switch (ev.type) {
+		case ButtonPress:
+		case ButtonRelease:
+			d[1] = d[2] = d[3] = d[4] = 0;
+			if (lastwin != None) {
+				d[2] = ev.xbutton.time;
+				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_DROP], d);
+			} else {
+				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_LEAVE], d);
+			}
+			goto done;
+		case ClientMessage:
+			if (ev.xclient.message_type != wid->atoms[XDND_STATUS])
+				break;
+			if ((Window)ev.xclient.data.l[0] != lastwin)
+				break;
+			accept = (ev.xclient.data.l[1] & 0x1);
+			sendposition = (ev.xclient.data.l[1] & 0x2);
+			widgetcursor(wid, accept ? CURSOR_DRAG : CURSOR_NODROP);
+			x = ev.xclient.data.l[2] >> 16;
+			y = ev.xclient.data.l[2] & 0xFFFF;
+			w = ev.xclient.data.l[3] >> 16;
+			h = ev.xclient.data.l[3] & 0xFFFF;
+			break;
+		case MotionNotify:
+			if (ev.xmotion.time - lasttime < MOTION_TIME)
+				break;
+			inside = between(ev.xmotion.x, ev.xmotion.y, x, y, w, h);
+			if ((sendposition || !inside) && lastwin != None) {
+				if (FLAG(ev.xmotion.state, ControlMask|ShiftMask))
+					d[4] = wid->atoms[XDND_ACTION_LINK];
+				if (FLAG(ev.xmotion.state, ShiftMask))
+					d[4] = wid->atoms[XDND_ACTION_MOVE];
+				if (FLAG(ev.xmotion.state, ControlMask))
+					d[4] = wid->atoms[XDND_ACTION_COPY];
+				else
+					d[4] = wid->atoms[XDND_ACTION_ASK];
+				d[1] = 0;
+				d[2] = (ev.xmotion.x_root << 16) | (ev.xmotion.y_root & 0xFFFF);
+				d[3] = ev.xmotion.time;
+				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_POSITION], d);
+				sendposition = TRUE;
+			}
+			lasttime = ev.xmotion.time;
+			if ((win = getdropwin(wid, &version)) == lastwin)
+				break;
+			sendposition = TRUE;
+			x = y = w = h = 0;
+			if (version > XDND_VERSION)
+				version = XDND_VERSION;
+			if (lastwin != None && lastwin != wid->win) {
+				d[1] = d[2] = d[3] = d[4] = 0;
+				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_LEAVE], d);
+			}
+			if (win != None && win != wid->win) {
+				d[1] = version << 24;
+				d[2] = wid->atoms[TEXT_URI_LIST];
+				d[3] = d[4] = None;
+				clientmsg(wid->dpy, win, wid->atoms[XDND_ENTER], d);
+			}
+			if (win == None)
+				widgetcursor(wid, CURSOR_NODROP);
+			else
+				widgetcursor(wid, CURSOR_DRAG);
+			lastwin = win;
+			break;
+		}
+	}
+done:
+	widgetcursor(wid, CURSOR_NORMAL);
+	wid->state = STATE_NORMAL;
+	return WIDGET_NONE;
+}
+
+static WidgetEvent
 mainmode(Widget wid, int *selitems, int *nitems)
 {
 	XEvent ev;
 	Time lasttime = 0;
-	int ignoremotion = FALSE;
+	int clickx = 0;
+	int clicky = 0;
 	int clicki = -1;
 	int state;
 
@@ -2305,11 +2621,13 @@ mainmode(Widget wid, int *selitems, int *nitems)
 				return state;
 			break;
 		case ButtonPress:
+			clickx = ev.xbutton.x;
+			clicky = ev.xbutton.y;
 			if (ev.xbutton.window != wid->win)
 				break;
 			if (ev.xbutton.button == Button1) {
 				clicki = mouse1click(wid, &ev.xbutton);
-				ownselection(wid, ev.xbutton.time);
+				ownprimary(wid, ev.xbutton.time);
 				if (clicki == -1 ||
 				    (ev.xbutton.state & (ControlMask | ShiftMask)) ||
 				    ev.xbutton.time - lasttime > DOUBLECLICK) {
@@ -2323,10 +2641,9 @@ mainmode(Widget wid, int *selitems, int *nitems)
 					drawitems(wid);
 				commitdraw(wid);
 			} else if (ev.xbutton.button == Button2) {
-				state = scrollmotion(wid, ev.xmotion.x, ev.xmotion.y);
+				state = scrollmode(wid, ev.xmotion.x, ev.xmotion.y);
 				if (state != WIDGET_NONE)
 					return state;
-				ignoremotion = TRUE;
 			} else if (ev.xbutton.button == Button3) {
 				mouse3click(wid, ev.xbutton.x, ev.xbutton.y);
 				*nitems = fillselitems(wid, selitems, -1);
@@ -2343,8 +2660,6 @@ mainmode(Widget wid, int *selitems, int *nitems)
 				return WIDGET_PREV;
 			if (ev.xbutton.button == BUTTON9)
 				return WIDGET_NEXT;
-			if (ev.xbutton.button == Button1)
-				ignoremotion = FALSE;
 			break;
 		case MotionNotify:
 			if (ev.xmotion.window != wid->win)
@@ -2353,11 +2668,13 @@ mainmode(Widget wid, int *selitems, int *nitems)
 			    ev.xmotion.state != (Button1Mask|ShiftMask) &&
 			    ev.xmotion.state != (Button1Mask|ControlMask))
 				break;
-			if (ignoremotion)
+			if (diff(ev.xmotion.x, clickx) * diff(ev.xmotion.y, clicky) < DRAG_SQUARE)
 				break;
-			if (clicki != -1)
-				break;
-			state = rectmotion(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), ev.xmotion.x, ev.xmotion.y);
+			if (clicki == -1) {
+				state = selmode(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
+			} else if (clicki > 0) {
+				state = dragmode(wid, ev.xmotion.time);
+			}
 			if (state != WIDGET_NONE)
 				return state;
 			break;
@@ -2542,9 +2859,10 @@ error:
 void
 widgetcursor(Widget wid, int cursor)
 {
-	if (cursor < 0 || cursor >= CURSOR_LAST)
-		cursor = CURSOR_NORMAL;
-	XDefineCursor(wid->dpy, wid->win, wid->cursors[cursor]);
+	if (cursor == CURSOR_NORMAL || cursor < 0 || cursor >= CURSOR_LAST)
+		XUndefineCursor(wid->dpy, wid->win);
+	else
+		XDefineCursor(wid->dpy, wid->win, wid->cursors[cursor]);
 	XFlush(wid->dpy);
 }
 
