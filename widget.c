@@ -2601,6 +2601,7 @@ mainmode(Widget wid, int *selitems, int *nitems)
 	int clickx = 0;
 	int clicky = 0;
 	int clicki = -1;
+	int index;
 	int state;
 
 	while (!XNextEvent(wid->dpy, &ev)) {
@@ -2624,16 +2625,7 @@ mainmode(Widget wid, int *selitems, int *nitems)
 			if (ev.xbutton.window != wid->win)
 				break;
 			if (ev.xbutton.button == Button1) {
-				clicki = mouse1click(wid, &ev.xbutton);
-				ownprimary(wid, ev.xbutton.time);
-				if (clicki == -1 ||
-				    (ev.xbutton.state & (ControlMask | ShiftMask)) ||
-				    ev.xbutton.time - lasttime > DOUBLECLICK) {
-					lasttime = ev.xbutton.time;
-					break;
-				}
-				*nitems = fillselitems(wid, selitems, wid->highlight);
-				return WIDGET_OPEN;
+				clicki = getpointerclick(wid, ev.xbutton.x, ev.xbutton.y);
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
 				if (scroll(wid, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
 					drawitems(wid);
@@ -2658,7 +2650,19 @@ mainmode(Widget wid, int *selitems, int *nitems)
 				return WIDGET_PREV;
 			if (ev.xbutton.button == BUTTON9)
 				return WIDGET_NEXT;
-			break;
+			if (ev.xbutton.button != Button1)
+				break;
+			index = mouse1click(wid, &ev.xbutton);
+			if (index > 0)
+				ownprimary(wid, ev.xbutton.time);
+			if (index == -1 ||
+			    (ev.xbutton.state & (ControlMask | ShiftMask)) ||
+			    ev.xbutton.time - lasttime > DOUBLECLICK) {
+				lasttime = ev.xbutton.time;
+				break;
+			}
+			*nitems = fillselitems(wid, selitems, wid->highlight);
+			return WIDGET_OPEN;
 		case MotionNotify:
 			if (ev.xmotion.window != wid->win)
 				break;
