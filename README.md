@@ -164,10 +164,6 @@ when pasting.  You can check my context script at my [dotfiles].
 
 [dotfiles]: https://github.com/phillbush/home/blob/668c9929b724417671d95432e1eedc98b1d82cb2/execs/xfiles-menu
 
-### What features need to be implemented?
-
-* Implement drag-and-drop.
-* Use kqueue/inotify to check for directory changes?
 
 ## License
 
