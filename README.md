@@ -92,7 +92,7 @@ defaults to xdg-open (I recommend you to use [plumb] instead).
 
 The context command is called with the paths to the selected files as
 arguments.  If not specified with the `XFILES_CONTEXTCMD` environment
-varible, nothing is used.  I recommend you to use [xmenu] or [pmenu].
+variable, nothing is used.  I recommend you to use [xmenu] or [pmenu].
 
 [xmenu]: https://github.com/phillbush/xmenu
 [pmenu]: https://github.com/phillbush/pmenu
