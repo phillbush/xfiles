@@ -12,6 +12,7 @@ typedef enum {
 	WIDGET_PREV,
 	WIDGET_NEXT,
 	WIDGET_REFRESH,
+	WIDGET_PARENT,
 	WIDGET_ERROR,
 } WidgetEvent;
 

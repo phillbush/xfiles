@@ -2300,6 +2300,8 @@ draw:
 		break;
 	case XK_F5:
 		return WIDGET_REFRESH;
+	case XK_BackSpace:
+		return WIDGET_PARENT;
 	default:
 		break;
 	}

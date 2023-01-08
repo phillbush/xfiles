@@ -885,6 +885,14 @@ main(int argc, char *argv[])
 				goto done;
 			}
 			break;
+		case WIDGET_PARENT:
+			if (strcmp(fm.cwd->path, "/") == 0)
+				break;
+			if (changedir(&fm, "..", FALSE) == RET_ERROR) {
+				exitval = EXIT_FAILURE;
+				goto done;
+			}
+			break;
 		case WIDGET_OPEN:
 			if (nitems < 1)
 				break;
