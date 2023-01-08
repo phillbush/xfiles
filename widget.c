@@ -2524,12 +2524,10 @@ dragmode(Widget wid, Time lasttime)
 		switch (ev.type) {
 		case ButtonPress:
 		case ButtonRelease:
-			d[1] = d[2] = d[3] = d[4] = 0;
 			if (lastwin != None) {
+				d[1] = d[2] = d[3] = d[4] = 0;
 				d[2] = ev.xbutton.time;
 				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_DROP], d);
-			} else {
-				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_LEAVE], d);
 			}
 			goto done;
 		case ClientMessage:
