@@ -1817,25 +1817,26 @@ done:
 static int
 mouse1click(Widget wid, XButtonPressedEvent *ev)
 {
-	int previtem, index;
+	int prevhili, index;
 
-	if (!(ev->state & (ControlMask | ShiftMask)) && wid->sel != NULL) {
+	index = getpointerclick(wid, ev->x, ev->y);
+	if (index > 0 && wid->issel[index] != NULL)
+		return index;
+	if (!(ev->state & (ControlMask | ShiftMask)))
 		unselectitems(wid);
-	}
-	previtem = wid->highlight;
-	if ((index = getpointerclick(wid, ev->x, ev->y)) == -1)
-		goto done;
+	if (index < 0)
+		return index;
 	/*
 	 * If index != 0, there's no need to ask highlight() to redraw the item,
 	 * as selectitem() or selectitems() will already redraw it.
 	 */
+	prevhili = wid->highlight;
 	highlight(wid, index, (index == 0));
-	if (previtem != -1 && ev->state & ShiftMask) {
-		selectitems(wid, wid->highlight, previtem);
-	} else {
+	if (prevhili != -1 && ev->state & ShiftMask)
+		selectitems(wid, wid->highlight, prevhili);
+	else
 		selectitem(wid, wid->highlight, ((ev->state & ControlMask) ? wid->issel[wid->highlight] == NULL : TRUE), FALSE);
-	}
-done:
+	ownprimary(wid, ev->time);
 	return index;
 }
 
@@ -2601,7 +2602,6 @@ mainmode(Widget wid, int *selitems, int *nitems)
 	int clickx = 0;
 	int clicky = 0;
 	int clicki = -1;
-	int index;
 	int state;
 
 	while (!XNextEvent(wid->dpy, &ev)) {
@@ -2625,7 +2625,7 @@ mainmode(Widget wid, int *selitems, int *nitems)
 			if (ev.xbutton.window != wid->win)
 				break;
 			if (ev.xbutton.button == Button1) {
-				clicki = getpointerclick(wid, ev.xbutton.x, ev.xbutton.y);
+				clicki = mouse1click(wid, &ev.xbutton);
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
 				if (scroll(wid, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
 					drawitems(wid);
@@ -2652,10 +2652,7 @@ mainmode(Widget wid, int *selitems, int *nitems)
 				return WIDGET_NEXT;
 			if (ev.xbutton.button != Button1)
 				break;
-			index = mouse1click(wid, &ev.xbutton);
-			if (index > 0)
-				ownprimary(wid, ev.xbutton.time);
-			if (index == -1 ||
+			if (clicki < 0 ||
 			    (ev.xbutton.state & (ControlMask | ShiftMask)) ||
 			    ev.xbutton.time - lasttime > DOUBLECLICK) {
 				lasttime = ev.xbutton.time;
