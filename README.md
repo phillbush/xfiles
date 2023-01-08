@@ -110,7 +110,7 @@ or you can use any set of 64x64 `.xpm` icons.
 
 ### How can I open/edit xpm icons?
 
-You can open xpm files with [feh](https://feh.finalrewind.org/), or 
+You can open xpm files with [feh](https://feh.finalrewind.org/), or
 your preferred image viewer if it supports it.
 
 [Xpm](https://en.wikipedia.org/wiki/X_PixMap) is a file format meant
@@ -154,7 +154,7 @@ Set `general.autoScroll` to True on about:config.
 
 ### Is there a context menu?
 
-Not natively, You should use a menu application like xmenu or pmenu
+Not natively.  You should use a menu application like xmenu or pmenu
 for that.
 
 
