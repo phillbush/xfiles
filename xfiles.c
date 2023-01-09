@@ -816,7 +816,7 @@ main(int argc, char *argv[])
 			}
 			break;
 		case WIDGET_PARENT:
-			if (strcmp(fm.cwd->path, "/") == 0)
+			if (fm.cwd->path[0] == '\0')    /* cwd is root */
 				break;
 			if (changedir(&fm, "..", FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
