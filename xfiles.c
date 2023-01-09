@@ -381,7 +381,7 @@ getmatchingdata(struct FM *fm, char **tab[][CONFIG_LAST], char **entry)
 			}
 			if (s == NULL)
 				continue;
-			if (p[0] == '~' && p[1] == '/') {
+			if (p[0] == '~') {
 				if (strncmp(fm->home, s, fm->homelen) != 0)
 					continue;
 				p++;
