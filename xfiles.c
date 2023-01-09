@@ -620,7 +620,7 @@ newcwd(struct FM *fm)
 }
 
 static int
-changedir(struct FM *fm, const char *path, int keepscroll)
+changedir(struct FM *fm, const char *path, int keepscroll, int force_refresh)
 {
 	Scroll *scrl;
 	struct stat sb;
@@ -632,7 +632,7 @@ changedir(struct FM *fm, const char *path, int keepscroll)
 		.here = NULL,
 	};
 
-	if (fm->last != NULL && path == fm->last->path) {
+	if (!force_refresh && fm->last != NULL && path == fm->last->path) {
 		/*
 		 * We're cd'ing to the place we are currently at; only
 		 * continue if the directory's ctime has changed
@@ -793,7 +793,7 @@ main(int argc, char *argv[])
 			if (contextcmd == NULL)
 				break;
 			runcontext(&fm, contextcmd, nitems);
-			if (changedir(&fm, fm.cwd->path, TRUE) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, TRUE, FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -810,7 +810,14 @@ main(int argc, char *argv[])
 			if (cwd == NULL)
 				break;
 			fm.cwd = cwd;
-			if (changedir(&fm, cwd->path, TRUE) == RET_ERROR) {
+			if (changedir(&fm, cwd->path, TRUE, FALSE) == RET_ERROR) {
+				exitval = EXIT_FAILURE;
+				goto done;
+			}
+			break;
+		case WIDGET_TOGGLE_HIDE:
+			hide = !hide;
+			if (changedir(&fm, fm.cwd->path, TRUE, TRUE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -818,7 +825,7 @@ main(int argc, char *argv[])
 		case WIDGET_PARENT:
 			if (fm.cwd->path[0] == '\0')    /* cwd is root */
 				break;
-			if (changedir(&fm, "..", FALSE) == RET_ERROR) {
+			if (changedir(&fm, "..", FALSE, FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -831,7 +838,7 @@ main(int argc, char *argv[])
 			if (fm.entries[fm.selitems[0]][STATE_MODE] == NULL)
 				break;
 			if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
-				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RET_ERROR) {
+				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE, FALSE) == RET_ERROR) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
