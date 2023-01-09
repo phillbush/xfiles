@@ -105,7 +105,7 @@ enum {
 	MOTION_TIME     = 32,                   /* update time rate for rectangular selection */
 
 	/* scrolling */
-	SCROLL_STEP     = 5,                    /* pixels per scroll */
+	SCROLL_STEP     = 32,                   /* pixels per scroll */
 	SCROLLER_SIZE   = 32,                   /* size of the scroller */
 	SCROLLER_MIN    = 16,                   /* min lines to scroll for the scroller to change */
 	HANDLE_MAX_SIZE = (SCROLLER_SIZE - 2),  /* max size of the scroller handle */
