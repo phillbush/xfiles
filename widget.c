@@ -2223,7 +2223,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 			n = min(wid->ncols, n);
 		} else if (ksym == XK_Left || ksym == XK_h) {
 			n = -1;
-		} else if (ksym == XK_Right || ksym == XK_l) {
+		} else {
 			n = 1;
 		}
 		if ((index = wid->highlight + n) < 0 || index >= wid->nitems)
