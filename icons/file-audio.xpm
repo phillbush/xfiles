@@ -1,5 +1,5 @@
 /* XPM */
-static char * file_music_xpm[] = {
+static char * file_audio_xpm[] = {
 "64 64 8 1",
 " 	c None",
 ".	c #BABDB6",

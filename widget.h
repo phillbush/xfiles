@@ -89,54 +89,27 @@ unsigned long widgetwinid(Widget wid);
  * widget.  This function can only be called once for each widget, after
  * the widget has been created.
  *
- * If an icon from the datas array could not be open, it writes a line
- * describing the problem to stderr and returns -1.  The caller should
- * not use the widget again and should close it immediately.
+ * If an icon from the xpms[] array could not be loaded, it writes a
+ * line describing the problem to stderr and returns -1.  The caller
+ * should not use the widget again and should close it immediately.
  *
- * If an icon from the paths array could not be open, it writes a line
- * describing the problem to stderr but returns 0.  It is not an error
- * if such an icon could not be open, and the calling function must do
- * nothing in such case (it is not notified whether an error occurred,
- * anyway); in such case, a fallback icon is used instead.
+ * If all icons could be loaded successfully, it outputs nothing and
+ * returns 0.
  *
- * If all icons could successfully, it outputs nothing and returns 0.
- *
- * The caller can then reference to an icon by giving its index on
- * setwidget().  The index for an icon in datas[] is from 0 to ndatas-1.
- * The index for an icon in paths[] is from ndatas to ndatas+npaths-1.
+ * A loaded icon can be referenced by giving its index to setwidget().
  *
  * The parameters are as follows:
  *
  * - wid:
  *   Widget previously created with initwidget().
  *
- * - datas:
+ * - xpms:
  *   Array of array of strings for the xpm files included at compile time.
  *
- * - paths:
- *   Array of strings for the paths to the xpm files included at runtime.
- *
- * - ndatas:
- *   Integer for the number of string arrays in the datas array.  We only
- *   handle up to 255 icons; so ndatas + npaths must be less than 256.
- *
- * - npaths:
- *   Integer for the number of strings in the paths array.  We only
- *   handle up to 255 icons; so ndatas + npaths must be less than 256.
+ * - nxpms:
+ *   Integer for the number of string arrays in xpms[].
  */
-int openicons(Widget wid, char **datas[], char *paths[], int ndatas, int npaths);
-
-/*
- * For each item, the caller must pass two values to setwidget(): the
- * index for the icon it should try to display, and the index for the
- * icon it should display in case the first try failed.
- *
- * Both indices are packed/unpacked into/from a single int with the
- * following macros.
- */
-#define ICON_PACK(a, b)         ((int)((((unsigned)(b)) << 8) | ((unsigned)(a))))
-#define ICON_FIRSTTRY(x)        ((int)((unsigned)(x) & 0xFFU))
-#define ICON_FALLBACK(x)        ((int)(((unsigned)(x) >> 8) & 0xFFU))
+int widopenicons(Widget wid, char **xpms[], int nxpms);
 
 /*
  * Set the current state of a widget and its current list of items.

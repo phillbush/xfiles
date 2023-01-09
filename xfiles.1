@@ -258,42 +258,10 @@ The following environment variables affect the execution of
 The display to start
 .Nm
 on.
-.It XFILES_ICONS
-Newline-separated list of icon specifications.
-Each linemust have the following format:
-.Ic "[TYPE:][GLOB1|GLOB2|...|GLOBN]=PATH"
-.Bl -bullet
-.It
-.Ic "TYPE"
-is a string of characters that must be in the file's type.
-For example, the
-TYPE
-.Qq "d"
-matches a directory,
-.Qq "dl"
-matches a link to a directory, and
-.Qq "-x"
-matches any regular executable file.
-.It
-.Ic "GLOB1"
-until
-.Ic "GLOBN"
-are bar-delimited glob strings that must match the entry being displayed by XFiles,
-for example,
-.Qq "*.png|*.jpg"
-matches files with png or jpg extension.
-.It
-.Ic "PATH"
-is the path to the icon in X Pixmap (xpm) format.
-.El
 .It Ev OPENER
 Program to be called to open files.
 Defaults to
 .Xr xdg-open 1 .
-.It Ev XFILES_THUMBNAILER
-Program to be called to generate thumbnails.
-The first argument passed to such program is the path to the existent file or directory.
-The second argument is the path to the thumbnail image to be created in the PPM format.
 .It Ev XFILES_THUMBNAILDIR
 Path to the directory where thumbnails must be saved.
 .It Ev XFILES_CONTEXTCMD

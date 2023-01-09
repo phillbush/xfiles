@@ -1,5 +1,5 @@
 PROG = xfiles
-OBJS = ${PROG:=.o} widget.o util.o
+OBJS = ${PROG:=.o} widget.o util.o config.o
 SRCS = ${OBJS:.o=.c}
 MANS = ${PROG:=.1}
 
@@ -34,12 +34,10 @@ clean:
 install: all
 	install -d ${DESTDIR}${PREFIX}/bin
 	install -d ${DESTDIR}${MANPREFIX}/man1
-	install -m 755 thumbnail ${DESTDIR}${PREFIX}/bin/thumbnail
 	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
 	install -m 644 ${MANS} ${DESTDIR}${MANPREFIX}/man1/${MANS}
 
 uninstall:
-	rm ${DESTDIR}${PREFIX}/bin/thumbnail
 	rm ${DESTDIR}${PREFIX}/bin/${PROG}
 	rm ${DESTDIR}${MANPREFIX}/man1/${MANS}
 
