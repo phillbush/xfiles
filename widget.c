@@ -2169,6 +2169,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		unselectitems(wid);
 		break;
 	case XK_Return:
+	case XK_L:
 		if (wid->highlight == -1)
 			break;
 		*nitems = fillselitems(wid, selitems, wid->highlight);
@@ -2192,6 +2193,10 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 	case XK_Down:
 	case XK_Left:
 	case XK_Right:
+	case XK_h:
+	case XK_j:
+	case XK_k:
+	case XK_l:
 		redrawall = TRUE;
 		if (ksym == XK_Home) {
 			index = 0;
@@ -2209,16 +2214,16 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 			wid->highlight = 0;
 			setrow(wid, 0);
 		}
-		if (ksym == XK_Up) {
+		if (ksym == XK_Up || ksym == XK_k) {
 			n = -wid->ncols;
-		} else if (ksym == XK_Down) {
+		} else if (ksym == XK_Down || ksym == XK_j) {
 			n = wid->highlight < (wid->nitems / wid->ncols) * wid->ncols
 			  ? wid->nitems - wid->highlight - 1
 			  : 0;
 			n = min(wid->ncols, n);
-		} else if (ksym == XK_Left) {
+		} else if (ksym == XK_Left || ksym == XK_h) {
 			n = -1;
-		} else {
+		} else if (ksym == XK_Right || ksym == XK_l) {
 			n = 1;
 		}
 		if ((index = wid->highlight + n) < 0 || index >= wid->nitems)
@@ -2258,6 +2263,7 @@ draw:
 	case XK_F5:
 		return WIDGET_REFRESH;
 	case XK_BackSpace:
+	case XK_H:
 		return WIDGET_PARENT;
 	default:
 		break;
