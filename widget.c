@@ -2259,6 +2259,8 @@ draw:
 		return WIDGET_REFRESH;
 	case XK_BackSpace:
 		return WIDGET_PARENT;
+	case XK_period:
+		return WIDGET_TOGGLE_HIDE;
 	default:
 		break;
 	}
