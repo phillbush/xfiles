@@ -372,7 +372,7 @@ getmatchingdata(struct FM *fm, char **tab[][CONFIG_LAST], char **entry)
 			return i;
 		for (j = 1; patts[j] != NULL; j++) {
 			p = patts[j];
-			if (strchr(p, '/') != NULL) {
+			if (p[0] == '~' || strchr(p, '/') != NULL) {
 				flags = FNM_PATHNAME;
 				s = entry[STATE_PATH];
 			} else {
