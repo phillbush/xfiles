@@ -161,6 +161,7 @@ enum {
 	UTF8_STRING,
 	COMPOUND_TEXT,
 	DELETE,
+	INCR,
 	MULTIPLE,
 	TARGETS,
 	TEXT,
@@ -170,6 +171,7 @@ enum {
 	ATOM_PAIR,
 
 	/* window protocols */
+	WM_PROTOCOLS,
 	WM_DELETE_WINDOW,
 
 	/* window properties */
@@ -218,6 +220,8 @@ struct Widget {
 	Visual *visual;
 	Colormap colormap;
 	int depth;
+	Atom dropaction;
+	Window dropsrc;
 
 	Pixmap pix;                     /* the pixmap of the window */
 	Pixmap namepix;                 /* temporary pixmap for the labels */
@@ -381,8 +385,10 @@ static char *atomnames[ATOM_LAST] = {
 	[ATOM_PAIR]                  = "ATOM_PAIR",
 	[COMPOUND_TEXT]              = "COMPOUND_TEXT",
 	[UTF8_STRING]                = "UTF8_STRING",
+	[WM_PROTOCOLS]               = "WM_PROTOCOLS",
 	[WM_DELETE_WINDOW]           = "WM_DELETE_WINDOW",
 	[DELETE]                     = "DELETE",
+	[INCR]                       = "INCR",
 	[MULTIPLE]                   = "MULTIPLE",
 	[TARGETS]                    = "TARGETS",
 	[TEXT]                       = "TEXT",
@@ -1778,6 +1784,14 @@ endevent(Widget wid)
 	}
 }
 
+static Bool
+translatetoroot(Widget wid, int *x, int *y)
+{
+	Window win;
+
+	return XTranslateCoordinates(wid->dpy, wid->win, ROOT(wid->dpy), 0, 0, x, y, &win);
+}
+
 static int
 querypointer(Widget wid, Window win, int *retx, int *rety, Window *retwin)
 {
@@ -2064,6 +2078,85 @@ xinitvisual(Widget wid)
 	}
 }
 
+static void
+finishdrop(Widget wid)
+{
+	long d[NCLIENTMSG_DATA];
+
+	d[0] = wid->win;
+	d[1] = d[2] = d[3] = d[4] = 0;
+	if (wid->dropsrc == None)
+		return;
+	clientmsg(wid->dpy, wid->dropsrc, wid->atoms[XDND_FINISHED], d);
+	wid->dropaction = None;
+	wid->dropsrc = None;
+}
+
+static void
+tryconvertsel(Widget wid, XSelectionEvent *xev)
+{
+	Atom sel;
+
+	if (xev->target == wid->atoms[TEXT_URI_LIST])
+		sel = wid->atoms[UTF8_STRING];
+	else if (xev->target == wid->atoms[UTF8_STRING])
+		sel = wid->atoms[TEXT_PLAIN];
+	else if (xev->target == wid->atoms[TEXT_PLAIN])
+		sel = wid->atoms[TEXT];
+	else if (xev->target == wid->atoms[TEXT])
+		sel = wid->atoms[XA_STRING];
+	else
+		return;         /* give up */
+	XConvertSelection(
+		wid->dpy,
+		wid->atoms[XDND_SELECTION],
+		sel, sel,
+		wid->win,
+		xev->time
+	);
+}
+
+static char *
+getdroptext(Widget wid, Atom prop)
+{
+	char *text;
+	unsigned char *p;
+	unsigned long len;
+	unsigned long dl;               /* dummy variable */
+	int format, status;
+	Atom type;
+
+	text = NULL;
+	status = XGetWindowProperty(
+		wid->dpy,
+		wid->win,
+		prop,
+		0L,
+		0x1FFFFFFF,
+		True,
+		AnyPropertyType,
+		&type, &format,
+		&len, &dl,
+		&p
+	);
+	if (status != Success || len == 0 || p == NULL) {
+		goto done;
+	}
+	if (type == wid->atoms[INCR]) {
+		/* we do not do incremental transfer */
+		goto done;
+	}
+	if ((text = emalloc(len + 1)) == NULL) {
+		goto done;
+	}
+	memcpy(text, p, len);
+	text[len] = '\0';
+done:
+	XFree(p);
+	finishdrop(wid);
+	return text;
+}
+
 /*
  * The following routines check an event, and process then if needed.
  * They return WIDGET_NONE if the event is not processed.
@@ -2207,12 +2300,59 @@ draw:
 static WidgetEvent
 processevent(Widget wid, XEvent *ev)
 {
+	long d[NCLIENTMSG_DATA];
+	int x, y;
+
 	wid->redraw = FALSE;
 	switch (ev->type) {
 	case ClientMessage:
-		if ((Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
+		if (ev->xclient.message_type == wid->atoms[WM_PROTOCOLS] &&
+		    (Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW]) {
 			return WIDGET_CLOSE;
-		return WIDGET_NONE;
+		} else if (ev->xclient.message_type == wid->atoms[XDND_ENTER]) {
+			wid->dropsrc = (Window)ev->xclient.data.l[0];
+			wid->dropaction = None;
+		} else if (ev->xclient.message_type == wid->atoms[XDND_LEAVE] &&
+		           (Window)ev->xclient.data.l[0] != None &&
+		           (Window)ev->xclient.data.l[0] == wid->dropsrc) {
+			wid->dropaction = None;
+			wid->dropsrc = None;
+		} else if (ev->xclient.message_type == wid->atoms[XDND_DROP] &&
+		           (Window)ev->xclient.data.l[0] != None &&
+		           (Window)ev->xclient.data.l[0] == wid->dropsrc) {
+			XConvertSelection(
+				wid->dpy,
+				wid->atoms[XDND_SELECTION],
+				wid->atoms[TEXT_URI_LIST],
+				wid->atoms[TEXT_URI_LIST],
+				wid->win,
+				(Time)ev->xclient.data.l[2]
+			);
+		} else if (ev->xclient.message_type == wid->atoms[XDND_POSITION] &&
+		           (Window)ev->xclient.data.l[0] != None &&
+		           (Window)ev->xclient.data.l[0] == wid->dropsrc) {
+			d[0] = wid->win;
+			d[1] = 0x1;
+			if (translatetoroot(wid, &x, &y)) {
+				d[2] = (x << 16) | (y & 0xFFFF);
+				d[3] = (wid->w << 16) | (wid->h & 0xFFFF);
+			} else {
+				d[2] = d[3] = 0;
+			}
+			if ((Atom)ev->xclient.data.l[4] == wid->atoms[XDND_ACTION_COPY] ||
+			    (Atom)ev->xclient.data.l[4] == wid->atoms[XDND_ACTION_MOVE] ||
+			    (Atom)ev->xclient.data.l[4] == wid->atoms[XDND_ACTION_LINK] ||
+			    (Atom)ev->xclient.data.l[4] == wid->atoms[XDND_ACTION_ASK]) {
+				wid->dropaction = (Atom)ev->xclient.data.l[4];
+			} else {
+				wid->dropaction = wid->atoms[XDND_ACTION_ASK];
+			}
+			d[4] = wid->dropaction;
+			clientmsg(wid->dpy, (Window)ev->xclient.data.l[0], wid->atoms[XDND_STATUS], d);
+		} else {
+			return WIDGET_NONE;
+		}
+		break;
 	case Expose:
 		if (ev->xexpose.count == 0)
 			commitdraw(wid);
@@ -2393,15 +2533,17 @@ done:
 }
 
 static WidgetEvent
-dragmode(Widget wid, Time lasttime, int clicki)
+dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 {
 	XEvent ev;
 	Window lastwin, win, dragwin;
 	Atom version;
+	WidgetEvent retval;
 	int sendposition;
 	int accept, inside, x, y, w, h;
 	long d[NCLIENTMSG_DATA];
 
+	retval = WIDGET_NONE;
 	lastwin = None;
 	dragwin = None;
 	wid->state = STATE_SELECTING;
@@ -2425,7 +2567,21 @@ dragmode(Widget wid, Time lasttime, int clicki)
 		switch (ev.type) {
 		case ButtonPress:
 		case ButtonRelease:
-			if (lastwin != None) {
+			if (lastwin == wid->win) {
+				clicki = getpointerclick(wid, ev.xbutton.x, ev.xbutton.y);
+				if (clicki < 1)
+					goto done;
+				*nitems = fillselitems(wid, selitems, clicki);
+				if (FLAG(ev.xbutton.state, ControlMask|ShiftMask))
+					retval = WIDGET_DROPLINK;
+				if (FLAG(ev.xbutton.state, ShiftMask))
+					retval = WIDGET_DROPMOVE;
+				if (FLAG(ev.xbutton.state, ControlMask))
+					retval = WIDGET_DROPCOPY;
+				else
+					retval = WIDGET_DROPASK;
+				finishdrop(wid);
+			} else if (lastwin != None) {
 				d[1] = d[2] = d[3] = d[4] = 0;
 				d[2] = ev.xbutton.time;
 				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_DROP], d);
@@ -2494,17 +2650,18 @@ done:
 		XDestroyWindow(wid->dpy, dragwin);
 	widgetcursor(wid, CURSOR_NORMAL);
 	wid->state = STATE_NORMAL;
-	return WIDGET_NONE;
+	return retval;
 }
 
 static WidgetEvent
-mainmode(Widget wid, int *selitems, int *nitems)
+mainmode(Widget wid, int *selitems, int *nitems, char **text)
 {
 	XEvent ev;
 	Time lasttime = 0;
 	int clickx = 0;
 	int clicky = 0;
 	int clicki = -1;
+	int x, y;
 	int state;
 
 	while (!XNextEvent(wid->dpy, &ev)) {
@@ -2575,10 +2732,30 @@ mainmode(Widget wid, int *selitems, int *nitems)
 			if (clicki == -1) {
 				state = selmode(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
 			} else if (clicki > 0) {
-				state = dragmode(wid, ev.xmotion.time, clicki);
+				state = dragmode(wid, ev.xmotion.time, clicki, selitems, nitems);
 			}
 			if (state != WIDGET_NONE)
 				return state;
+			break;
+		case SelectionNotify:
+			if (wid->dropsrc == None)
+				break;
+			if (ev.xselection.property == None) {
+				tryconvertsel(wid, &ev.xselection);
+				break;
+			}
+			if ((*text = getdroptext(wid, ev.xselection.property)) != NULL) {
+				querypointer(wid, wid->win, &x, &y, NULL);
+				*nitems = 1;
+				selitems[0] = getpointerclick(wid, x, y);
+				if (wid->dropaction == wid->atoms[XDND_ACTION_COPY])
+					return WIDGET_DROPCOPY;
+				if (wid->dropaction == wid->atoms[XDND_ACTION_MOVE])
+					return WIDGET_DROPMOVE;
+				if (wid->dropaction == wid->atoms[XDND_ACTION_LINK])
+					return WIDGET_DROPLINK;
+				return WIDGET_DROPASK;
+			}
 			break;
 		}
 		endevent(wid);
@@ -2628,6 +2805,8 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.nlines = NULL,
 		.icons = NULL,
 		.highlight = -1,
+		.dropaction = None,
+		.dropsrc = None,
 		.title = "",
 		.class = class,
 		.sel = NULL,
@@ -2808,11 +2987,13 @@ mapwidget(Widget wid)
 }
 
 WidgetEvent
-pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl)
+pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl, char **text)
 {
 	XEvent ev;
 	int retval;
 
+	*text = NULL;
+	finishdrop(wid);
 	while (wid->start && XPending(wid->dpy) > 0) {
 		(void)XNextEvent(wid->dpy, &ev);
 		if (processevent(wid, &ev) == WIDGET_CLOSE) {
@@ -2821,7 +3002,7 @@ pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl)
 		}
 	}
 	wid->start = TRUE;
-	retval = mainmode(wid, selitems, nitems);
+	retval = mainmode(wid, selitems, nitems, text);
 	endevent(wid);
 	scrl->ydiff = wid->ydiff;
 	scrl->row = wid->row;
@@ -2833,6 +3014,7 @@ closewidget(Widget wid)
 {
 	int i, j;
 
+	finishdrop(wid);
 	cleanwidget(wid);
 	for (i = 0; i < wid->nicons; i++) {
 		if (wid->icons[i].pix != None) {

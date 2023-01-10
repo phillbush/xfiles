@@ -2,19 +2,37 @@
 .Dt XFILES 1
 .Os
 .Sh NAME
-.Nm xfiles
+.Nm xfiles ,
+.Nm xfilesctl
 .Nd X11 file manager
 .Sh SYNOPSIS
-.Nm prog
+.Nm xfiles
 .Op Fl a
-.Op Fl c Ar cmd
 .Op Fl g Ar geometry
 .Op Fl n Ar name
 .Op Ar directory
+.Pp
+.Nm xfilesctl
+.Cm menu
+.Nm xfilesctl
+.Cm menu
+.Ar file ...
+.Nm xfilesctl
+.Cm drop-ask
+.Ar file ...
+.Nm xfilesctl
+.Cm drop-copy
+.Ar file ...
+.Nm xfilesctl
+.Cm drop-move
+.Ar file ...
+.Nm xfilesctl
+.Cm drop-link
+.Ar file ...
 .Sh DESCRIPTION
-.Nm
+.Nm xfiles
 is a file manager for X11.
-.Nm
+.Nm xfiles
 uses other programs to perform several tasks,
 such as open a file, generate thumbnails, or run arbitrary commands.
 .Pp
@@ -22,20 +40,6 @@ The options are as follows:
 .Bl -tag -width Ds
 .It Fl a
 Include directory entries whose name begin with a dot.
-.It Fl c Ar cmd
-Set the context command to
-.Ar cmd
-The context command is the command to be run when the user clicks the third mouse button.
-Usually, this command is a program that pops up a menu when the user right-clicks
-.Nm .
-The paths to selected files are passed as arguments to this command.
-The command is run in the directory currently open at
-.Nm .
-If this option is not given,
-.Nm
-uses the value of the
-.Ev "XFILES_CONTEXTCMD"
-environment variable as the context command.
 .It Fl g Ar geometry
 Set window size and position as specified in
 .Xr XParseGeometry 3 .
@@ -49,7 +53,7 @@ property.
 is used to retrieve resources.
 If not specified, defaults to
 the name of the command
-.Nm
+.Nm xfiles
 was invoked as (that is, the
 .Xr basename 3
 of its
@@ -59,22 +63,113 @@ of its
 If no
 .Ar directory
 is given as argument,
-.Nm
+.Nm xfiles
 opens at the current directory.
 Otherwise, it opens at the given directory.
+.Pp
+.Nm xfilesctl
+is a script called by
+.Nm xfiles
+to operate on files.
+.Nm xfilesctl
+should not be called manually.
+.Nm xfilesctl
+It gets a
+.Ar command
+as argument indicating the kind of interaction to perform with the user.
+Posible interactions are invoking a menu (such as
+.Xr xmenu 1
+or
+.Xr pmenu 1 )
+or popping up a terminal dialog.
+.Pp
+The first form
+(with the
+.Cm menu
+command and no argument)
+is invoked at right-clicking a directory when no file is selected.
+It pops up a menu for the user to chose what to do on snarfed files.
+The options are:
+.Bl -tag -compact
+.It Cm move
+Move snarfed files to current directory.
+.It Cm copy
+Copy snarfed files to current directory.
+.It Cm link
+Link snarfed files into current directory.
+.It Cm none
+Do nothing.
+.El
+.Pp
+The second form
+(with the
+.Cm menu
+command and at least one argument)
+is invoked at right-clicking a selected file.
+It pops up a menu for the user to chose what to do on the selected files.
+The options are:
+.Bl -tag -compact
+.It Cm rename
+Open the editor for renaming the files.
+.It Cm snarf
+Snarf the files into clipboard.
+.It Cm trash
+Send files to trash.
+.It Cm none
+(do nothing).
+.El
+.Pp
+The third form
+(with the
+.Cm drop-ask
+command)
+is invoked at dropping a file into the window.
+It pops up a menu for the user to chose what to do on dropped files.
+The options are:
+.Bl -tag -compact
+.It Cm move
+Move dropped files to current directory.
+.It Cm copy
+Copy dropped files to current directory.
+.It Cm link
+Link dropped files into current directory.
+.It Cm none
+Do nothing.
+.El
+.Pp
+The fourth form
+(with the
+.Cm drop-copy
+command)
+is invoked at dropping a file while the Control modifier is pressed.
+It pops up a terminal asking whether to copy the dropped files into current directory.
+.Pp
+The fifth form
+(with the
+.Cm drop-move
+command)
+is invoked at dropping a file while the Shift modifier is pressed.
+It pops up a terminal asking whether to move the dropped files into current directory.
+.Pp
+The sixth form
+(with the
+.Cm drop-link
+command)
+is invoked at dropping a file while the Shift and Control modifiers are pressed.
+It pops up a terminal asking whether to link the dropped files into current directory.
 .Sh USAGE
-.Nm
+.Nm xfiles
 is controlled mainly with the mouse,
 but some actions can also be performed with the keyboard.
 .Pp
-.Nm
+.Nm xfiles
 has four modes of operation, activated via mouse.
 In each mode, some mouse or keyboard actions are allowed while others are not.
 The modes of operation are as follows.
 .Bl -tag -width Ds
 .It Normal Mode
 This is the mode which
-.Nm
+.Nm xfiles
 starts in.
 All actions, except rectangular selection and scroller manipulation,
 can be performed while in this mode.
@@ -91,15 +186,21 @@ No action other than scrolling can be performed while in this mode.
 To exit this mode, press the second mouse button
 (or release it, if the pointer had not been released nor moved outside the scroller).
 .It Context Mode
-This mode is entered after pressing the third mouse button or the Menu key.
+This mode is entered after
+.Nm xfilesctl
+is called (such as after pressing the third mouse button or the Menu key).
 In this mode,
-.Nm
-is waiting for the context command to exit.
+.Nm xfiles
+is waiting for
+.Nm xfilesctl
+to exit.
 No action can be performed while in this mode.
-To exit this mode, the context command must return.
+To exit this mode,
+.Nm xfilesctl
+must return.
 .El
 .Ss Mouse
-.Nm
+.Nm xfiles
 The first mouse button (usually the left one) is used for selection and opening.
 Selecting one or more files copies their paths into the PRIMARY X selection.
 Opening a single file invokes the command specified by the
@@ -114,7 +215,7 @@ and the environment variable
 containing the window id of
 .Nm ,
 is visible to its process.
-.Bl -bullet
+.Bl -bullet -width 2
 .It
 A single click with no modifier on a file's icon selects it (deselecting any other file).
 .It
@@ -139,7 +240,7 @@ Some of them pop up the scroller.
 The scroller is a small widget that replaces the scrollbar in
 .Nm ;
 it can be used either as a scrollbar or as Firefox's autoScroll.
-.Bl -bullet
+.Bl -bullet -width 2
 .It
 A press on the second button pops up the scroller.
 Moving the pointer up or down scrolls the list of files up or down.
@@ -156,40 +257,32 @@ Holding the fourth button scrolls the list of files up.
 Holding the fifth button scrolls the list of files down.
 .El
 .Pp
-The third button (usually the right one) is used for context command invocation.
-The context command is a program specified either with the
-.Fl c
-command-line option or the
-.Ev "XFILES_CONTEXTCMD"
-environment variable.
-This program is invoked after pressing the third mouse button.
-It is invoked in the directory currently open at
-.Nm ;
-and the environment variable
-.Ev "WINDOWID" ,
-containing the window id of
-.Nm ,
-is visible to its process.
+The third button (usually the right one) is used to pop up a menu with
+.Nm xfilesctl .
 No modifier applies to that button.
-.Bl -bullet
+.Bl -bullet -width 2
 .It
-Pressing the third button while there are one or more files selected
-invokes the context command with the paths of all the selected files passed as arguments.
+Pressing the third button while there are one or more files selected invokes
+.Nm xfilesctl
+on its second form, with the paths of all the selected files passed as arguments.
 .It
 Pressing the third button on a file's icon while there's no file selected
-selects that file and invokes the context command with its path passed as argument.
+selects that file and invokes
+.Nm xfilesctl
+with its path passed as argument.
 .It
-Pressing the third button on nothing while there's no file selected
-invokes the context command with no argument.
+Pressing the third button on nothing while there's no file selected invokes
+.Nm xfilesctl
+with no argument.
 .El
 .Pp
 The sixth and seventh mouse buttons (scroll left and scroll right) are not used, since
-.Nm
+.Nm xfiles
 does not scroll horizontally.
 .Pp
 The eighth and ninth mouse buttons (previous and next) are used for navigating
 through the browsing history.
-.Bl -bullet
+.Bl -bullet -width 2
 .It
 Clicking the eigth mouse button goes to the previously open directory.
 .It
@@ -204,7 +297,11 @@ Deselect everything.
 .It Enter/Return or Shift+l
 Select and open highlighted file.
 .It Menu
-Invoke context command on selected files.
+Invoke
+.Nm xfilesctl
+with the
+.Cm menu
+command on selected files.
 .It Space
 Select highlighted file.
 .It PageUp
@@ -258,7 +355,7 @@ The following environment variables affect the execution of
 .Bl -tag -width Ds
 .It Ev DISPLAY
 The display to start
-.Nm
+.Nm xfiles
 on.
 .It Ev OPENER
 Program to be called to open files.
@@ -266,20 +363,16 @@ Defaults to
 .Xr xdg-open 1 .
 .It Ev XFILES_THUMBNAILDIR
 Path to the directory where thumbnails must be saved.
-.It Ev XFILES_CONTEXTCMD
-Name of the command to be run on right clicking when the
-.Fl -c
-option is not given.
 .El
 .Pp
 The following environment variables are set by
-.Nm
+.Nm xfiles
 and can affect the execution of the commands run by it.
 .Bl -tag -width Ds
 .It Ev "WINDOWID"
 A string containing the id number, in decimal ASCII characters,
 of the X Window created by the current
-.Nm
+.Nm xfiles
 process.
 Note that this string contains the number in decimal notation,
 not in hexadecimal (as is usually exchanged by a few X applications).

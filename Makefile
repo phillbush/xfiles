@@ -2,6 +2,7 @@ PROG = xfiles
 OBJS = ${PROG:=.o} widget.o util.o config.o
 SRCS = ${OBJS:.o=.c}
 MANS = ${PROG:=.1}
+SCRIPT = xfilesctl
 
 PREFIX ?= /usr/local
 MANPREFIX ?= ${PREFIX}/share/man
@@ -34,10 +35,12 @@ clean:
 install: all
 	install -d ${DESTDIR}${PREFIX}/bin
 	install -d ${DESTDIR}${MANPREFIX}/man1
+	install -m 755 ${SCRIPT} ${DESTDIR}${PREFIX}/bin/${SCRIPT}
 	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
 	install -m 644 ${MANS} ${DESTDIR}${MANPREFIX}/man1/${MANS}
 
 uninstall:
+	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT}
 	rm ${DESTDIR}${PREFIX}/bin/${PROG}
 	rm ${DESTDIR}${MANPREFIX}/man1/${MANS}
 

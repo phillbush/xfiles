@@ -1,0 +1,130 @@
+#!/bin/sh
+
+MENUCMD="${MENUCMD:-"xmenu"}"
+TERMCMD="${TERMCMD:-"xterm"}"
+
+term() {
+	"$TERMCMD" -e "$@"
+}
+
+dialog() {
+	term /bin/sh -c '
+		printf "\t%s\n" "$@"
+		printf "'"$msg"'? [y/N] "
+		read arg
+		case "$arg" in
+		([Yy]*)
+			'"$cmd"' "$@" .
+			;;
+		esac
+	' xfilesctl "$@"
+}
+
+drop() {
+	cmd="$1"
+	shift 1
+	dialog "$@"
+}
+
+paste() {
+	cmd="$1"
+	shift 1
+	{
+		xsel -ob
+		echo
+	} | {
+		set --
+		while read f
+		do
+			case "$f" in
+			("")
+				;;
+			(*)
+				set -- "$@" "$f"
+				;;
+			esac
+		done
+		dialog "$@"
+	}
+}
+
+dirmenu() {
+	cmd="$1"
+	shift 1
+	case "$(
+	"$MENUCMD" <<-EOF
+		copy
+		move
+		link
+		none
+	EOF
+	)" in
+	("copy")
+		msg="copy"
+		"$cmd" cp "$@"
+		;;
+	("move")
+		msg="move"
+		"$cmd" mv "$@"
+		;;
+	("link")
+		msg="link"
+		"$cmd" "ln -s" "$@"
+	esac
+}
+
+filemenu() {
+	case "$(
+	"$MENUCMD" <<-EOF
+		rename
+		snarf
+		trash
+		edit
+	EOF
+	)" in
+	("rename")
+		term bulkrename "$@"
+		;;
+	("snarf")
+		xsel -op | xsel -ib &
+		;;
+	("trash")
+		trash "$@"
+		;;
+	("edit")
+		plumb -e -- "$1"
+		;;
+	esac
+}
+
+cmd="$1"
+shift 1
+case "$cmd" in
+("menu")
+	case "$#" in
+	(0)
+		dirmenu paste "$@"
+		;;
+	(*)
+		filemenu "$@"
+		;;
+	esac
+	;;
+("drop-ask")
+	dirmenu drop "$@"
+	;;
+("drop-copy")
+	msg="copy"
+	drop cp "$@"
+	;;
+("drop-move")
+	msg="move"
+	drop mv "$@"
+	;;
+("drop-link")
+	msg="link"
+	drop "ln -s" "$@"
+	;;
+esac
+
+exit

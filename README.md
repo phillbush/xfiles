@@ -13,7 +13,6 @@ XFiles depends on a few environment variables to be usable:
 
 * `OPENER`: Program to be called to open files.  Defaults to `xdg-open`.
 * `XFILES_THUMBNAILDIR`: Path to directory where thumbnails must be cached.
-* `XFILES_CONTEXTCMD`: Program to be called when right clicking.
 
 XFiles can be customized by setting the following X resources:
 
@@ -22,6 +21,27 @@ XFiles can be customized by setting the following X resources:
 * `XFiles.foreground`:    Text color.
 * `XFiles.selbackground`: Background color for selected entries.
 * `XFiles.selforeground`: Text color for selected entries.
+
+**WARNING!**
+
+XFiles now uses a shell script for additional operation on files.
+
+Previously, there was this optional `XFILES_CONTEXTCMD` environment
+variable that was called to pop up a menu when right-clicking.
+
+With the addition of drag-and-drop, it became necessary to use the
+script for moving/copying the dropped files as well.
+
+XFiles now uses a script called `xfilesctl` (for XFiles Controller) that
+handles both menu and file dropping.  An example script is provided, but
+it relies on a few programs from [fmutils], a collection of small
+scripts for file management.
+
+[fmutils]: https://github.com/phillbush/fmutils
+
+I highly recommend you to read this script and change it to fit your
+needs.
+
 
 ## Opening
 
@@ -50,16 +70,6 @@ recompiling XFiles.
 For thumbnails to work, the environment variable `XFILES_THUMBNAILDIR`
 must be set to the path of an existing writeable and readable directory
 where thumbnails will be cached.
-
-
-## Context menu
-
-The context command is called with the paths to the selected files as
-arguments.  If not specified with the `XFILES_CONTEXTCMD` environment
-variable, nothing is used.  I recommend you to use [xmenu] or [pmenu].
-
-[xmenu]: https://github.com/phillbush/xmenu
-[pmenu]: https://github.com/phillbush/pmenu
 
 
 ## Questions

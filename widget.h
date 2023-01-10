@@ -14,6 +14,10 @@ typedef enum {
 	WIDGET_REFRESH,
 	WIDGET_PARENT,
 	WIDGET_TOGGLE_HIDE,
+	WIDGET_DROPASK,
+	WIDGET_DROPCOPY,
+	WIDGET_DROPMOVE,
+	WIDGET_DROPLINK,
 	WIDGET_ERROR,
 } WidgetEvent;
 
@@ -232,8 +236,14 @@ void mapwidget(Widget wid);
  *
  * - scrl
  *   Pointer to a scroll state to fill with last scroll information.
+ *
+ * - sel
+ *   Pointer to string. When files are dropped into the window, *sel is
+ *   set to a string containing the dropped contents.  The content is a
+ *   sequence of "file://PATH\r\n" strings.  The string must be freed by
+ *   the caller.
  */
-WidgetEvent pollwidget(Widget wid, int *selitems, int *nselitems, Scroll *scrl);
+WidgetEvent pollwidget(Widget wid, int *selitems, int *nselitems, Scroll *scrl, char **sel);
 
 /*
  * Set the thumbnail (aka miniature) of a given item.

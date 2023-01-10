@@ -14,13 +14,22 @@
 #include "util.h"
 #include "widget.h"
 
+/* actions for the controller command */
+#define DROPCOPY         "drop-copy"
+#define DROPMOVE         "drop-move"
+#define DROPLINK         "drop-link"
+#define DROPASK          "drop-ask"
+#define MENU             "menu"
+
 #define APPCLASS         "XFiles"
 #define WINDOWID         "WINDOWID"
+#define URI_PREFIX       "file://"
+#define INCRSIZE         512
 #define NCMDARGS         3
 #define WINDOWID_BUFSIZE 16
 #define DEF_OPENER       "xdg-open"
 #define THUMBNAILDIR     "XFILES_THUMBNAILDIR"
-#define CONTEXTCMD       "XFILES_CONTEXTCMD"
+#define CONTEXTCMD       "xfilesctl"
 #define DEV_NULL         "/dev/null"
 #define UNIT_LAST        7
 #define SIZE_BUFSIZE     6       /* 4 digits + suffix char + nul */
@@ -538,15 +547,16 @@ initthumbnailer(struct FM *fm)
 }
 
 static void
-forkexec(char *const argv[], int doublefork)
+forkexec(char *const argv[], char *path, int doublefork)
 {
 	pid_t pid1, pid2;
 	int fd;
 
 	if ((pid1 = efork()) == 0) {
 		if (!doublefork || (pid2 = efork()) == 0) {
+			if (path != NULL && wchdir(path) == RET_ERROR)
+				exit(EXIT_FAILURE);
 			fd = open(DEV_NULL, O_RDWR);
-			(void)dup2(fd, STDOUT_FILENO);
 			(void)dup2(fd, STDIN_FILENO);
 			if (fd > 2)
 				(void)close(fd);
@@ -569,6 +579,7 @@ fileopen(struct FM *fm, char *path)
 			path,
 			NULL,
 		},
+		NULL,
 		TRUE
 	);
 }
@@ -579,12 +590,96 @@ runcontext(struct FM *fm, char *contextcmd, int nselitems)
 	int i;
 	char **argv;
 
-	argv = emalloc((nselitems + 2) * sizeof(*argv));
+	i = 0;
+	argv = emalloc((nselitems + 3) * sizeof(*argv));
 	argv[0] = contextcmd;
+	argv[1] = MENU;
 	for (i = 0; i < nselitems; i++)
-		argv[i+1] = fm->entries[fm->selitems[i]][STATE_NAME];
-	argv[i+1] = NULL;
-	forkexec(argv, FALSE);
+		argv[i+2] = fm->entries[fm->selitems[i]][STATE_NAME];
+	argv[i+2] = NULL;
+	forkexec(argv, NULL, FALSE);
+	free(argv);
+}
+
+static void
+runindrop(struct FM *fm, char *contextcmd, WidgetEvent event, int nitems)
+{
+	int i;
+	char **argv;
+	char *path;
+
+	/*
+	 * Drag-and-drop in the same window.
+	 *
+	 * fm->selitems[0] is the path where the files have been dropped
+	 * into.  The other items are the files being dropped.
+	 */
+	path = fm->entries[fm->selitems[0]][STATE_PATH];
+	if ((argv = malloc((nitems + 2) * sizeof(*argv))) == NULL)
+		return;
+	argv[0] = contextcmd;
+	switch (event) {
+	case WIDGET_DROPCOPY: argv[1] = DROPCOPY; break;
+	case WIDGET_DROPMOVE: argv[1] = DROPMOVE; break;
+	case WIDGET_DROPLINK: argv[1] = DROPLINK; break;
+	default:              argv[1] = DROPASK;  break;
+	}
+	for (i = 1; i < nitems; i++)
+		argv[i + 1] = fm->entries[fm->selitems[i]][STATE_PATH];
+	argv[nitems + 1] = NULL;
+	forkexec(argv, path, FALSE);
+}
+
+static void
+runexdrop(char *contextcmd, WidgetEvent event, char *text, char *path)
+{
+	size_t capacity, argc, i, j, k;
+	char **argv, **p;
+
+	/*
+	 * Drag-and-drop between different windows.
+	 *
+	 * We get text containing a sequence of URIs.  Each URI has the
+	 * format "file:///path/to/file" and ends in "\r\n".  We need to
+	 * remove the paths from the URIs and fill them into argv.
+	 */
+	argc = 0;
+	capacity = INCRSIZE;
+	if ((argv = malloc(capacity * sizeof(*argv))) == NULL)
+		return;
+	argv[argc++] = contextcmd;
+	switch (event) {
+	case WIDGET_DROPCOPY: argv[argc++] = DROPCOPY; break;
+	case WIDGET_DROPMOVE: argv[argc++] = DROPMOVE; break;
+	case WIDGET_DROPLINK: argv[argc++] = DROPLINK; break;
+	default:              argv[argc++] = DROPASK;  break;
+	}
+	for (i = 0; text[i] != '\0'; i++) {
+		if (strncmp(text + i, URI_PREFIX, sizeof(URI_PREFIX) - 1) == 0)
+			i += sizeof(URI_PREFIX) - 1;
+		j = i;
+		while (text[j] != '\0' && text[j] != '\n')
+			j++;
+		if (j > i && text[j-1] == '\r')
+			k = j - 1;
+		else
+			k = j;
+		text[k] = '\0';
+		if (argc + 1> capacity) {
+			capacity += INCRSIZE;
+			p = realloc(argv, capacity * sizeof(*argv));
+			if (p == NULL) {
+				free(argv);
+				return;
+			}
+			argv = p;
+		}
+		argv[argc++] = text + i;
+		printf("%s\n", argv[argc-1]);
+		i = j;
+	}
+	argv[argc++] = NULL;
+	forkexec(argv, path, FALSE);
 	free(argv);
 }
 
@@ -697,7 +792,7 @@ main(int argc, char *argv[])
 {
 	struct FM fm;
 	struct Cwd *cwd;
-	int ch, nitems, state;
+	int ch, nitems;
 	int saveargc;
 	int exitval = EXIT_SUCCESS;
 	char *geom = NULL;
@@ -707,10 +802,12 @@ main(int argc, char *argv[])
 	char *contextcmd = NULL;
 	char **saveargv;
 	char winid[WINDOWID_BUFSIZE];
+	char *text;
+	WidgetEvent event;
 
 	saveargv = argv;
 	saveargc = argc;
-	contextcmd = getenv(CONTEXTCMD);
+	contextcmd = CONTEXTCMD;
 	home = getenv("HOME");
 	fm = (struct FM){
 		.capacity = 0,
@@ -783,8 +880,8 @@ main(int argc, char *argv[])
 		goto error;
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
-	while ((state = pollwidget(fm.wid, fm.selitems, &nitems, &fm.cwd->state)) != WIDGET_CLOSE) {
-		switch (state) {
+	while ((event = pollwidget(fm.wid, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
+		switch (event) {
 		case WIDGET_ERROR:
 			exitval = EXIT_FAILURE;
 			goto done;
@@ -801,9 +898,9 @@ main(int argc, char *argv[])
 		case WIDGET_PREV:
 		case WIDGET_NEXT:
 		case WIDGET_REFRESH:
-			if (state == WIDGET_PREV)
+			if (event == WIDGET_PREV)
 				cwd = fm.cwd->prev;
-			else if (state == WIDGET_NEXT)
+			else if (event == WIDGET_NEXT)
 				cwd = fm.cwd->next;
 			else
 				cwd = fm.cwd;
@@ -845,6 +942,27 @@ main(int argc, char *argv[])
 			} else if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'f') {
 				fileopen(&fm, fm.entries[fm.selitems[0]][STATE_PATH]);
 			}
+			break;
+		case WIDGET_DROPASK:
+		case WIDGET_DROPCOPY:
+		case WIDGET_DROPMOVE:
+		case WIDGET_DROPLINK:
+			if (contextcmd == NULL)
+				break;
+			if (text != NULL) {
+				/* drag-and-drop between different windows */
+				if (nitems > 0 && (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries))
+					path = NULL;
+				else
+					path = fm.entries[fm.selitems[0]][STATE_PATH];
+				runexdrop(contextcmd, event, text, path);
+				free(text);
+			} else if (nitems > 1 && fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
+				/* drag-and-drop in the same window */
+				runindrop(&fm, contextcmd, event, nitems);
+			}
+			break;
+		default:
 			break;
 		}
 	}
