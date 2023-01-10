@@ -61,11 +61,11 @@ dirmenu() {
 	)" in
 	("copy")
 		msg="copy"
-		"$cmd" cp "$@"
+		"$cmd" "cp -v" "$@"
 		;;
 	("move")
 		msg="move"
-		"$cmd" mv "$@"
+		"$cmd" "mv -v" "$@"
 		;;
 	("link")
 		msg="link"
@@ -115,11 +115,11 @@ case "$cmd" in
 	;;
 ("drop-copy")
 	msg="copy"
-	drop cp "$@"
+	drop "cp -v" "$@"
 	;;
 ("drop-move")
 	msg="move"
-	drop mv "$@"
+	drop "mv -v" "$@"
 	;;
 ("drop-link")
 	msg="link"
