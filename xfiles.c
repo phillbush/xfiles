@@ -675,7 +675,6 @@ runexdrop(char *contextcmd, WidgetEvent event, char *text, char *path)
 			argv = p;
 		}
 		argv[argc++] = text + i;
-		printf("%s\n", argv[argc-1]);
 		i = j;
 	}
 	argv[argc++] = NULL;
@@ -715,11 +714,11 @@ newcwd(struct FM *fm)
 }
 
 static int
-changedir(struct FM *fm, const char *path, int keepscroll, int force_refresh)
+changedir(struct FM *fm, const char *path, int force_refresh)
 {
 	Scroll *scrl;
 	struct stat sb;
-	int retval;
+	int keepscroll, retval;
 	struct Cwd cwd = {
 		.prev = NULL,
 		.next = NULL,
@@ -744,12 +743,19 @@ changedir(struct FM *fm, const char *path, int keepscroll, int force_refresh)
 	closethumbthread(fm);
 	if (diropen(fm, &cwd, path) == RET_ERROR)
 		goto done;
-	if (fm->cwd->prev != NULL && fm->cwd->prev->path != NULL
-	    && strcmp(cwd.path, fm->cwd->prev->path) == 0) {
-		fm->cwd = fm->cwd->prev;
+	if (fm->cwd->path != NULL && strcmp(cwd.path, fm->cwd->path) == 0) {
+		/*
+		 * We're changing to the directory we currentlyare.
+		 * Keep the scroll position
+		 */
 		keepscroll = TRUE;
 	} else {
+		/*
+		 * We're changing to a new directory.
+		 * Scroll to the top.
+		 */
 		newcwd(fm);
+		keepscroll = FALSE;
 	}
 	free(fm->cwd->path);
 	free(fm->cwd->here);
@@ -890,7 +896,7 @@ main(int argc, char *argv[])
 			if (contextcmd == NULL)
 				break;
 			runcontext(&fm, contextcmd, nitems);
-			if (changedir(&fm, fm.cwd->path, TRUE, FALSE) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -904,7 +910,7 @@ main(int argc, char *argv[])
 			if (cwd == NULL)
 				break;
 			fm.cwd = cwd;
-			if (changedir(&fm, cwd->path, TRUE, FALSE) == RET_ERROR) {
+			if (changedir(&fm, cwd->path, FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -913,7 +919,7 @@ main(int argc, char *argv[])
 			hide = !hide;
 			/* FALLTHROUGH */
 		case WIDGET_REFRESH:
-			if (changedir(&fm, fm.cwd->path, TRUE, TRUE) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, TRUE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -921,7 +927,7 @@ main(int argc, char *argv[])
 		case WIDGET_PARENT:
 			if (fm.cwd->path[0] == '\0')    /* cwd is root */
 				break;
-			if (changedir(&fm, "..", FALSE, FALSE) == RET_ERROR) {
+			if (changedir(&fm, "..", FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -934,7 +940,7 @@ main(int argc, char *argv[])
 			if (fm.entries[fm.selitems[0]][STATE_MODE] == NULL)
 				break;
 			if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
-				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE, FALSE) == RET_ERROR) {
+				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RET_ERROR) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
@@ -960,7 +966,7 @@ main(int argc, char *argv[])
 				/* drag-and-drop in the same window */
 				runindrop(&fm, contextcmd, event, nitems);
 			}
-			if (changedir(&fm, fm.cwd->path, TRUE, FALSE) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
