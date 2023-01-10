@@ -2876,7 +2876,7 @@ setthumbnail(Widget wid, char *path, int item)
 	size_t size, i;
 	int w, h;
 	char buf[DATA_DEPTH];
-	char *data;
+	unsigned char *data;
 
 	if (item < 0 || item >= wid->nitems || wid->thumbs == NULL)
 		return;
@@ -2932,7 +2932,7 @@ setthumbnail(Widget wid, char *path, int item)
 		wid->visual,
 		wid->depth,
 		ZPixmap,
-		0, data,
+		0, (char *)data,
 		w, h,
 		DATA_DEPTH * BYTE,
 		0
