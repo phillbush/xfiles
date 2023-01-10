@@ -2260,7 +2260,9 @@ draw:
 	case XK_BackSpace:
 		return WIDGET_PARENT;
 	case XK_period:
-		return WIDGET_TOGGLE_HIDE;
+		if (xev->state & ControlMask)
+			return WIDGET_TOGGLE_HIDE;
+		break;
 	default:
 		break;
 	}
