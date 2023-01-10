@@ -44,6 +44,9 @@
 #define PPM_COLOR       "255\n"
 
 #define ALARMFLAGS      (XSyncCACounter | XSyncCAValue | XSyncCAValueType | XSyncCATestType | XSyncCADelta)
+#define DEPTH(d)        (DefaultDepth((d), DefaultScreen((d))))
+#define VISUAL(d)       (DefaultVisual((d), DefaultScreen((d))))
+#define COLORMAP(d)     (DefaultColormap((d), DefaultScreen((d))))
 #define WIDTH(d)        (DisplayWidth((d), DefaultScreen((d))))
 #define HEIGHT(d)       (DisplayHeight((d), DefaultScreen((d))))
 #define ROOT(d)         (DefaultRootWindow((d)))
@@ -217,9 +220,6 @@ struct Widget {
 	Window win;
 	XftColor colors[SELECT_LAST][COLOR_LAST];
 	XftFont *font;
-	Visual *visual;
-	Colormap colormap;
-	int depth;
 	Atom dropaction;
 	Window dropsrc;
 
@@ -448,11 +448,11 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 	wid->win = XCreateWindow(
 		wid->dpy, ROOT(wid->dpy),
 		x, y, wid->w, wid->h, 0,
-		wid->depth, InputOutput, wid->visual,
+		CopyFromParent, CopyFromParent, CopyFromParent,
 		CWBackPixel | CWEventMask | CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
 			.border_pixel = 0,
-			.colormap = wid->colormap,
+			.colormap = COLORMAP(wid->dpy),
 			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
 			.event_mask = StructureNotifyMask | ExposureMask
 			            | KeyPressMask | PointerMotionMask
@@ -466,7 +466,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		wid->win,
 		LABELWIDTH,
 		wid->fonth,
-		wid->depth
+		DEPTH(wid->dpy)
 	);
 	if (wid->namepix == None)
 		return RET_ERROR;
@@ -520,7 +520,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 static int
 ealloccolor(Widget wid, const char *s, XftColor *color)
 {
-	if(!XftColorAllocName(wid->dpy, wid->visual, wid->colormap, s, color))
+	if(!XftColorAllocName(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), s, color))
 		return RET_ERROR;
 	return RET_OK;
 }
@@ -636,7 +636,7 @@ error:
 		for (j = 0; j < COLOR_LAST; j++) {
 			if (colorerror[i][j])
 				continue;
-			XftColorFree(wid->dpy, wid->visual, wid->colormap, &wid->colors[i][j]);
+			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
 		}
 	}
 	if (!fonterror)
@@ -681,7 +681,7 @@ calcsize(Widget wid, int w, int h)
 			XFreePixmap(wid->dpy, wid->rectbord);
 		wid->pixw = wid->ncols * wid->itemw;
 		wid->pixh = wid->nrows * wid->itemh;
-		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, wid->depth);
+		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, DEPTH(wid->dpy));
 		wid->rectbord = XCreatePixmap(wid->dpy, wid->win, wid->w, wid->h, CLIP_DEPTH);
 		ret = 1;
 	}
@@ -706,7 +706,7 @@ drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, 0, 0, LABELWIDTH, wid->fonth);
 	XSetForeground(wid->dpy, wid->gc, color[COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, x, 0, w, wid->fonth);
-	draw = XftDrawCreate(wid->dpy, pix, wid->visual, wid->colormap);
+	draw = XftDrawCreate(wid->dpy, pix, VISUAL(wid->dpy), COLORMAP(wid->dpy));
 	XftDrawStringUtf8(draw, &color[COLOR_FG], wid->font, x, wid->font->ascent, (const FcChar8 *)text, len);
 	XftDrawDestroy(draw);
 }
@@ -1063,7 +1063,7 @@ drawscroller(Widget wid, int y)
 {
 	Pixmap pix;
 
-	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, wid->depth)) == None)
+	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, DEPTH(wid->dpy))) == None)
 		return;
 	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, pix, wid->gc, 0, 0, SCROLLER_SIZE, SCROLLER_SIZE);
@@ -1878,12 +1878,7 @@ checkheader(FILE *fp, char *header, size_t size)
 static int
 pixmapfromdata(Widget wid, char **data, Pixmap *pix, Pixmap *mask)
 {
-	XpmAttributes xa = {
-		.valuemask = XpmVisual | XpmColormap | XpmDepth,
-		.visual = wid->visual,
-		.colormap = wid->colormap,
-		.depth = wid->depth,
-	};
+	XpmAttributes xa = { 0 };
 
 	if (XpmCreatePixmapFromData(wid->dpy, wid->win, data, pix, mask, &xa) != XpmSuccess) {
 		*pix = None;
@@ -1977,11 +1972,11 @@ createdragwin(Widget wid, int index)
 	win = XCreateWindow(
 		wid->dpy, ROOT(wid->dpy),
 		xroot, yroot, w, h, 0,
-		wid->depth, InputOutput, wid->visual,
+		CopyFromParent, CopyFromParent, CopyFromParent,
 		CWBackPixel | CWOverrideRedirect| CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
 			.border_pixel = 0,
-			.colormap = wid->colormap,
+			.colormap = COLORMAP(wid->dpy),
 			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
 			.override_redirect = True
 		}
@@ -2023,7 +2018,7 @@ createdragwin(Widget wid, int index)
 		XFreeGC(wid->dpy, gc);
 		XSetWindowBackgroundPixmap(wid->dpy, win, pix);
 	} else {
-		if ((pix = XCreatePixmap(wid->dpy, win, w, h, wid->depth)) == None) {
+		if ((pix = XCreatePixmap(wid->dpy, win, w, h, DEPTH(wid->dpy))) == None) {
 			XDestroyWindow(wid->dpy, win);
 			return None;
 		}
@@ -2040,42 +2035,6 @@ createdragwin(Widget wid, int index)
 	XMapRaised(wid->dpy, win);
 	XFlush(wid->dpy);
 	return win;
-}
-
-void
-xinitvisual(Widget wid)
-{
-	int screen;
-	XVisualInfo tpl = {
-		.screen = DefaultScreen(wid->dpy),
-		.depth = 32,
-		.class = TrueColor
-	};
-	XVisualInfo *infos;
-	XRenderPictFormat *fmt;
-	long masks = VisualScreenMask | VisualDepthMask | VisualClassMask;
-	int nitems;
-	int i;
-
-	screen = DefaultScreen(wid->dpy);
-	wid->visual = NULL;
-	if ((infos = XGetVisualInfo(wid->dpy, masks, &tpl, &nitems)) != NULL) {
-		for (i = 0; i < nitems; i++) {
-			fmt = XRenderFindVisualFormat(wid->dpy, infos[i].visual);
-			if (fmt->type == PictTypeDirect && fmt->direct.alphaMask) {
-				wid->depth = infos[i].depth;
-				wid->visual = infos[i].visual;
-				wid->colormap = XCreateColormap(wid->dpy, ROOT(wid->dpy), wid->visual, AllocNone);
-				break;
-			}
-		}
-		XFree(infos);
-	}
-	if (wid->visual == NULL) {
-		wid->depth = DefaultDepth(wid->dpy, screen);
-		wid->visual = DefaultVisual(wid->dpy, screen);
-		wid->colormap = DefaultColormap(wid->dpy, screen);
-	}
 }
 
 static void
@@ -2843,7 +2802,6 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		warnx("could not initialize XSync extension");
 		goto error;
 	}
-	xinitvisual(wid);
 	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
 	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1) {
 		warn("fcntl");
@@ -2864,10 +2822,10 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	wid->scroller = XCreateWindow(
 		wid->dpy, wid->win,
 		0, 0, SCROLLER_SIZE, SCROLLER_SIZE, 1,
-		wid->depth, InputOutput, wid->visual,
+		CopyFromParent, CopyFromParent, CopyFromParent,
 		CWBackPixel | CWBorderPixel | CWEventMask | CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
-			.colormap = wid->colormap,
+			.colormap = COLORMAP(wid->dpy),
 			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
 			.border_pixel = wid->colors[SELECT_NOT][COLOR_FG].pixel,
 			.event_mask = ButtonPressMask | PointerMotionMask,
@@ -3031,7 +2989,7 @@ closewidget(Widget wid)
 	XFreePixmap(wid->dpy, wid->stipple);
 	for (i = 0; i < SELECT_LAST; i++)
 		for (j = 0; j < COLOR_LAST; j++)
-			XftColorFree(wid->dpy, wid->visual, wid->colormap, &wid->colors[i][j]);
+			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
 	XftFontClose(wid->dpy, wid->font);
 	XDestroyWindow(wid->dpy, wid->scroller);
 	XDestroyWindow(wid->dpy, wid->win);
@@ -3068,7 +3026,7 @@ setthumbnail(Widget wid, char *path, int item)
 	size_t size, i;
 	int w, h;
 	char buf[DATA_DEPTH];
-	char *data;
+	unsigned char *data;
 
 	if (item < 0 || item >= wid->nitems || wid->thumbs == NULL)
 		return;
@@ -3121,10 +3079,10 @@ setthumbnail(Widget wid, char *path, int item)
 	};
 	wid->thumbs[item]->img = XCreateImage(
 		wid->dpy,
-		wid->visual,
-		wid->depth,
+		VISUAL(wid->dpy),
+		DEPTH(wid->dpy),
 		ZPixmap,
-		0, data,
+		0, (char *)data,
 		w, h,
 		DATA_DEPTH * BYTE,
 		0
