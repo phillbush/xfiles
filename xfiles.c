@@ -897,13 +897,10 @@ main(int argc, char *argv[])
 			break;
 		case WIDGET_PREV:
 		case WIDGET_NEXT:
-		case WIDGET_REFRESH:
 			if (event == WIDGET_PREV)
 				cwd = fm.cwd->prev;
-			else if (event == WIDGET_NEXT)
-				cwd = fm.cwd->next;
 			else
-				cwd = fm.cwd;
+				cwd = fm.cwd->next;
 			if (cwd == NULL)
 				break;
 			fm.cwd = cwd;
@@ -914,6 +911,8 @@ main(int argc, char *argv[])
 			break;
 		case WIDGET_TOGGLE_HIDE:
 			hide = !hide;
+			/* FALLTHROUGH */
+		case WIDGET_REFRESH:
 			if (changedir(&fm, fm.cwd->path, TRUE, TRUE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
@@ -960,6 +959,10 @@ main(int argc, char *argv[])
 			} else if (nitems > 1 && fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
 				/* drag-and-drop in the same window */
 				runindrop(&fm, contextcmd, event, nitems);
+			}
+			if (changedir(&fm, fm.cwd->path, TRUE, FALSE) == RET_ERROR) {
+				exitval = EXIT_FAILURE;
+				goto done;
 			}
 			break;
 		default:
