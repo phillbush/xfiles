@@ -708,6 +708,10 @@ main(int argc, char *argv[])
 	char **saveargv;
 	char winid[WINDOWID_BUFSIZE];
 
+	#ifdef __OpenBSD__
+	epledge("stdio rpath proc exec unix");
+	#endif
+
 	saveargv = argv;
 	saveargc = argc;
 	contextcmd = getenv(CONTEXTCMD);

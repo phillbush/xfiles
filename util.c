@@ -87,6 +87,15 @@ escandir(const char *dirname, struct dirent ***namelist, int (*select)(const str
 	return ret;
 }
 
+#ifdef __OpenBSD__
+void
+epledge(const char *promises)
+{
+        if (pledge(promises, NULL) < 0)
+                err(1, "pledge");
+}
+#endif
+
 pid_t
 efork(void)
 {

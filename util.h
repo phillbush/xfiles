@@ -17,6 +17,10 @@
 #define TRUE 1
 #endif
 
+#ifdef __OpenBSD__
+void epledge(const char *promises);
+#endif
+
 pid_t efork(void);
 int max(int x, int y);
 int min(int x, int y);
