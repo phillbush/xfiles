@@ -37,7 +37,7 @@
 #define STATUS_UNKNOWN  "?"
 
 /* opacity of drag-and-drop mini window */
-#define DND_OPACITY     0x90000000
+#define DND_OPACITY     0x7FFFFFFF
 
 /* constants to check a .ppm file */
 #define PPM_HEADER      "P6\n"
