@@ -16,6 +16,7 @@
 #include <X11/xpm.h>
 #include <X11/Xft/Xft.h>
 #include <X11/Xcursor/Xcursor.h>
+#include <X11/extensions/shape.h>
 #include <X11/extensions/sync.h>
 
 #include "util.h"
@@ -35,14 +36,14 @@
 /* what to display when item's status is unknown */
 #define STATUS_UNKNOWN  "?"
 
+/* opacity of drag-and-drop mini window */
+#define DND_OPACITY     0x90000000
+
 /* constants to check a .ppm file */
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
 
 #define ALARMFLAGS      (XSyncCACounter | XSyncCAValue | XSyncCAValueType | XSyncCATestType | XSyncCADelta)
-#define VISUAL(d)       (DefaultVisual((d), DefaultScreen((d))))
-#define COLORMAP(d)     (DefaultColormap((d), DefaultScreen((d))))
-#define DEPTH(d)        (DefaultDepth((d), DefaultScreen((d))))
 #define WIDTH(d)        (DisplayWidth((d), DefaultScreen((d))))
 #define HEIGHT(d)       (DisplayHeight((d), DefaultScreen((d))))
 #define ROOT(d)         (DefaultRootWindow((d)))
@@ -55,6 +56,9 @@
 enum {
 	/* number of members on a the .data.l[] array of a XClientMessageEvent */
 	NCLIENTMSG_DATA = 5,
+
+	/* drag and drop miniwindow */
+	DND_DISTANCE    = 8,                    /* distance from pointer to dnd miniwindow */
 
 	/* distance the cursor must move to be considered a drag */
 	DRAG_THRESHOLD  = 8,
@@ -173,7 +177,9 @@ enum {
 	_NET_WM_NAME,
 	_NET_WM_PID,
 	_NET_WM_WINDOW_TYPE,
+	_NET_WM_WINDOW_TYPE_DND,
 	_NET_WM_WINDOW_TYPE_NORMAL,
+	_NET_WM_WINDOW_OPACITY,
 
 	/* others */
 	_NULL,
@@ -209,6 +215,9 @@ struct Widget {
 	Window win;
 	XftColor colors[SELECT_LAST][COLOR_LAST];
 	XftFont *font;
+	Visual *visual;
+	Colormap colormap;
+	int depth;
 
 	Pixmap pix;                     /* the pixmap of the window */
 	Pixmap namepix;                 /* temporary pixmap for the labels */
@@ -382,7 +391,9 @@ static char *atomnames[ATOM_LAST] = {
 	[_NET_WM_NAME]               = "_NET_WM_NAME",
 	[_NET_WM_PID]                = "_NET_WM_PID",
 	[_NET_WM_WINDOW_TYPE]        = "_NET_WM_WINDOW_TYPE",
+	[_NET_WM_WINDOW_TYPE_DND]    = "_NET_WM_WINDOW_TYPE_DND",
 	[_NET_WM_WINDOW_TYPE_NORMAL] = "_NET_WM_WINDOW_TYPE_NORMAL",
+	[_NET_WM_WINDOW_OPACITY] =  "_NET_WM_WINDOW_OPACITY",
 	[_NULL]                      = "NULL",
 };
 
@@ -431,9 +442,11 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 	wid->win = XCreateWindow(
 		wid->dpy, ROOT(wid->dpy),
 		x, y, wid->w, wid->h, 0,
-		CopyFromParent, CopyFromParent, CopyFromParent,
-		CWBackPixel | CWEventMask,
+		wid->depth, InputOutput, wid->visual,
+		CWBackPixel | CWEventMask | CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
+			.border_pixel = 0,
+			.colormap = wid->colormap,
 			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
 			.event_mask = StructureNotifyMask | ExposureMask
 			            | KeyPressMask | PointerMotionMask
@@ -447,7 +460,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		wid->win,
 		LABELWIDTH,
 		wid->fonth,
-		DEPTH(wid->dpy)
+		wid->depth
 	);
 	if (wid->namepix == None)
 		return RET_ERROR;
@@ -499,9 +512,9 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 }
 
 static int
-ealloccolor(Display *dpy, const char *s, XftColor *color)
+ealloccolor(Widget wid, const char *s, XftColor *color)
 {
-	if(!XftColorAllocName(dpy, VISUAL(dpy), COLORMAP(dpy), s, color))
+	if(!XftColorAllocName(wid->dpy, wid->visual, wid->colormap, s, color))
 		return RET_ERROR;
 	return RET_OK;
 }
@@ -571,7 +584,7 @@ inittheme(Widget wid, const char *class, const char *name)
 			if (s == NULL) {
 				/* could not found resource; use default value */
 				s = defvalue[i][j];
-			} else if (ealloccolor(wid->dpy, s, &wid->colors[i][j]) == RET_ERROR) {
+			} else if (ealloccolor(wid, s, &wid->colors[i][j]) == RET_ERROR) {
 				/* resource found, but allocation failed; use default value */
 				warnx("\"%s\": could not load color (falling back to \"%s\")", s, defvalue[i][j]);
 				s = defvalue[i][j];
@@ -579,7 +592,7 @@ inittheme(Widget wid, const char *class, const char *name)
 				/* resource found and successfully allocated */
 				continue;
 			}
-			if (ealloccolor(wid->dpy, s, &wid->colors[i][j]) == RET_ERROR) {
+			if (ealloccolor(wid, s, &wid->colors[i][j]) == RET_ERROR) {
 				warnx("\"%s\": could not load color", s);
 				colorerror[i][j] = TRUE;
 				goterror = TRUE;
@@ -617,7 +630,7 @@ error:
 		for (j = 0; j < COLOR_LAST; j++) {
 			if (colorerror[i][j])
 				continue;
-			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
+			XftColorFree(wid->dpy, wid->visual, wid->colormap, &wid->colors[i][j]);
 		}
 	}
 	if (!fonterror)
@@ -662,8 +675,8 @@ calcsize(Widget wid, int w, int h)
 			XFreePixmap(wid->dpy, wid->rectbord);
 		wid->pixw = wid->ncols * wid->itemw;
 		wid->pixh = wid->nrows * wid->itemh;
-		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, DEPTH(wid->dpy));
-		wid->rectbord = XCreatePixmap(wid->dpy, ROOT(wid->dpy), wid->w, wid->h, CLIP_DEPTH);
+		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, wid->depth);
+		wid->rectbord = XCreatePixmap(wid->dpy, wid->win, wid->w, wid->h, CLIP_DEPTH);
 		ret = 1;
 	}
 	etunlock(&wid->lock);
@@ -687,7 +700,7 @@ drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, 0, 0, LABELWIDTH, wid->fonth);
 	XSetForeground(wid->dpy, wid->gc, color[COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, wid->namepix, wid->gc, x, 0, w, wid->fonth);
-	draw = XftDrawCreate(wid->dpy, pix, VISUAL(wid->dpy), COLORMAP(wid->dpy));
+	draw = XftDrawCreate(wid->dpy, pix, wid->visual, wid->colormap);
 	XftDrawStringUtf8(draw, &color[COLOR_FG], wid->font, x, wid->font->ascent, (const FcChar8 *)text, len);
 	XftDrawDestroy(draw);
 }
@@ -1044,7 +1057,7 @@ drawscroller(Widget wid, int y)
 {
 	Pixmap pix;
 
-	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, DEPTH(wid->dpy))) == None)
+	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, wid->depth)) == None)
 		return;
 	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
 	XFillRectangle(wid->dpy, pix, wid->gc, 0, 0, SCROLLER_SIZE, SCROLLER_SIZE);
@@ -1194,219 +1207,6 @@ cleanwidget(Widget wid)
 	wid->nlines = NULL;
 	free(wid->issel);
 	wid->issel = NULL;
-}
-
-Widget
-initwidget(const char *class, const char *name, const char *geom, int argc, char *argv[])
-{
-	XSyncSystemCounter *counters;
-	Widget wid;
-	int ncounters, tmp, i;
-	char *progname, *s;
-
-	wid = NULL;
-	progname = "";
-	if (argc > 0 && argv[0] != NULL) {
-		progname = argv[0];
-		if ((s = strrchr(argv[0], '/')) != NULL) {
-			progname = s + 1;
-		}
-	}
-	if (name == NULL)
-		name = progname;
-	if ((wid = malloc(sizeof(*wid))) == NULL) {
-		warn("malloc");
-		return NULL;
-	}
-	*wid = (struct Widget){
-		.progname = progname,
-		.dpy = NULL,
-		.start = FALSE,
-		.redraw = FALSE,
-		.win = None,
-		.scroller = None,
-		.lock = PTHREAD_MUTEX_INITIALIZER,
-		.thumbs = NULL,
-		.thumbhead = NULL,
-		.linelen = NULL,
-		.nlines = NULL,
-		.icons = NULL,
-		.highlight = -1,
-		.title = "",
-		.class = class,
-		.sel = NULL,
-		.rectsel = NULL,
-		.issel = NULL,
-		.seltime = 0,
-		.pix = None,
-		.rectbord = None,
-		.state = STATE_NORMAL,
-		.stipple = None,
-		.syncattr = (XSyncAlarmAttributes){
-			.trigger.counter        = None,
-			.trigger.value_type     = XSyncRelative,
-			.trigger.test_type      = XSyncPositiveComparison,
-		},
-	};
-	if (!XInitThreads()) {
-		warnx("XInitThreads");
-		goto error;
-	}
-	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale()) {
-		warnx("could not set locale");
-		goto error;
-	}
-	if ((wid->dpy = XOpenDisplay(NULL)) == NULL) {
-		warnx("could not connect to X server");
-		goto error;
-	}
-	if (!XSyncQueryExtension(wid->dpy, &wid->syncevent, &tmp)) {
-		warnx("could not query XSync extension");
-		goto error;
-	}
-	if (!XSyncInitialize(wid->dpy, &tmp, &tmp)) {
-		warnx("could not initialize XSync extension");
-		goto error;
-	}
-	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
-	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1) {
-		warn("fcntl");
-		goto error;
-	}
-	if ((wid->gc = XCreateGC(wid->dpy, ROOT(wid->dpy), GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
-		warnx("could not create graphics context");
-		goto error;
-	}
-	if (inittheme(wid, class, name) == -1) {
-		warnx("could not set theme");
-		goto error;
-	}
-	if (createwin(wid, class, name, geom, argc, argv, winicon_data, winicon_size) == -1) {
-		warnx("could not create window");
-		goto error;
-	}
-	wid->scroller = XCreateWindow(
-		wid->dpy, wid->win,
-		0, 0, SCROLLER_SIZE, SCROLLER_SIZE, 1,
-		CopyFromParent, CopyFromParent, CopyFromParent,
-		CWBackPixel | CWBorderPixel | CWEventMask,
-		&(XSetWindowAttributes){
-			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
-			.border_pixel = wid->colors[SELECT_NOT][COLOR_FG].pixel,
-			.event_mask = ButtonPressMask | PointerMotionMask,
-		}
-	);
-	if (wid->scroller == None) {
-		warnx("could not create window");
-		goto error;
-	}
-	if ((wid->stipple = XCreatePixmap(wid->dpy, ROOT(wid->dpy), STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None) {
-		warnx("could not create pixmap");
-		goto error;
-	}
-	if ((wid->stipgc = XCreateGC(wid->dpy, wid->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
-		warnx("could not create graphics context");
-		goto error;
-	}
-	XSetForeground(wid->dpy, wid->stipgc, 0);
-	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
-	XSetForeground(wid->dpy, wid->stipgc, 1);
-	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, 1, 1);
-	XSetStipple(wid->dpy, wid->gc, wid->stipple);
-	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
-	wid->cursors[CURSOR_DRAG] = XcursorLibraryLoadCursor(wid->dpy, "dnd-none");
-	wid->cursors[CURSOR_NODROP] = XcursorLibraryLoadCursor(wid->dpy, "forbidden");
-	if ((counters = XSyncListSystemCounters(wid->dpy, &ncounters)) != NULL) {
-		for (i = 0; i < ncounters; i++) {
-			if (strcmp(counters[i].name, "SERVERTIME") == 0) {
-				wid->syncattr.trigger.counter = counters[i].counter;
-				break;
-			}
-		}
-		XSyncFreeSystemCounterList(counters);
-	}
-	if (wid->syncattr.trigger.counter == None) {
-		warnx("could not use XSync extension");
-		goto error;
-	}
-	XSyncIntToValue(&wid->syncattr.trigger.wait_value, 128);
-	XSyncIntToValue(&wid->syncattr.delta, 0);
-	return wid;
-error:
-	if (wid->stipple != None)
-		XFreePixmap(wid->dpy, wid->stipple);
-	if (wid->scroller != None)
-		XDestroyWindow(wid->dpy, wid->scroller);
-	if (wid->win != None)
-		XDestroyWindow(wid->dpy, wid->win);
-	if (wid->dpy != NULL)
-		XCloseDisplay(wid->dpy);
-	free(wid);
-	return NULL;
-}
-
-int
-setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
-{
-	size_t i;
-
-	cleanwidget(wid);
-	wid->items = items;
-	wid->nitems = nitems;
-	wid->itemicons = itemicons;
-	if (scrl == NULL) {
-		wid->ydiff = 0;
-		wid->row = 0;
-	} else {
-		wid->ydiff = scrl->ydiff;
-		wid->row = scrl->row;
-	}
-	wid->title = title;
-	wid->highlight = -1;
-	(void)calcsize(wid, -1, -1);
-	if (scrl != NULL && wid->row >= wid->nscreens) {
-		wid->ydiff = 0;
-		setrow(wid, wid->nscreens);
-	}
-	if ((wid->issel = calloc(wid->nitems, sizeof(*wid->issel))) == NULL) {
-		warn("calloc");
-		goto error;
-	}
-	if ((wid->linelen = calloc(wid->nitems, sizeof(*wid->linelen))) == NULL) {
-		warn("calloc");
-		goto error;
-	}
-	if ((wid->nlines = calloc(wid->nitems, sizeof(*wid->nlines))) == NULL) {
-		warn("calloc");
-		goto error;
-	}
-	if ((wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) == NULL) {
-		warn("calloc");
-		goto error;
-	}
-	for (i = 0; i < nitems; i++)
-		wid->thumbs[i] = NULL;
-	wid->thumbhead = NULL;
-	settitle(wid);
-	drawitems(wid);
-	commitdraw(wid);
-	return RET_OK;
-error:
-	free(wid->issel);
-	free(wid->linelen);
-	free(wid->nlines);
-	free(wid->thumbs);
-	wid->issel = NULL;
-	wid->linelen = NULL;
-	wid->nlines = NULL;
-	wid->thumbs = NULL;
-	return RET_ERROR;
-}
-
-void
-mapwidget(Widget wid)
-{
-	XMapWindow(wid->dpy, wid->win);
 }
 
 static void
@@ -2064,9 +1864,14 @@ checkheader(FILE *fp, char *header, size_t size)
 static int
 pixmapfromdata(Widget wid, char **data, Pixmap *pix, Pixmap *mask)
 {
-	XpmAttributes xa = { 0 };
+	XpmAttributes xa = {
+		.valuemask = XpmVisual | XpmColormap | XpmDepth,
+		.visual = wid->visual,
+		.colormap = wid->colormap,
+		.depth = wid->depth,
+	};
 
-	if (XpmCreatePixmapFromData(wid->dpy, ROOT(wid->dpy), data, pix, mask, &xa) != XpmSuccess) {
+	if (XpmCreatePixmapFromData(wid->dpy, wid->win, data, pix, mask, &xa) != XpmSuccess) {
 		*pix = None;
 		*mask = None;
 		return RET_ERROR;
@@ -2132,6 +1937,130 @@ clientmsg(Display *dpy, Window win, Atom atom, long d[5])
 	ev.xclient.data.l[4] = d[4];
 	if (!XSendEvent(dpy, win, False, 0x0, &ev)) {
 		warnx("could not send event");
+	}
+}
+
+static Window
+createdragwin(Widget wid, int index)
+{
+	Window win;
+	GC gc;
+	unsigned long opacity;
+	int icon, pix, mask;
+	int xroot, yroot, w, h;
+
+	if (index <= 0)
+		return None;
+	if (!querypointer(wid, ROOT(wid->dpy), &xroot, &yroot, NULL))
+		return None;
+	w = h = THUMBSIZE;
+	xroot += DND_DISTANCE;
+	yroot += DND_DISTANCE;
+	if (wid->thumbs[index] != NULL) {
+		w = wid->thumbs[index]->w;
+		h = wid->thumbs[index]->h;
+	}
+	win = XCreateWindow(
+		wid->dpy, ROOT(wid->dpy),
+		xroot, yroot, w, h, 0,
+		wid->depth, InputOutput, wid->visual,
+		CWBackPixel | CWOverrideRedirect| CWColormap | CWBorderPixel,
+		&(XSetWindowAttributes){
+			.border_pixel = 0,
+			.colormap = wid->colormap,
+			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
+			.override_redirect = True
+		}
+	);
+	if (win == None)
+		return None;
+	opacity = DND_OPACITY;
+	XChangeProperty(
+		wid->dpy, win,
+		wid->atoms[_NET_WM_WINDOW_OPACITY],
+		XA_CARDINAL, 32, PropModeReplace,
+		(unsigned char *)&opacity,
+		1
+	);
+	XChangeProperty(
+		wid->dpy, win,
+		wid->atoms[_NET_WM_WINDOW_TYPE],
+		XA_ATOM, 32, PropModeReplace,
+		(unsigned char *)&wid->atoms[_NET_WM_WINDOW_TYPE_DND],
+		1
+	);
+	if (wid->thumbs[index] == NULL) {
+		icon = wid->itemicons[index];
+		pix = wid->icons[icon].pix;
+		if ((mask = XCreatePixmap(wid->dpy, win, w, h, CLIP_DEPTH)) == None) {
+			XDestroyWindow(wid->dpy, win);
+			return None;
+		}
+		if ((gc = XCreateGC(wid->dpy, mask, 0, NULL)) == None) {
+			XFreePixmap(wid->dpy, mask);
+			XDestroyWindow(wid->dpy, win);
+			return None;
+		}
+		XSetForeground(wid->dpy, gc, 0);
+		XFillRectangle(wid->dpy, mask, gc, 0, 0, w, h);
+		XCopyArea(wid->dpy, wid->icons[icon].mask, mask, gc, 0, 0, w, h, 0, 0);
+		XShapeCombineMask(wid->dpy, win, ShapeBounding, 0, 0, mask, ShapeSet);
+		XFreePixmap(wid->dpy, mask);
+		XFreeGC(wid->dpy, gc);
+		XSetWindowBackgroundPixmap(wid->dpy, win, pix);
+	} else {
+		if ((pix = XCreatePixmap(wid->dpy, win, w, h, wid->depth)) == None) {
+			XDestroyWindow(wid->dpy, win);
+			return None;
+		}
+		XPutImage(
+			wid->dpy,
+			pix,
+			wid->gc,
+			wid->thumbs[index]->img,
+			0, 0, 0, 0, w, h
+		);
+		XSetWindowBackgroundPixmap(wid->dpy, win, pix);
+		XFreePixmap(wid->dpy, pix);
+	}
+	XMapRaised(wid->dpy, win);
+	XFlush(wid->dpy);
+	return win;
+}
+
+void
+xinitvisual(Widget wid)
+{
+	int screen;
+	XVisualInfo tpl = {
+		.screen = DefaultScreen(wid->dpy),
+		.depth = 32,
+		.class = TrueColor
+	};
+	XVisualInfo *infos;
+	XRenderPictFormat *fmt;
+	long masks = VisualScreenMask | VisualDepthMask | VisualClassMask;
+	int nitems;
+	int i;
+
+	screen = DefaultScreen(wid->dpy);
+	wid->visual = NULL;
+	if ((infos = XGetVisualInfo(wid->dpy, masks, &tpl, &nitems)) != NULL) {
+		for (i = 0; i < nitems; i++) {
+			fmt = XRenderFindVisualFormat(wid->dpy, infos[i].visual);
+			if (fmt->type == PictTypeDirect && fmt->direct.alphaMask) {
+				wid->depth = infos[i].depth;
+				wid->visual = infos[i].visual;
+				wid->colormap = XCreateColormap(wid->dpy, ROOT(wid->dpy), wid->visual, AllocNone);
+				break;
+			}
+		}
+		XFree(infos);
+	}
+	if (wid->visual == NULL) {
+		wid->depth = DefaultDepth(wid->dpy, screen);
+		wid->visual = DefaultVisual(wid->dpy, screen);
+		wid->colormap = DefaultColormap(wid->dpy, screen);
 	}
 }
 
@@ -2464,16 +2393,17 @@ done:
 }
 
 static WidgetEvent
-dragmode(Widget wid, Time lasttime)
+dragmode(Widget wid, Time lasttime, int clicki)
 {
 	XEvent ev;
-	Window lastwin, win;
+	Window lastwin, win, dragwin;
 	Atom version;
 	int sendposition;
 	int accept, inside, x, y, w, h;
 	long d[NCLIENTMSG_DATA];
 
 	lastwin = None;
+	dragwin = None;
 	wid->state = STATE_SELECTING;
 	widgetcursor(wid, CURSOR_DRAG);
 	d[0] = wid->win;
@@ -2482,6 +2412,7 @@ dragmode(Widget wid, Time lasttime)
 	x = y = w = h = 0;
 	wid->seltime = lasttime;
 	XSetSelectionOwner(wid->dpy, wid->atoms[XDND_SELECTION], wid->win, lasttime);
+	dragwin = createdragwin(wid, clicki);
 	while (!XNextEvent(wid->dpy, &ev)) {
 		switch (processevent(wid, &ev)) {
 		case WIDGET_CLOSE:
@@ -2516,6 +2447,7 @@ dragmode(Widget wid, Time lasttime)
 		case MotionNotify:
 			if (ev.xmotion.time - lasttime < MOTION_TIME)
 				break;
+			XMoveWindow(wid->dpy, dragwin, ev.xmotion.x_root + DND_DISTANCE, ev.xmotion.y_root + DND_DISTANCE);
 			inside = between(ev.xmotion.x, ev.xmotion.y, x, y, w, h);
 			if ((sendposition || !inside) && lastwin != None) {
 				if (FLAG(ev.xmotion.state, ControlMask|ShiftMask))
@@ -2558,6 +2490,8 @@ dragmode(Widget wid, Time lasttime)
 		}
 	}
 done:
+	if (dragwin != None)
+		XDestroyWindow(wid->dpy, dragwin);
 	widgetcursor(wid, CURSOR_NORMAL);
 	wid->state = STATE_NORMAL;
 	return WIDGET_NONE;
@@ -2641,7 +2575,7 @@ mainmode(Widget wid, int *selitems, int *nitems)
 			if (clicki == -1) {
 				state = selmode(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
 			} else if (clicki > 0) {
-				state = dragmode(wid, ev.xmotion.time);
+				state = dragmode(wid, ev.xmotion.time, clicki);
 			}
 			if (state != WIDGET_NONE)
 				return state;
@@ -2657,6 +2591,221 @@ mainmode(Widget wid, int *selitems, int *nitems)
  * public functions.  Some of them rely on the existence of objects
  * in the given addresses, during Widget's lifetime.
  */
+
+Widget
+initwidget(const char *class, const char *name, const char *geom, int argc, char *argv[])
+{
+	XSyncSystemCounter *counters;
+	Widget wid;
+	int ncounters, tmp, i;
+	char *progname, *s;
+
+	wid = NULL;
+	progname = "";
+	if (argc > 0 && argv[0] != NULL) {
+		progname = argv[0];
+		if ((s = strrchr(argv[0], '/')) != NULL) {
+			progname = s + 1;
+		}
+	}
+	if (name == NULL)
+		name = progname;
+	if ((wid = malloc(sizeof(*wid))) == NULL) {
+		warn("malloc");
+		return NULL;
+	}
+	*wid = (struct Widget){
+		.progname = progname,
+		.dpy = NULL,
+		.start = FALSE,
+		.redraw = FALSE,
+		.win = None,
+		.scroller = None,
+		.lock = PTHREAD_MUTEX_INITIALIZER,
+		.thumbs = NULL,
+		.thumbhead = NULL,
+		.linelen = NULL,
+		.nlines = NULL,
+		.icons = NULL,
+		.highlight = -1,
+		.title = "",
+		.class = class,
+		.sel = NULL,
+		.rectsel = NULL,
+		.issel = NULL,
+		.seltime = 0,
+		.pix = None,
+		.rectbord = None,
+		.state = STATE_NORMAL,
+		.stipple = None,
+		.syncattr = (XSyncAlarmAttributes){
+			.trigger.counter        = None,
+			.trigger.value_type     = XSyncRelative,
+			.trigger.test_type      = XSyncPositiveComparison,
+		},
+	};
+	if (!XInitThreads()) {
+		warnx("XInitThreads");
+		goto error;
+	}
+	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale()) {
+		warnx("could not set locale");
+		goto error;
+	}
+	if ((wid->dpy = XOpenDisplay(NULL)) == NULL) {
+		warnx("could not connect to X server");
+		goto error;
+	}
+	if (!XSyncQueryExtension(wid->dpy, &wid->syncevent, &tmp)) {
+		warnx("could not query XSync extension");
+		goto error;
+	}
+	if (!XSyncInitialize(wid->dpy, &tmp, &tmp)) {
+		warnx("could not initialize XSync extension");
+		goto error;
+	}
+	xinitvisual(wid);
+	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
+	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1) {
+		warn("fcntl");
+		goto error;
+	}
+	if (inittheme(wid, class, name) == -1) {
+		warnx("could not set theme");
+		goto error;
+	}
+	if (createwin(wid, class, name, geom, argc, argv, winicon_data, winicon_size) == -1) {
+		warnx("could not create window");
+		goto error;
+	}
+	if ((wid->gc = XCreateGC(wid->dpy, wid->win, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
+		warnx("could not create graphics context");
+		goto error;
+	}
+	wid->scroller = XCreateWindow(
+		wid->dpy, wid->win,
+		0, 0, SCROLLER_SIZE, SCROLLER_SIZE, 1,
+		wid->depth, InputOutput, wid->visual,
+		CWBackPixel | CWBorderPixel | CWEventMask | CWColormap | CWBorderPixel,
+		&(XSetWindowAttributes){
+			.colormap = wid->colormap,
+			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
+			.border_pixel = wid->colors[SELECT_NOT][COLOR_FG].pixel,
+			.event_mask = ButtonPressMask | PointerMotionMask,
+		}
+	);
+	if (wid->scroller == None) {
+		warnx("could not create window");
+		goto error;
+	}
+	if ((wid->stipple = XCreatePixmap(wid->dpy, wid->win, STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None) {
+		warnx("could not create pixmap");
+		goto error;
+	}
+	if ((wid->stipgc = XCreateGC(wid->dpy, wid->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
+		warnx("could not create graphics context");
+		goto error;
+	}
+	XSetForeground(wid->dpy, wid->stipgc, 0);
+	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
+	XSetForeground(wid->dpy, wid->stipgc, 1);
+	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, 1, 1);
+	XSetStipple(wid->dpy, wid->gc, wid->stipple);
+	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
+	wid->cursors[CURSOR_DRAG] = XcursorLibraryLoadCursor(wid->dpy, "dnd-none");
+	wid->cursors[CURSOR_NODROP] = XcursorLibraryLoadCursor(wid->dpy, "forbidden");
+	if ((counters = XSyncListSystemCounters(wid->dpy, &ncounters)) != NULL) {
+		for (i = 0; i < ncounters; i++) {
+			if (strcmp(counters[i].name, "SERVERTIME") == 0) {
+				wid->syncattr.trigger.counter = counters[i].counter;
+				break;
+			}
+		}
+		XSyncFreeSystemCounterList(counters);
+	}
+	if (wid->syncattr.trigger.counter == None) {
+		warnx("could not use XSync extension");
+		goto error;
+	}
+	XSyncIntToValue(&wid->syncattr.trigger.wait_value, 128);
+	XSyncIntToValue(&wid->syncattr.delta, 0);
+	return wid;
+error:
+	if (wid->stipple != None)
+		XFreePixmap(wid->dpy, wid->stipple);
+	if (wid->scroller != None)
+		XDestroyWindow(wid->dpy, wid->scroller);
+	if (wid->win != None)
+		XDestroyWindow(wid->dpy, wid->win);
+	if (wid->dpy != NULL)
+		XCloseDisplay(wid->dpy);
+	free(wid);
+	return NULL;
+}
+
+int
+setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
+{
+	size_t i;
+
+	cleanwidget(wid);
+	wid->items = items;
+	wid->nitems = nitems;
+	wid->itemicons = itemicons;
+	if (scrl == NULL) {
+		wid->ydiff = 0;
+		wid->row = 0;
+	} else {
+		wid->ydiff = scrl->ydiff;
+		wid->row = scrl->row;
+	}
+	wid->title = title;
+	wid->highlight = -1;
+	(void)calcsize(wid, -1, -1);
+	if (scrl != NULL && wid->row >= wid->nscreens) {
+		wid->ydiff = 0;
+		setrow(wid, wid->nscreens);
+	}
+	if ((wid->issel = calloc(wid->nitems, sizeof(*wid->issel))) == NULL) {
+		warn("calloc");
+		goto error;
+	}
+	if ((wid->linelen = calloc(wid->nitems, sizeof(*wid->linelen))) == NULL) {
+		warn("calloc");
+		goto error;
+	}
+	if ((wid->nlines = calloc(wid->nitems, sizeof(*wid->nlines))) == NULL) {
+		warn("calloc");
+		goto error;
+	}
+	if ((wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) == NULL) {
+		warn("calloc");
+		goto error;
+	}
+	for (i = 0; i < nitems; i++)
+		wid->thumbs[i] = NULL;
+	wid->thumbhead = NULL;
+	settitle(wid);
+	drawitems(wid);
+	commitdraw(wid);
+	return RET_OK;
+error:
+	free(wid->issel);
+	free(wid->linelen);
+	free(wid->nlines);
+	free(wid->thumbs);
+	wid->issel = NULL;
+	wid->linelen = NULL;
+	wid->nlines = NULL;
+	wid->thumbs = NULL;
+	return RET_ERROR;
+}
+
+void
+mapwidget(Widget wid)
+{
+	XMapWindow(wid->dpy, wid->win);
+}
 
 WidgetEvent
 pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl)
@@ -2700,7 +2849,7 @@ closewidget(Widget wid)
 	XFreePixmap(wid->dpy, wid->stipple);
 	for (i = 0; i < SELECT_LAST; i++)
 		for (j = 0; j < COLOR_LAST; j++)
-			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
+			XftColorFree(wid->dpy, wid->visual, wid->colormap, &wid->colors[i][j]);
 	XftFontClose(wid->dpy, wid->font);
 	XDestroyWindow(wid->dpy, wid->scroller);
 	XDestroyWindow(wid->dpy, wid->win);
@@ -2774,7 +2923,7 @@ setthumbnail(Widget wid, char *path, int item)
 		data[i * DATA_DEPTH + 0] = buf[2];   /* B */
 		data[i * DATA_DEPTH + 1] = buf[1];   /* G */
 		data[i * DATA_DEPTH + 2] = buf[0];   /* R */
-		data[i * DATA_DEPTH + 3] = '\0';     /* A */
+		data[i * DATA_DEPTH + 3] = 0xFF;     /* A */
 	}
 	fclose(fp);
 	fp = NULL;
@@ -2790,8 +2939,8 @@ setthumbnail(Widget wid, char *path, int item)
 	};
 	wid->thumbs[item]->img = XCreateImage(
 		wid->dpy,
-		VISUAL(wid->dpy),
-		DEPTH(wid->dpy),
+		wid->visual,
+		wid->depth,
 		ZPixmap,
 		0, data,
 		w, h,
