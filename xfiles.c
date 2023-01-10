@@ -745,9 +745,17 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 		goto done;
 	if (fm->cwd->path != NULL && strcmp(cwd.path, fm->cwd->path) == 0) {
 		/*
-		 * We're changing to the directory we currentlyare.
-		 * Keep the scroll position
+		 * We're changing to the directory we currently are.
+		 * Keep the scroll position we have now.
 		 */
+		keepscroll = TRUE;
+	} else if (fm->cwd->prev != NULL && fm->cwd->prev->path != NULL &&
+	           strcmp(cwd.path, fm->cwd->prev->path) == 0) {
+		/*
+		 * We're changing to the directory we were previously.
+		 * Keep the scroll position we had there.
+		 */
+		fm->cwd = fm->cwd->prev;
 		keepscroll = TRUE;
 	} else {
 		/*
