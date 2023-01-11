@@ -56,6 +56,18 @@
 /* how much to scroll on PageUp/PageDown (half the window height) */
 #define PAGE_STEP(w)    ((w)->h / 2)
 
+/* window capacity (max number of rows that can fit on the window) */
+#define WIN_ROWS(w)     ((w)->h / (w)->itemh)
+
+/* number of WHOLE rows that the current directory has */
+#define WHL_ROWS(w)     ((w)->nitems / (w)->ncols)
+
+/* 0 if all rows are entirely filled; 1 if there's an extra, half-filled row */
+#define MOD_ROWS(w)     (((w)->nitems % (w)->ncols) != 0 ? 1 : 0)
+
+/* actual number of rows (either whole or not) that the current directory has */
+#define ALL_ROWS(w)     (WHL_ROWS(w) + MOD_ROWS(w))
+
 enum {
 	/* number of members on a the .data.l[] array of a XClientMessageEvent */
 	NCLIENTMSG_DATA = 5,
@@ -664,15 +676,15 @@ calcsize(Widget wid, int w, int h)
 		wid->ydiff = 0;
 	}
 	wid->ncols = max(wid->w / wid->itemw, 1);
-	wid->nrows = max(wid->h / wid->itemh + (wid->h % wid->itemh ? 2 : 1), 1);
+	wid->nrows = max(WIN_ROWS(wid) + (wid->h % wid->itemh ? 2 : 1), 1);
 	wid->x0 = max((wid->w - wid->ncols * wid->itemw) / 2, 0);
-	wid->nscreens = wid->nitems / wid->ncols - wid->h / wid->itemh + (wid->nitems % wid->ncols != 0 ? 1 : 0);
+	wid->nscreens = ALL_ROWS(wid) - WIN_ROWS(wid);
 	wid->nscreens = max(wid->nscreens, 1);
 	d = (double)wid->nscreens / SCROLLER_MIN;
 	d = (d < 1.0 ? 1.0 : d);
 	wid->handlew = max(SCROLLER_SIZE / d - 2, 1);
 	wid->handlew = min(wid->handlew, HANDLE_MAX_SIZE);
-	if (wid->handlew == HANDLE_MAX_SIZE && wid->nscreens > 1)
+	if (wid->handlew == HANDLE_MAX_SIZE && ALL_ROWS(wid) > WIN_ROWS(wid))
 		wid->handlew = HANDLE_MAX_SIZE - 1;
 	if (ncols != wid->ncols || nrows != wid->nrows) {
 		if (wid->pix != None)
@@ -1082,7 +1094,7 @@ scroll(Widget wid, int y)
 
 	if (y == 0)
 		return FALSE;
-	if (wid->nitems / wid->ncols + (wid->nitems % wid->ncols != 0 ? 2 : 1) < wid->nrows)
+	if (ALL_ROWS(wid) + 1 < wid->nrows)
 		return FALSE;
 	prevhand = gethandlepos(wid);
 	newrow = prevrow = wid->row;
@@ -2198,7 +2210,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 		if (ksym == XK_Up || ksym == XK_k) {
 			n = -wid->ncols;
 		} else if (ksym == XK_Down || ksym == XK_j) {
-			n = wid->highlight < (wid->nitems / wid->ncols) * wid->ncols
+			n = wid->highlight < (WHL_ROWS(wid)) * wid->ncols
 			  ? wid->nitems - wid->highlight - 1
 			  : 0;
 			n = min(wid->ncols, n);
@@ -2219,8 +2231,8 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
 			 */
 			if (row[i] < newrow) {
 				newrow = row[i];
-			} else if (row[i] >= newrow + wid->h / wid->itemh) {
-				newrow = row[i] - wid->h / wid->itemh + 1;
+			} else if (row[i] >= newrow + WIN_ROWS(wid)) {
+				newrow = row[i] - WIN_ROWS(wid) + 1;
 			}
 		}
 		if (wid->row != newrow) {
