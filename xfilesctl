@@ -2,6 +2,7 @@
 
 MENUCMD="${MENUCMD:-"xmenu"}"
 TERMCMD="${TERMCMD:-"xterm"}"
+EDITOR="${EDITOR:-"${VISUAL:-"vi"}"}"
 
 term() {
 	"$TERMCMD" -e "$@"
@@ -56,7 +57,7 @@ dirmenu() {
 		copy
 		move
 		link
-		none
+		term
 	EOF
 	)" in
 	("copy")
@@ -70,6 +71,10 @@ dirmenu() {
 	("link")
 		msg="link"
 		"$cmd" "ln -s" "$@"
+		;;
+	("term")
+		"$TERMCMD" &
+		;;
 	esac
 }
 
@@ -92,7 +97,7 @@ filemenu() {
 		trash "$@"
 		;;
 	("edit")
-		plumb -e -- "$1"
+		"$TERMCMD" -e "$EDITOR" "$1"
 		;;
 	esac
 }
