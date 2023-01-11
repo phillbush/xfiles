@@ -14,6 +14,10 @@
 #include "util.h"
 #include "widget.h"
 
+#ifndef FNM_CASEFOLD
+#define FNM_CASEFOLD     0
+#endif
+
 /* actions for the controller command */
 #define DROPCOPY         "drop-copy"
 #define DROPMOVE         "drop-move"
@@ -382,10 +386,10 @@ getmatchingdata(struct FM *fm, char **tab[][CONFIG_LAST], char **entry)
 		for (j = 1; patts[j] != NULL; j++) {
 			p = patts[j];
 			if (p[0] == '~' || strchr(p, '/') != NULL) {
-				flags = FNM_PATHNAME;
+				flags = FNM_CASEFOLD | FNM_PATHNAME;
 				s = entry[STATE_PATH];
 			} else {
-				flags = 0;
+				flags = FNM_CASEFOLD;
 				s = entry[STATE_NAME];
 			}
 			if (s == NULL)
