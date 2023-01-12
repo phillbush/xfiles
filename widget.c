@@ -11,6 +11,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xresource.h>
+#include <X11/Xutil.h>
 #include <X11/XKBlib.h>
 #include <X11/cursorfont.h>
 #include <X11/xpm.h>
@@ -98,6 +99,7 @@ enum {
 	TITLE_BUFSIZE   = 1028,                 /* title buffer size */
 	STATUS_BUFSIZE  = 64,                   /* status buffer size */
 	RES_BUFSIZE     = 512,                  /* resource buffer size */
+	KSYM_BUFSIZE    = 64,                   /* key symbol name buffer size */
 
 	/* hardcoded object sizes in pixels */
 	/* there's no ITEM_HEIGHT for it is computed at runtime from font height */
@@ -198,6 +200,10 @@ enum {
 	_NET_WM_WINDOW_TYPE_NORMAL,
 	_NET_WM_WINDOW_OPACITY,
 
+	/* widget control properties */
+	_CONTROL_CWD,
+	_CONTROL_GOTO,
+
 	/* others */
 	_NULL,
 
@@ -235,13 +241,16 @@ struct Widget {
 	Atom dropaction;
 	Window dropsrc;
 
+	Atom lastprop;
+	char *lasttext;
+
 	Pixmap pix;                     /* the pixmap of the window */
 	Pixmap namepix;                 /* temporary pixmap for the labels */
 	Pixmap stipple;                 /* stipple for painting icons of selected items */
 	Pixmap rectbord;                /* rectangular selection border */
 
 	/*
-	 * TODO
+	 * Lock used for synchronizing the thumbnail and the main threads.
 	 */
 	pthread_mutex_t lock;
 
@@ -411,7 +420,9 @@ static char *atomnames[ATOM_LAST] = {
 	[_NET_WM_WINDOW_TYPE]        = "_NET_WM_WINDOW_TYPE",
 	[_NET_WM_WINDOW_TYPE_DND]    = "_NET_WM_WINDOW_TYPE_DND",
 	[_NET_WM_WINDOW_TYPE_NORMAL] = "_NET_WM_WINDOW_TYPE_NORMAL",
-	[_NET_WM_WINDOW_OPACITY] =  "_NET_WM_WINDOW_OPACITY",
+	[_NET_WM_WINDOW_OPACITY]     = "_NET_WM_WINDOW_OPACITY",
+	[_CONTROL_CWD]               = "_CONTROL_CWD",
+	[_CONTROL_GOTO]              = "_CONTROL_GOTO",
 	[_NULL]                      = "NULL",
 };
 
@@ -468,7 +479,8 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
 			.event_mask = StructureNotifyMask | ExposureMask
 			            | KeyPressMask | PointerMotionMask
-			            | ButtonReleaseMask | ButtonPressMask,
+			            | ButtonReleaseMask | ButtonPressMask
+			            | PropertyChangeMask,
 		}
 	);
 	if (wid->win == None)
@@ -1054,6 +1066,16 @@ settitle(Widget wid)
 		8,
 		PropModeReplace,
 		(unsigned char *)title,
+		strlen(title)
+	);
+	XChangeProperty(
+		wid->dpy,
+		wid->win,
+		wid->atoms[_CONTROL_CWD],
+		wid->atoms[UTF8_STRING],
+		8,
+		PropModeReplace,
+		(unsigned char *)wid->title,
 		strlen(title)
 	);
 }
@@ -2088,7 +2110,7 @@ tryconvertsel(Widget wid, XSelectionEvent *xev)
 }
 
 static char *
-getdroptext(Widget wid, Atom prop)
+gettextprop(Widget wid, Atom prop)
 {
 	char *text;
 	unsigned char *p;
@@ -2113,6 +2135,42 @@ getdroptext(Widget wid, Atom prop)
 	if (status != Success || len == 0 || p == NULL) {
 		goto done;
 	}
+	if ((text = emalloc(len + 1)) == NULL) {
+		goto done;
+	}
+	memcpy(text, p, len);
+	text[len] = '\0';
+done:
+	XFree(p);
+	return text;
+}
+
+static char *
+getdroptext(Widget wid, Atom prop)
+{
+	char *text;
+	unsigned char *p;
+	unsigned long len;
+	unsigned long dl;               /* dummy variable */
+	int format, status;
+	Atom type;
+
+	text = NULL;
+	status = XGetWindowProperty(
+		wid->dpy,
+		wid->win,
+		prop,
+		0L,
+		0x1FFFFFFF,
+		False,
+		AnyPropertyType,
+		&type, &format,
+		&len, &dl,
+		&p
+	);
+	if (status != Success || len == 0 || p == NULL) {
+		goto done;
+	}
 	if (type == wid->atoms[INCR]) {
 		/* we do not do incremental transfer */
 		goto done;
@@ -2124,7 +2182,6 @@ getdroptext(Widget wid, Atom prop)
 	text[len] = '\0';
 done:
 	XFree(p);
-	finishdrop(wid);
 	return text;
 }
 
@@ -2134,11 +2191,13 @@ done:
  */
 
 static WidgetEvent
-keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems)
+keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems, char **text)
 {
 	KeySym ksym;
 	unsigned int state;
-	int redrawall, previtem, index, row[2], newrow, n, i;
+	int row[2];
+	int redrawall, previtem, index, shift, newrow, n, i;
+	char *kstr;
 
 	if (!XkbLookupKeySym(wid->dpy, xev->keycode, xev->state, &state, &ksym))
 		return WIDGET_NONE;
@@ -2253,17 +2312,42 @@ draw:
 		if (redrawall)
 			drawitems(wid);
 		break;
-	case XK_F5:
-		return WIDGET_REFRESH;
-	case XK_BackSpace:
-	case XK_H:
-		return WIDGET_PARENT;
-	case XK_period:
-		if (xev->state & ControlMask)
-			return WIDGET_TOGGLE_HIDE;
-		break;
 	default:
-		break;
+		/*
+		 * Check if the key symbol is a printable ASCII symbol.
+		 * If they are, fallthrough if they are modified by
+		 * Control.
+		 *
+		 * We're using some implementational knowledge here.
+		 *
+		 * The range of ASCII printable characters goes from
+		 * 0x20 (space) to 0x7E (tilde).  Keysyms for ASCII
+		 * symbols are thankfully encoded the same as their
+		 * ASCII counterparts!
+		 *
+		 * That is, XK_A == 'A' == 0x41.
+		 */
+		if (ksym < XK_space || ksym > XK_asciitilde)
+			break;
+		if (!FLAG(xev->state, ControlMask))
+			break;
+		/* FALLTHROUGH */
+	case XK_F1: case XK_F2: case XK_F3: case XK_F4: case XK_F5: case XK_F6:
+	case XK_F7: case XK_F8: case XK_F9: case XK_F10: case XK_F11: case XK_F12:
+	case XK_F13: case XK_Delete: case XK_BackSpace: case XK_Tab:
+		/*
+		 * User pressed either Control + ASCII Key, an F-key,
+		 * Delete, Backspace or Tab.  We inform the calling
+		 * module that such key is pressed for it to process
+		 * it however wants.
+		 */
+		kstr = XKeysymToString(ksym);
+		if ((*text = malloc(KSYM_BUFSIZE)) == NULL)
+			break;
+		shift = FLAG(xev->state, ShiftMask);
+		(void)snprintf(*text, KSYM_BUFSIZE, "^%s%s", shift ? "S-" : "", kstr);
+		*nitems = fillselitems(wid, selitems, -1);
+		return WIDGET_KEYPRESS;
 	}
 	return WIDGET_NONE;
 }
@@ -2345,11 +2429,43 @@ processevent(Widget wid, XEvent *ev)
 			break;
 		unselectitems(wid);
 		break;
+	case PropertyNotify:
+		if (ev->xproperty.window != wid->win)
+			break;
+		if (ev->xproperty.state != PropertyNewValue)
+			break;
+		if (ev->xproperty.atom != wid->atoms[_CONTROL_GOTO])
+			break;
+		free(wid->lasttext);
+		wid->lastprop = wid->atoms[_CONTROL_GOTO];
+		wid->lasttext = gettextprop(wid, wid->atoms[_CONTROL_GOTO]);
+		break;
 	default:
 		return WIDGET_NONE;
 	}
 	endevent(wid);
 	return WIDGET_INTERNAL;
+}
+
+static WidgetEvent
+checklastprop(Widget wid, char **text)
+{
+	Atom prop;
+	char *str;
+
+	if (wid->lastprop != None) {
+		prop = wid->lastprop;
+		str = wid->lasttext;
+		wid->lastprop = None;
+		wid->lasttext = NULL;
+		if (prop == wid->atoms[_CONTROL_GOTO]) {
+			*text = str;
+			return WIDGET_GOTO;
+		} else {
+			free(str);
+		}
+	}
+	return WIDGET_NONE;
 }
 
 /*
@@ -2551,7 +2667,6 @@ dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 					retval = WIDGET_DROPCOPY;
 				else
 					retval = WIDGET_DROPASK;
-				finishdrop(wid);
 			} else if (lastwin != None) {
 				d[1] = d[2] = d[3] = d[4] = 0;
 				d[2] = ev.xbutton.time;
@@ -2644,9 +2759,11 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
 		default:
 			continue;
 		}
+		if ((state = checklastprop(wid, text)) != WIDGET_NONE)
+			return state;
 		switch (ev.type) {
 		case KeyPress:
-			state = keypress(wid, &ev.xkey, selitems, nitems);
+			state = keypress(wid, &ev.xkey, selitems, nitems, text);
 			if (state != WIDGET_NONE)
 				return state;
 			break;
@@ -2728,6 +2845,14 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
 				return WIDGET_DROPASK;
 			}
 			break;
+		case ClientMessage:
+			if (ev.xclient.message_type == wid->atoms[XDND_FINISHED]) {
+				printf("ASDA\n");
+				return WIDGET_REFRESH;
+			}
+			break;
+		default:
+			break;
 		}
 		endevent(wid);
 	}
@@ -2788,6 +2913,8 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.rectbord = None,
 		.state = STATE_NORMAL,
 		.stipple = None,
+		.lastprop = None,
+		.lasttext = NULL,
 		.syncattr = (XSyncAlarmAttributes){
 			.trigger.counter        = None,
 			.trigger.value_type     = XSyncRelative,
@@ -2972,7 +3099,8 @@ pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl, char **text)
 		}
 	}
 	wid->start = TRUE;
-	retval = mainmode(wid, selitems, nitems, text);
+	if ((retval = checklastprop(wid, text)) == WIDGET_NONE)
+		retval = mainmode(wid, selitems, nitems, text);
 	endevent(wid);
 	scrl->ydiff = wid->ydiff;
 	scrl->row = wid->row;

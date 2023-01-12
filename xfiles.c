@@ -589,15 +589,15 @@ fileopen(struct FM *fm, char *path)
 }
 
 static void
-runcontext(struct FM *fm, char *contextcmd, int nselitems)
+runcontext(struct FM *fm, char *cmd, int nselitems)
 {
 	int i;
 	char **argv;
 
 	i = 0;
 	argv = emalloc((nselitems + 3) * sizeof(*argv));
-	argv[0] = contextcmd;
-	argv[1] = MENU;
+	argv[0] = CONTEXTCMD;
+	argv[1] = cmd;
 	for (i = 0; i < nselitems; i++)
 		argv[i+2] = fm->entries[fm->selitems[i]][STATE_NAME];
 	argv[i+2] = NULL;
@@ -606,7 +606,7 @@ runcontext(struct FM *fm, char *contextcmd, int nselitems)
 }
 
 static void
-runindrop(struct FM *fm, char *contextcmd, WidgetEvent event, int nitems)
+runindrop(struct FM *fm, WidgetEvent event, int nitems)
 {
 	int i;
 	char **argv;
@@ -621,7 +621,7 @@ runindrop(struct FM *fm, char *contextcmd, WidgetEvent event, int nitems)
 	path = fm->entries[fm->selitems[0]][STATE_PATH];
 	if ((argv = malloc((nitems + 2) * sizeof(*argv))) == NULL)
 		return;
-	argv[0] = contextcmd;
+	argv[0] = CONTEXTCMD;
 	switch (event) {
 	case WIDGET_DROPCOPY: argv[1] = DROPCOPY; break;
 	case WIDGET_DROPMOVE: argv[1] = DROPMOVE; break;
@@ -635,7 +635,7 @@ runindrop(struct FM *fm, char *contextcmd, WidgetEvent event, int nitems)
 }
 
 static void
-runexdrop(char *contextcmd, WidgetEvent event, char *text, char *path)
+runexdrop(WidgetEvent event, char *text, char *path)
 {
 	size_t capacity, argc, i, j, k;
 	char **argv, **p;
@@ -651,7 +651,7 @@ runexdrop(char *contextcmd, WidgetEvent event, char *text, char *path)
 	capacity = INCRSIZE;
 	if ((argv = malloc(capacity * sizeof(*argv))) == NULL)
 		return;
-	argv[argc++] = contextcmd;
+	argv[argc++] = CONTEXTCMD;
 	switch (event) {
 	case WIDGET_DROPCOPY: argv[argc++] = DROPCOPY; break;
 	case WIDGET_DROPMOVE: argv[argc++] = DROPMOVE; break;
@@ -811,13 +811,12 @@ main(int argc, char *argv[])
 	struct FM fm;
 	struct Cwd *cwd;
 	int ch, nitems;
-	int saveargc;
+	int saveargc, force_refresh;
 	int exitval = EXIT_SUCCESS;
 	char *geom = NULL;
 	char *name = NULL;
 	char *path = NULL;
 	char *home = NULL;
-	char *contextcmd = NULL;
 	char **saveargv;
 	char winid[WINDOWID_BUFSIZE];
 	char *text;
@@ -825,7 +824,6 @@ main(int argc, char *argv[])
 
 	saveargv = argv;
 	saveargc = argc;
-	contextcmd = CONTEXTCMD;
 	home = getenv("HOME");
 	fm = (struct FM){
 		.capacity = 0,
@@ -855,13 +853,10 @@ main(int argc, char *argv[])
 	fm.ngrps = getgroups(NGROUPS_MAX, fm.grps);
 	if ((fm.opener = getenv("OPENER")) == NULL)
 		fm.opener = DEF_OPENER;
-	while ((ch = getopt(argc, argv, "ac:g:n:")) != -1) {
+	while ((ch = getopt(argc, argv, "ag:n:")) != -1) {
 		switch (ch) {
 		case 'a':
 			hide = 0;
-			break;
-		case 'c':
-			contextcmd = optarg;
 			break;
 		case 'g':
 			geom = optarg;
@@ -898,6 +893,7 @@ main(int argc, char *argv[])
 		goto error;
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
+	text = NULL;
 	while ((event = pollwidget(fm.wid, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
 		switch (event) {
 		case WIDGET_ERROR:
@@ -905,9 +901,7 @@ main(int argc, char *argv[])
 			goto done;
 			break;
 		case WIDGET_CONTEXT:
-			if (contextcmd == NULL)
-				break;
-			runcontext(&fm, contextcmd, nitems);
+			runcontext(&fm, MENU, nitems);
 			if (changedir(&fm, fm.cwd->path, FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
@@ -927,19 +921,8 @@ main(int argc, char *argv[])
 				goto done;
 			}
 			break;
-		case WIDGET_TOGGLE_HIDE:
-			hide = !hide;
-			/* FALLTHROUGH */
 		case WIDGET_REFRESH:
 			if (changedir(&fm, fm.cwd->path, TRUE) == RET_ERROR) {
-				exitval = EXIT_FAILURE;
-				goto done;
-			}
-			break;
-		case WIDGET_PARENT:
-			if (fm.cwd->path[0] == '\0')    /* cwd is root */
-				break;
-			if (changedir(&fm, "..", FALSE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -964,21 +947,37 @@ main(int argc, char *argv[])
 		case WIDGET_DROPCOPY:
 		case WIDGET_DROPMOVE:
 		case WIDGET_DROPLINK:
-			if (contextcmd == NULL)
-				break;
 			if (text != NULL) {
 				/* drag-and-drop between different windows */
 				if (nitems > 0 && (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries))
 					path = NULL;
 				else
 					path = fm.entries[fm.selitems[0]][STATE_PATH];
-				runexdrop(contextcmd, event, text, path);
-				free(text);
+				runexdrop(event, text, path);
 			} else if (nitems > 1 && fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
 				/* drag-and-drop in the same window */
-				runindrop(&fm, contextcmd, event, nitems);
+				runindrop(&fm, event, nitems);
 			}
 			if (changedir(&fm, fm.cwd->path, FALSE) == RET_ERROR) {
+				exitval = EXIT_FAILURE;
+				goto done;
+			}
+			break;
+		case WIDGET_KEYPRESS:
+			if (strcmp(text, "^period") == 0) {
+				hide = !hide;
+				force_refresh = TRUE;
+			} else {
+				runcontext(&fm, text, nitems);
+				force_refresh = FALSE;
+			}
+			if (changedir(&fm, fm.cwd->path, force_refresh) == RET_ERROR) {
+				exitval = EXIT_FAILURE;
+				goto done;
+			}
+			break;
+		case WIDGET_GOTO:
+			if (changedir(&fm, text, TRUE) == RET_ERROR) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -986,8 +985,11 @@ main(int argc, char *argv[])
 		default:
 			break;
 		}
+		free(text);
+		text = NULL;
 	}
 done:
+	free(text);
 	closethumbthread(&fm);
 error:
 	clearcwd(fm.hist);

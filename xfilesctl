@@ -1,5 +1,6 @@
 #!/bin/sh
 
+PROMPTCMD="${PROMPTCMD:-"dmenu"}"
 MENUCMD="${MENUCMD:-"xmenu"}"
 TERMCMD="${TERMCMD:-"xterm"}"
 EDITOR="${EDITOR:-"${VISUAL:-"vi"}"}"
@@ -10,20 +11,46 @@ term() {
 
 dialog() {
 	term /bin/sh -c '
+		cmd="$1"
+		shift 1
 		printf "\t%s\n" "$@"
-		printf "'"$msg"'? [y/N] "
+		case "$cmd" in
+		("cp")
+			printf "Copy? [y/N] "
+			;;
+		("mv")
+			printf "Move? [y/N] "
+			;;
+		("ln")
+			printf "Link? [y/N] "
+			;;
+		("rm")
+			printf "Send to trash? [y/N] "
+			;;
+		esac
 		read arg
 		case "$arg" in
-		([Yy]*)
-			'"$cmd"' "$@" .
+		([Yy]*)      ;;
+		(*)     exit ;;
+		esac
+		case "$cmd" in
+		("cp")
+			cp -v "$@" .
+			;;
+		("mv")
+			mv -v "$@" .
+			;;
+		("ln")
+			ln -s "$@" .
+			;;
+		("rm")
+			trash "$@"
 			;;
 		esac
 	' xfilesctl "$@"
 }
 
 drop() {
-	cmd="$1"
-	shift 1
 	dialog "$@"
 }
 
@@ -45,12 +72,12 @@ paste() {
 				;;
 			esac
 		done
-		dialog "$@"
+		dialog "$cmd" "$@"
 	}
 }
 
 dirmenu() {
-	cmd="$1"
+	func="$1"
 	shift 1
 	case "$(
 	"$MENUCMD" <<-EOF
@@ -61,16 +88,13 @@ dirmenu() {
 	EOF
 	)" in
 	("copy")
-		msg="copy"
-		"$cmd" "cp -v" "$@"
+		"$func" "cp" "$@"
 		;;
 	("move")
-		msg="move"
-		"$cmd" "mv -v" "$@"
+		"$func" "mv" "$@"
 		;;
 	("link")
-		msg="link"
-		"$cmd" "ln -s" "$@"
+		"$func" "ln" "$@"
 		;;
 	("term")
 		"$TERMCMD" &
@@ -102,9 +126,13 @@ filemenu() {
 	esac
 }
 
-cmd="$1"
+changedir() {
+	xprop -id "$WINDOWID" -format "_CONTROL_GOTO" 8u -set "_CONTROL_GOTO" "$1"
+}
+
+operation="$1"
 shift 1
-case "$cmd" in
+case "$operation" in
 ("menu")
 	case "$#" in
 	(0)
@@ -119,16 +147,36 @@ case "$cmd" in
 	dirmenu drop "$@"
 	;;
 ("drop-copy")
-	msg="copy"
-	drop "cp -v" "$@"
+	drop "cp" "$@"
 	;;
 ("drop-move")
-	msg="move"
-	drop "mv -v" "$@"
+	drop "mv" "$@"
 	;;
 ("drop-link")
-	msg="link"
-	drop "ln -s" "$@"
+	drop "ln" "$@"
+	;;
+(^BackSpace)
+	# go up
+	changedir ".."
+	;;
+(^F5|^[Rr])
+	# cd to where we are just to refresh
+	changedir "."
+	;;
+(^[LlGg])
+	# call dmenu to go somewhere
+	newdir="$("$PROMPTCMD" -w "$WINDOWID")"
+	changedir "$newdir"
+	;;
+(^Delete)
+	case "$#" in
+	(0)
+		# nothing to delete
+		;;
+	(*)
+		dialog "rm" "$@"
+		;;
+	esac
 	;;
 esac
 

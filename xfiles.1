@@ -1,4 +1,4 @@
-.Dd December 25, 2022
+.Dd January 12, 2023
 .Dt XFILES 1
 .Os
 .Sh NAME
@@ -13,22 +13,8 @@
 .Op Ar directory
 .Pp
 .Nm xfilesctl
-.Cm menu
-.Nm xfilesctl
-.Cm menu
-.Ar file ...
-.Nm xfilesctl
-.Cm drop-ask
-.Ar file ...
-.Nm xfilesctl
-.Cm drop-copy
-.Ar file ...
-.Nm xfilesctl
-.Cm drop-move
-.Ar file ...
-.Nm xfilesctl
-.Cm drop-link
-.Ar file ...
+.Ar command
+.Op Ar file ...
 .Sh DESCRIPTION
 .Nm xfiles
 is a file manager for X11.
@@ -72,98 +58,139 @@ is a script called by
 .Nm xfiles
 to operate on files.
 .Nm xfilesctl
-should not be called manually.
+should usually not be called manually.
 .Nm xfilesctl
-It gets a
+gets a
 .Ar command
 as argument indicating the kind of interaction to perform with the user.
-Posible interactions are invoking a menu (such as
+Posible interactions are invoking a menu
+or popping up a terminal dialog.
+Refer to the
+.Nm xfilesctl
+script itself to check all the operations it can perform;
+and to check the programs it depends on.
+.Pp
+The commands are as follows:
+.Bl -tag -width Ds
+.It Cm menu
+.Nm xfilesctl
+is invoked with the
+.Cm menu
+command when right-clicking a
+.Nm xfiles
+window.
+The selected files are given to
+.Nm xfilesctl
+as further arguments.
+This command is used to pop up a menu (such as
 .Xr xmenu 1
 or
 .Xr pmenu 1 )
-or popping up a terminal dialog.
-.Pp
-The first form
-(with the
-.Cm menu
-command and no argument)
-is invoked at right-clicking a directory when no file is selected.
-It pops up a menu for the user to chose what to do on snarfed files.
-The options are:
-.Bl -tag -compact
-.It Cm move
-Move snarfed files to current directory.
-.It Cm copy
-Copy snarfed files to current directory.
-.It Cm link
-Link snarfed files into current directory.
-.It Cm none
-Do nothing.
-.El
-.Pp
-The second form
-(with the
-.Cm menu
-command and at least one argument)
-is invoked at right-clicking a selected file.
-It pops up a menu for the user to chose what to do on the selected files.
-The options are:
-.Bl -tag -compact
-.It Cm rename
-Open the editor for renaming the files.
-.It Cm snarf
-Snarf the files into clipboard.
-.It Cm trash
-Send files to trash.
-.It Cm none
-(do nothing).
-.El
-.Pp
-The third form
-(with the
+containing operations to perform on the selected files
+(such as rename them or send them to the trash).
+.It Cm drop-ask
+.Nm xfilesctl
+is invoked with the
 .Cm drop-ask
-command)
-is invoked at dropping a file into the window.
-It pops up a menu for the user to chose what to do on dropped files.
-The options are:
-.Bl -tag -compact
-.It Cm move
-Move dropped files to current directory.
-.It Cm copy
-Copy dropped files to current directory.
-.It Cm link
-Link dropped files into current directory.
-.It Cm none
-Do nothing.
-.El
-.Pp
-The fourth form
-(with the
+command when dropping files at a
+.Nm xfiles
+window while no modifier is pressed.
+The paths to the dropped files are given to
+.Nm xfilesctl
+as further arguments.
+This command is used to pop up a menu containing operations to perform on the dropped files
+(such as copy them to the current directory, move them, or link them).
+.It Cm drop-copy
+.Nm xfilesctl
+is invoked with the
 .Cm drop-copy
-command)
-is invoked at dropping a file while the Control modifier is pressed.
-It pops up a terminal asking whether to copy the dropped files into current directory.
-.Pp
-The fifth form
-(with the
+command when dropping files at a
+.Nm xfiles
+window while the Control modifier key is pressed.
+The paths to the dropped files are given to
+.Nm xfilesctl
+as further arguments.
+This command is used to pop up a terminal dialog window asking whether
+to copy the dropped files to the current working directory.
+.It Cm drop-move
+.Nm xfilesctl
+is invoked with the
 .Cm drop-move
-command)
-is invoked at dropping a file while the Shift modifier is pressed.
-It pops up a terminal asking whether to move the dropped files into current directory.
-.Pp
-The sixth form
-(with the
+command when dropping files at a
+.Nm xfiles
+window while the Shift modifier key is pressed.
+The paths to the dropped files are given to
+.Nm xfilesctl
+as further arguments.
+This command is used to pop up a terminal dialog window asking whether
+to move the dropped files to the current working directory.
+.It Cm drop-link
+.Nm xfilesctl
+is invoked with the
 .Cm drop-link
-command)
-is invoked at dropping a file while the Shift and Control modifiers are pressed.
-It pops up a terminal asking whether to link the dropped files into current directory.
+command when dropping files at a
+.Nm xfiles
+window while both the Shift and Control modifier keys are pressed.
+The paths to the dropped files are given to
+.Nm xfilesctl
+as further arguments.
+This command is used to pop up a terminal dialog window asking whether
+to link the dropped files to the current working directory.
+.It Cm ^KEY
+.Nm xfilesctl
+is invoked with a
+.Cm ^KEY
+command
+(where
+.Qq "KEY"
+is the name of a key symbol, such as
+.Qq "a" ,
+.Qq "F5" ,
+or
+.Qq "Delete")
+when pressing a letter, number or punctuation key with Control,
+or a plain function (F1~F13) key,
+or a plain operation key (Delete, BackSpace, etc).
+The paths to the selected files are given to
+.Nm xfilesctl
+as further arguments.
+These commands are used to do whatever the user wants to
+(for example: send files to trash when clicking
+.Qq "Delete" ;
+pop up a
+.Xr dmenu 1
+prompting for a directory to go to when clicking
+.Qq "Ctrl-L" ;
+reload the current directory when clicking
+.Qq "F5" ;
+etc).
+.It Cm ^S-KEY
+.Nm xfilesctl
+is invoked with a
+.Cm ^S-KEY
+command
+(where
+.Qq "KEY"
+is the name of a key symbol, such as
+.Qq "a" ,
+.Qq "F5" ,
+or
+.Qq "Delete")
+when pressing a letter, number or punctuation key with Control and Shift,
+or a function (F1~F13) key with Shift,
+or an operation key (Delete, BackSpace, etc) with Shift.
+The paths to the selected files are given to
+.Nm xfilesctl
+as further arguments.
+These commands are used to do whatever the user wants to.
+.El
 .Sh USAGE
 .Nm xfiles
 is controlled mainly with the mouse,
 but some actions can also be performed with the keyboard.
 .Pp
 .Nm xfiles
-has four modes of operation, activated via mouse.
+has four modes of operation.
 In each mode, some mouse or keyboard actions are allowed while others are not.
 The modes of operation are as follows.
 .Bl -tag -width Ds
@@ -185,10 +212,10 @@ In this mode, the file list can be scrolled up and down by moving the mouse.
 No action other than scrolling can be performed while in this mode.
 To exit this mode, press the second mouse button
 (or release it, if the pointer had not been released nor moved outside the scroller).
-.It Context Mode
+.It Waiting Mode
 This mode is entered after
 .Nm xfilesctl
-is called (such as after pressing the third mouse button or the Menu key).
+is called (such as after pressing the third mouse button or dropping a file).
 In this mode,
 .Nm xfiles
 is waiting for
@@ -199,8 +226,7 @@ To exit this mode,
 .Nm xfilesctl
 must return.
 .El
-.Ss Mouse
-.Nm xfiles
+.Ss Mouse button 1
 The first mouse button (usually the left one) is used for selection and opening.
 Selecting one or more files copies their paths into the PRIMARY X selection.
 Opening a single file invokes the command specified by the
@@ -209,12 +235,7 @@ environment variable with the path to the open file as argument.
 The
 .Ev OPENER
 program is invoked in the directory currently open at
-.Nm ;
-and the environment variable
-.Ev "WINDOWID" ,
-containing the window id of
-.Nm ,
-is visible to its process.
+.Nm .
 .Bl -bullet -width 2
 .It
 A single click with no modifier on a file's icon selects it (deselecting any other file).
@@ -227,16 +248,25 @@ but adds the clicked file to the selection list instead.
 A single click with a Shift modifier adds to the selection list any file between
 the previously selected one and the clicked one.
 .It
-A dragging motion (press, drag, then release) with no modifier
+A dragging motion on no file with no modifier
 draws a rectangle selecting anything inside it (deselecting any other file).
 .It
-A dragging motion (press, drag, then release) with either the Control or Shift modifiers
+A dragging motion on no file with either the Control or Shift modifiers
 draws a rectangle adding to the selection list anything inside it.
+.It
+A dragging motion on a file initiates a drag-and-drop operation with the selected files.
+The dragged files can be then dropped on a directory on the current
+.Nm xfiles
+window, or on another window supporting the XDND protocol.
+The dragging motion can be modified by
+Control (forcing a copy operation);
+Shift (forcing a move operation); or
+Control + Shift (forcing a symbolik linking operation);
 .El
-.Pp
+.Ss Mouse button 2, 4, and 5
 The second, fourth and fifth buttons (the middle button click, scroll up and scroll down)
 are used for scrolling.  No modifier applies to those buttons.
-Some of them pop up the scroller.
+The second button pops up the scroller.
 The scroller is a small widget that replaces the scrollbar in
 .Nm ;
 it can be used either as a scrollbar or as Firefox's autoScroll.
@@ -256,7 +286,7 @@ Holding the fourth button scrolls the list of files up.
 .It
 Holding the fifth button scrolls the list of files down.
 .El
-.Pp
+.Ss Mouse button 3
 The third button (usually the right one) is used to pop up a menu with
 .Nm xfilesctl .
 No modifier applies to that button.
@@ -264,7 +294,7 @@ No modifier applies to that button.
 .It
 Pressing the third button while there are one or more files selected invokes
 .Nm xfilesctl
-on its second form, with the paths of all the selected files passed as arguments.
+with the paths of all the selected files passed as arguments.
 .It
 Pressing the third button on a file's icon while there's no file selected
 selects that file and invokes
@@ -275,11 +305,7 @@ Pressing the third button on nothing while there's no file selected invokes
 .Nm xfilesctl
 with no argument.
 .El
-.Pp
-The sixth and seventh mouse buttons (scroll left and scroll right) are not used, since
-.Nm xfiles
-does not scroll horizontally.
-.Pp
+.Ss Mouse buttons 8 and 7
 The eighth and ninth mouse buttons (previous and next) are used for navigating
 through the browsing history.
 .Bl -bullet -width 2
@@ -288,9 +314,14 @@ Clicking the eigth mouse button goes to the previously open directory.
 .It
 Clicking the ninth mouse button goes to the next open directory.
 .El
-.Ss Keyboard
+.Ss Other mouse buttons
+The sixth and seventh mouse buttons (scroll left and scroll right) are not used, since
+.Nm xfiles
+does not scroll horizontally.
+.Ss Default keys.
 The following keys (and their number keyboard counterparts) can control
-.Nm .
+.Nm xfiles
+by, for example, scrolling the window, or highlighting or selecting files.
 .Bl -tag -width Ds
 .It Escape
 Deselect everything.
@@ -323,15 +354,37 @@ Highlight and select the file in the given direction (deselecting any other file
 If modified by Control, does not deselect previously selected files.
 If modified by Shift, does not deselect previously selected files,
 and select any file between the target file and the previously highlighted one.
-.It F5
-Refresh the current directory.
-.It BackSpace or Shift+h
-Go to parent directory.
 .It Ctrl + . (Period)
 Hide/show hidden files and directories.
 .El
+.Ss Extra keys
+The letter, digit and punctuation keys, when modified by Control,
+the function keys (F1~F13),
+and a few other keys (like
+.Qq "Delete"
+and
+.Qq "Backspace"
+can be used, modified or not by Shift, to invoke
+.Nm xfilesctl .
+The following keys are handled by default by the
+.Nm xfilesctl
+script provided with
+.Nm xfiles :
+.Bl -tag -width Ds
+.It Ctrl-G or Ctrl-L
+Invoke
+.Xr dmenu 1
+to act as an URL bar and change the current directory.
+.It F5 or Ctrl-R
+Refresh the current directory.
+.It BackSpace
+Go to parent directory.
+.It Delete
+Pop up a terminal dialog asking whether to send selected files to trash.
+.El
 .Sh RESOURCES
-.Nm understands the following X resources.
+.Nm
+understands the following X resources.
 They must be prefixed with either the
 .Qq "XFiles"
 class or the name given with the
@@ -348,6 +401,30 @@ Text color.
 Background color for selected entries.
 .It Ic selforeground
 Text color for selected entries.
+.El
+.Sh PROPERTIES
+.Nm xfiles
+sets the following properties on its window:
+.Bl -tag -width Ds
+.It Ic "_CONTROL_CWD"
+Contains the current working directory.
+.It Ic "WM_NAME"
+Contains the title of the window.
+It has the format
+.Qq "CWD/ (N items) - XFiles (SCROLL%)"
+when no file is highlighted; or
+.Qq "CWD/FILE (SIZE) - XFiles (SCROLL%)"
+when a file is highlighted.
+.El
+.Pp
+.Nm xfiles
+reads the following properties on its window:
+.Bl -tag -width Ds
+.It Ic "_CONTROL_GOTO"
+When this property is changed,
+.Nm xfiles
+tries to change the directory to the path this property is set to,
+if possible.
 .El
 .Sh ENVIRONMENT
 The following environment variables affect the execution of
@@ -377,5 +454,9 @@ process.
 Note that this string contains the number in decimal notation,
 not in hexadecimal (as is usually exchanged by a few X applications).
 .El
+.Ss SEE ALSO
+.Xr X 1 ,
+.Xr dmenu 1 ,
+.Xr xmenu 1
 .Sh BUGS
 Yes.
