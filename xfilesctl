@@ -28,7 +28,7 @@ dialog() {
 			printf "Send to trash? [y/N] "
 			;;
 		esac
-		read arg
+		read -r arg
 		case "$arg" in
 		([Yy]*)      ;;
 		(*)     exit ;;
@@ -81,7 +81,7 @@ paste() {
 		echo
 	} | sed 's,^file://,,' | tr -d '\r' | {
 		set --
-		while read f
+		while read -r f
 		do
 			case "$f" in
 			("")
