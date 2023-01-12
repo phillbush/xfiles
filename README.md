@@ -22,7 +22,18 @@ XFiles can be customized by setting the following X resources:
 * `XFiles.selbackground`: Background color for selected entries.
 * `XFiles.selforeground`: Text color for selected entries.
 
-**WARNING!**
+**Non-features.**
+XFiles does not come with any of the following features:
+
+* Context menu:     Use `xmenu` or `pmenu` for that.
+* URL bar:          Use `dmenu` or `xprompt` for that.
+* File operations:  Use `mv`, `cp` and `[fmutils]` for that.
+* File opening:     Use `xdg-open` or `[plumb]` for that.
+
+[fmutils]: https://github.com/phillbush/fmutils
+[plumb]: https://github.com/phillbush/plumb
+
+## Controller Script
 
 XFiles now uses a shell script for additional operation on files.
 
@@ -33,7 +44,7 @@ With the addition of drag-and-drop, it became necessary to use the
 script for moving/copying the dropped files as well.
 
 XFiles now uses a script called `xfilesctl` (for XFiles Controller) that
-handles both menu and file dropping.  An example script is provided, but
+handles menus, file dropping and key presses.  An example script is provided, but
 it relies on a few programs from [fmutils], a collection of small
 scripts for file management.
 
@@ -41,6 +52,9 @@ scripts for file management.
 
 I highly recommend you to read this script and change it to fit your
 needs.
+
+The default `xfilesctl` script that comes with `xfiles` uses `xmenu` for
+context menus and `dmenu` for the URL bar.
 
 
 ## Opening
