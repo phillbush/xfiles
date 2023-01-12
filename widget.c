@@ -2221,7 +2221,6 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems, char **text)
 		unselectitems(wid);
 		break;
 	case XK_Return:
-	case XK_L:
 		if (wid->highlight == -1)
 			break;
 		*nitems = fillselitems(wid, selitems, wid->highlight);
@@ -2245,10 +2244,7 @@ keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems, char **text)
 	case XK_Down:
 	case XK_Left:
 	case XK_Right:
-	case XK_h:
-	case XK_j:
-	case XK_k:
-	case XK_l:
+hjkl:
 		redrawall = TRUE;
 		if (ksym == XK_Home) {
 			index = 0;
@@ -2329,8 +2325,11 @@ draw:
 		 */
 		if (ksym < XK_space || ksym > XK_asciitilde)
 			break;
-		if (!FLAG(xev->state, ControlMask))
+		if (!FLAG(xev->state, ControlMask)) {
+			if (ksym == XK_h || ksym == XK_j || ksym == XK_k || ksym == XK_l)
+				goto hjkl;
 			break;
+		}
 		/* FALLTHROUGH */
 	case XK_F1: case XK_F2: case XK_F3: case XK_F4: case XK_F5: case XK_F6:
 	case XK_F7: case XK_F8: case XK_F9: case XK_F10: case XK_F11: case XK_F12:
