@@ -300,17 +300,19 @@ entrycmp(const void *ap, const void *bp)
 	return strcoll(a[STATE_NAME], b[STATE_NAME]);
 }
 
-static void
+static int
 setthumbpath(struct FM *fm, char *orig, char *thumb)
 {
 	char buf[PATH_MAX];
 	int i;
 
-	snprintf(buf, PATH_MAX, "%s", orig);
+	if (realpath(orig, buf) == NULL)
+		return RET_ERROR;
 	for (i = 0; buf[i] != '\0'; i++)
 		if (buf[i] == '/')
 			buf[i] = '%';
 	snprintf(thumb, PATH_MAX, "%s/%s.ppm", fm->thumbnaildir, buf);
+	return RET_OK;
 }
 
 static int
@@ -452,7 +454,8 @@ thumbnailer(void *arg)
 			continue;
 		if (strncmp(fm->entries[i][STATE_PATH], fm->thumbnaildir, fm->thumbnaildirlen) == 0)
 			continue;
-		setthumbpath(fm, fm->entries[i][STATE_PATH], path);
+		if (setthumbpath(fm, fm->entries[i][STATE_PATH], path) == RET_ERROR)
+			continue;
 		if (thumbexists(fm, fm->entries[i], path)) {
 			setthumbnail(fm->wid, path, i);
 		}
