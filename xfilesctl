@@ -54,13 +54,32 @@ drop() {
 	dialog "$@"
 }
 
+snarf() {
+	case "$#" in
+	(0)
+		# no file to copy
+		return
+		;;
+	esac
+	for arg
+	do
+		# prefix files with $PWD (they are given as relative paths)
+		shift
+		set -- "$@" "$PWD/$arg"
+	done
+	# send URIs to clipboard
+	printf 'file://%s\r\n' "$@" |\
+	xclip -selection clipboard -in -target "text/uri-list" &
+}
+
 paste() {
 	cmd="$1"
 	shift 1
 	{
-		xsel -ob
+		# get URIs from clipboard
+		xclip -selection clipboard -out -target "text/uri-list"
 		echo
-	} | {
+	} | sed 's,^file://,,' | tr -d '\r' | {
 		set --
 		while read f
 		do
@@ -115,7 +134,7 @@ filemenu() {
 		term bulkrename "$@"
 		;;
 	("snarf")
-		xsel -op | xsel -ib &
+		snarf "$@"
 		;;
 	("trash")
 		trash "$@"
@@ -167,6 +186,14 @@ case "$operation" in
 	# call dmenu to go somewhere
 	newdir="$("$PROMPTCMD" -w "$WINDOWID")"
 	changedir "$newdir"
+	;;
+(^[Cc])
+	# snarf files
+	snarf "$@"
+	;;
+(^[Vv])
+	# copy snarfed files
+	paste "cp"
 	;;
 (^Delete)
 	case "$#" in

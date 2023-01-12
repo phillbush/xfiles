@@ -29,6 +29,7 @@ XFiles does not come with any of the following features:
 * URL bar:          Use `dmenu` or `xprompt` for that.
 * File operations:  Use `mv`, `cp` and [fmutils] for that.
 * File opening:     Use `xdg-open` or [plumb] for that.
+* Clipboard copy:   Use `xclip` for that.
 
 [fmutils]: https://github.com/phillbush/fmutils
 [plumb]: https://github.com/phillbush/plumb
@@ -54,7 +55,8 @@ I highly recommend you to read this script and change it to fit your
 needs.
 
 The default `xfilesctl` script that comes with `xfiles` uses `xmenu` for
-context menus and `dmenu` for the URL bar.
+context menus and `dmenu` for the URL bar.  It also uses `xclip(1)` for
+dealing with the clipboard.
 
 
 ## Opening
