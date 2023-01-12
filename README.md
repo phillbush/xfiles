@@ -27,8 +27,8 @@ XFiles does not come with any of the following features:
 
 * Context menu:     Use `xmenu` or `pmenu` for that.
 * URL bar:          Use `dmenu` or `xprompt` for that.
-* File operations:  Use `mv`, `cp` and `[fmutils]` for that.
-* File opening:     Use `xdg-open` or `[plumb]` for that.
+* File operations:  Use `mv`, `cp` and [fmutils] for that.
+* File opening:     Use `xdg-open` or [plumb] for that.
 
 [fmutils]: https://github.com/phillbush/fmutils
 [plumb]: https://github.com/phillbush/plumb
