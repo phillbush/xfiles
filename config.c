@@ -49,6 +49,13 @@ static char *file_archive[]    = { "f", "*.zip", "*.tar", "*.gz", "*.rar", NULL 
 static char *file_audio[]      = { "f", "*.mp[23]", "*.ogg", "*.opus", "*.flac", NULL };
 static char *file_code[]       = { "f", "*.c", "*.h", "*.s", NULL };
 static char *file_core[]       = { "f", "*.core", NULL };
+static char *file_xbm[]        = { "f", "*.xbm", NULL };
+static char *file__xpm[]       = { "f", "*.xpm", NULL };
+static char *file_png[]        = { "f", "*.png", NULL };
+static char *file_bmp[]        = { "f", "*.bmp", NULL };
+static char *file_gif[]        = { "f", "*.gif", NULL };
+static char *file_tiff[]       = { "f", "*.tiff", NULL };
+static char *file_jpeg[]       = { "f", "*.jpeg", "*.jpg", NULL };
 static char *file_image[]      = { "f", "*.x[pb]m", "*.png", "*.jpg", "*.jpeg", "*.ppm", "*.gif", NULL };
 static char *file_svg[]        = { "f", "*.svg", NULL };
 static char *file_readme[]     = { "f", "README", "README.md", NULL };
@@ -112,11 +119,35 @@ size_t nicons = LEN(icons);
 /*
  * The following are commands to be run to generate thumbnails.
  */
-static char *imagemagick[NCMDARGS] = {
+#define PNMSCALE " 2>/dev/null | pnmscalefixed -xysize "THUMBSIZE" "THUMBSIZE" "
+
+static char *xbmtopbm[NCMDARGS] = {
 	"/bin/sh", "-c",
-	"convert \"${1}[0]\" -background '#0A0A0A' -flatten " \
-	"-format ppm -thumbnail \""THUMBSIZE"x"THUMBSIZE"\" " \
-	"-define filename:literal=true \"${2}\"",
+	"<\"${1}\" xbmtopbm | ppmtoppm"PNMSCALE">\"${2}\""
+};
+static char *xpmtoppm[NCMDARGS] = {
+	"/bin/sh", "-c",
+	"<\"${1}\" xpmtoppm"PNMSCALE">\"${2}\""
+};
+static char *pngtopnm[NCMDARGS] = {
+	"/bin/sh", "-c",
+	"<\"${1}\" pngtopnm"PNMSCALE">\"${2}\""
+};
+static char *bmptopnm[NCMDARGS] = {
+	"/bin/sh", "-c",
+	"<\"${1}\" bmptopnm"PNMSCALE">\"${2}\""
+};
+static char *giftopnm[NCMDARGS] = {
+	"/bin/sh", "-c",
+	"<\"${1}\" giftopnm"PNMSCALE">\"${2}\""
+};
+static char *tifftopnm[NCMDARGS] = {
+	"/bin/sh", "-c",
+	"<\"${1}\" tifftopnm"PNMSCALE">\"${2}\""
+};
+static char *jpegtopnm[NCMDARGS] = {
+	"/bin/sh", "-c",
+	"<\"${1}\" jpegtopnm"PNMSCALE">\"${2}\""
 };
 static char *ffmpegthumb[NCMDARGS] = {
 	"/bin/sh", "-c",
@@ -143,7 +174,13 @@ static char *pdftoppm[NCMDARGS] = {
  */
 char **thumbs[][2] = {
 	{ file_video,      ffmpegthumb, },
-	{ file_image,      imagemagick, },
+	{ file_xbm,        xbmtopbm, },
+	{ file__xpm,       xpmtoppm, },
+	{ file_png,        pngtopnm, },
+	{ file_bmp,        bmptopnm, },
+	{ file_gif,        giftopnm, },
+	{ file_tiff,       tifftopnm, },
+	{ file_jpeg,       jpegtopnm, },
 	{ file_svg,        rsvgconvert, },
 	{ file_pdf,        pdftoppm,    },
 	{ NULL,            NULL, },
