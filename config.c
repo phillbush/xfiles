@@ -114,7 +114,7 @@ size_t nicons = LEN(icons);
  */
 static char *imagemagick[NCMDARGS] = {
 	"/bin/sh", "-c",
-	"convert \"${1}[0]\" -background '#0A0A0A' -flatten " \
+	"convert \"${1}\" -background '#0A0A0A' -flatten " \
 	"-format ppm -thumbnail \""THUMBSIZE"x"THUMBSIZE"\" " \
 	"-define filename:literal=true \"${2}\"",
 };
