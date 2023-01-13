@@ -2594,9 +2594,6 @@ selmode(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 		switch (ev.type) {
 		case ButtonPress:
 		case ButtonRelease:
-			if (ownsel)
-				ownprimary(wid, ev.xbutton.time);
-			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xbutton.x, ev.xbutton.y);
 			goto done;
 		case MotionNotify:
 			if (ev.xmotion.time - lasttime < MOTION_TIME)
@@ -2611,8 +2608,11 @@ selmode(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 		endevent(wid);
 	}
 done:
-	commitrectsel(wid);
 	wid->state = STATE_NORMAL;
+	if (ownsel)
+		ownprimary(wid, ev.xbutton.time);
+	rectdraw(wid, 0, 0, 0, 0, 0, 0);
+	commitrectsel(wid);
 	commitdraw(wid);
 	XSyncDestroyAlarm(wid->dpy, alarm);
 	return WIDGET_NONE;
