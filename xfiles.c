@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <err.h>
+#include <errno.h>
 #include <grp.h>
 #include <limits.h>
 #include <pwd.h>
@@ -546,11 +547,56 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 static void
 initthumbnailer(struct FM *fm)
 {
-	if ((fm->thumbnaildir = getenv(THUMBNAILDIR)) != NULL) {
-		fm->thumbnaildirlen = strlen(fm->thumbnaildir);
-	} else {
-		fm->thumbnaildirlen = 0;
+	struct stat sb;
+	mode_t mode, dir_mode;
+	int mkdir_errno, done;
+	char path[PATH_MAX];
+	char *slash, *str;
+
+	if ((str = getenv(THUMBNAILDIR)) == NULL)
+		return;
+	mode = 0777 & ~umask(0);
+	dir_mode = mode | S_IWUSR | S_IXUSR;
+	(void)snprintf(path, PATH_MAX, "%s", str);
+	slash = strrchr(path, '\0');
+	while (--slash > path && *slash == '/')
+		*slash = '\0';
+	fm->thumbnaildir = estrdup(path);
+	slash = path;
+	for (;;) {
+		slash += strspn(slash, "/");
+		slash += strcspn(slash, "/");
+		done = (*slash == '\0');
+		*slash = '\0';
+		if (mkdir(path, done ? mode : dir_mode) == 0) {
+			if (mode > 0777 && chmod(path, mode) == -1) {
+				warn("%s", fm->thumbnaildir);
+				goto error;
+			}
+		} else {
+			mkdir_errno = errno;
+			if (stat(path, &sb) == -1) {
+				errno = mkdir_errno;
+				warn("%s", fm->thumbnaildir);
+				goto error;
+			}
+			if (!S_ISDIR(sb.st_mode)) {
+				errno = ENOTDIR;
+				warn("%s", fm->thumbnaildir);
+				goto error;
+			}
+		}
+		if (done)
+			break;
+		*slash = '/';
 	}
+	fm->thumbnaildirlen = strlen(fm->thumbnaildir);
+	return;
+error:
+	free(fm->thumbnaildir);
+	fm->thumbnaildir = NULL;
+	fm->thumbnaildirlen = 0;
+	return;
 }
 
 static void
@@ -838,13 +884,12 @@ main(int argc, char *argv[])
 		.foundicons = NULL,
 		.home = home,
 		.homelen = ((home != NULL) ? strlen(home) : 0),
-
 		.uid = getuid(),
 		.gid = getgid(),
-
 		.thumblock = PTHREAD_MUTEX_INITIALIZER,
 		.thumbexit = 0,
 		.thumbnaildir = NULL,
+		.thumbnaildirlen = 0,
 	};
 	(*fm.cwd) = (struct Cwd){
 		.next = NULL,
@@ -881,7 +926,7 @@ main(int argc, char *argv[])
 	initthumbnailer(&fm);
 	if ((fm.wid = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
-	snprintf(winid, WINDOWID_BUFSIZE, "%lu", widgetwinid(fm.wid));
+	(void)snprintf(winid, WINDOWID_BUFSIZE, "%lu", widgetwinid(fm.wid));
 	if (setenv(WINDOWID, winid, TRUE) == RET_ERROR) {
 		warn("setenv");
 		exitval = EXIT_FAILURE;
@@ -1000,6 +1045,7 @@ error:
 	free(fm.entries);
 	free(fm.foundicons);
 	free(fm.selitems);
+	free(fm.thumbnaildir);
 	closewidget(fm.wid);
 	return exitval;
 }
