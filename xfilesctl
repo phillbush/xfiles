@@ -57,12 +57,6 @@ snarf() {
 		return
 		;;
 	esac
-	for arg
-	do
-		# prefix files with $PWD (they are given as relative paths)
-		shift
-		set -- "$@" "$PWD/$arg"
-	done
 	# send URIs to clipboard
 	printf 'file://%s\r\n' "$@" |\
 	xclip -selection clipboard -in -target "text/uri-list" &
