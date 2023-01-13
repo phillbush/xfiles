@@ -51,12 +51,13 @@ static char *file_code[]       = { "f", "*.c", "*.h", "*.s", NULL };
 static char *file_core[]       = { "f", "*.core", NULL };
 static char *file_xbm[]        = { "f", "*.xbm", NULL };
 static char *file__xpm[]       = { "f", "*.xpm", NULL };
+static char *file_ppm[]        = { "f", "*.p[bgp]m", NULL };
 static char *file_png[]        = { "f", "*.png", NULL };
 static char *file_bmp[]        = { "f", "*.bmp", NULL };
 static char *file_gif[]        = { "f", "*.gif", NULL };
 static char *file_tiff[]       = { "f", "*.tiff", NULL };
 static char *file_jpeg[]       = { "f", "*.jpeg", "*.jpg", NULL };
-static char *file_image[]      = { "f", "*.x[pb]m", "*.png", "*.jpg", "*.jpeg", "*.ppm", "*.gif", NULL };
+static char *file_image[]      = { "f", "*.x[pb]m", "*.png", "*.jpg", "*.jpeg", "*.p[bgp]m", "*.gif", NULL };
 static char *file_svg[]        = { "f", "*.svg", NULL };
 static char *file_readme[]     = { "f", "README", "README.md", NULL };
 static char *file_makefile[]   = { "f", "[Mm]akefile", NULL };
@@ -121,6 +122,10 @@ size_t nicons = LEN(icons);
  */
 #define PNMSCALE " 2>/dev/null | pnmscalefixed -xysize "THUMBSIZE" "THUMBSIZE" "
 
+static char *ppmtoppm[NCMDARGS] = {
+	"/bin/sh", "-c",
+	"<\"${1}\" ppmtoppm"PNMSCALE">\"${2}\""
+};
 static char *xbmtopbm[NCMDARGS] = {
 	"/bin/sh", "-c",
 	"<\"${1}\" xbmtopbm | ppmtoppm"PNMSCALE">\"${2}\""
@@ -176,6 +181,7 @@ char **thumbs[][2] = {
 	{ file_video,      ffmpegthumb, },
 	{ file_xbm,        xbmtopbm, },
 	{ file__xpm,       xpmtoppm, },
+	{ file_ppm,        ppmtoppm, },
 	{ file_png,        pngtopnm, },
 	{ file_bmp,        bmptopnm, },
 	{ file_gif,        giftopnm, },
