@@ -50,10 +50,6 @@ dialog() {
 	' xfilesctl "$@"
 }
 
-drop() {
-	dialog "$@"
-}
-
 snarf() {
 	case "$#" in
 	(0)
@@ -95,9 +91,31 @@ paste() {
 	}
 }
 
+dropmenu() {
+	case "$(
+	"$MENUCMD" <<-EOF
+		copy
+		move
+		link
+		none
+	EOF
+	)" in
+	("copy")
+		dialog "cp" "$@"
+		;;
+	("move")
+		dialog "mv" "$@"
+		;;
+	("link")
+		dialog "ln" "$@"
+		;;
+	("term")
+		"$TERMCMD" &
+		;;
+	esac
+}
+
 dirmenu() {
-	func="$1"
-	shift 1
 	case "$(
 	"$MENUCMD" <<-EOF
 		copy
@@ -107,13 +125,13 @@ dirmenu() {
 	EOF
 	)" in
 	("copy")
-		"$func" "cp" "$@"
+		paste "cp" "$@"
 		;;
 	("move")
-		"$func" "mv" "$@"
+		paste "mv" "$@"
 		;;
 	("link")
-		"$func" "ln" "$@"
+		paste "ln" "$@"
 		;;
 	("term")
 		"$TERMCMD" &
@@ -155,7 +173,7 @@ case "$operation" in
 ("menu")
 	case "$#" in
 	(0)
-		dirmenu paste "$@"
+		dirmenu "$@"
 		;;
 	(*)
 		filemenu "$@"
@@ -163,7 +181,7 @@ case "$operation" in
 	esac
 	;;
 ("drop-ask")
-	dirmenu drop "$@"
+	dropmenu "$@"
 	;;
 ("drop-copy")
 	drop "cp" "$@"
