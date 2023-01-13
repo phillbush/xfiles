@@ -3122,10 +3122,14 @@ closewidget(Widget wid)
 		}
 	}
 	free(wid->icons);
-	XFreePixmap(wid->dpy, wid->pix);
-	XFreePixmap(wid->dpy, wid->rectbord);
-	XFreePixmap(wid->dpy, wid->namepix);
-	XFreePixmap(wid->dpy, wid->stipple);
+	if (wid->pix != None)
+		XFreePixmap(wid->dpy, wid->pix);
+	if (wid->rectbord != None)
+		XFreePixmap(wid->dpy, wid->rectbord);
+	if (wid->namepix != None)
+		XFreePixmap(wid->dpy, wid->namepix);
+	if (wid->stipple != None)
+		XFreePixmap(wid->dpy, wid->stipple);
 	for (i = 0; i < SELECT_LAST; i++)
 		for (j = 0; j < COLOR_LAST; j++)
 			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
