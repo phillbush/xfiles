@@ -2845,10 +2845,8 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
 			}
 			break;
 		case ClientMessage:
-			if (ev.xclient.message_type == wid->atoms[XDND_FINISHED]) {
-				printf("ASDA\n");
+			if (ev.xclient.message_type == wid->atoms[XDND_FINISHED])
 				return WIDGET_REFRESH;
-			}
 			break;
 		default:
 			break;
