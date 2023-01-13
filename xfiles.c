@@ -648,7 +648,7 @@ runcontext(struct FM *fm, char *cmd, int nselitems)
 	argv[0] = CONTEXTCMD;
 	argv[1] = cmd;
 	for (i = 0; i < nselitems; i++)
-		argv[i+2] = fm->entries[fm->selitems[i]][STATE_NAME];
+		argv[i+2] = fm->entries[fm->selitems[i]][STATE_PATH];
 	argv[i+2] = NULL;
 	forkexec(argv, NULL, FALSE);
 	free(argv);
