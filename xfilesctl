@@ -44,7 +44,7 @@ dialog() {
 			ln -s "$@" .
 			;;
 		("rm")
-			dialog "rm" "$@"
+			trash "$@"
 			;;
 		esac
 	' xfilesctl "$@"
