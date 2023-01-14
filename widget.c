@@ -2618,12 +2618,12 @@ selmode(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 	}
 done:
 	wid->state = STATE_NORMAL;
-	if (ownsel)
-		ownprimary(wid, ev.xbutton.time);
 	rectdraw(wid, 0, 0, 0, 0, 0, 0);
 	commitrectsel(wid);
 	commitdraw(wid);
 	XSyncDestroyAlarm(wid->dpy, alarm);
+	if (ownsel)
+		ownprimary(wid, ev.xbutton.time);
 	return WIDGET_NONE;
 }
 
