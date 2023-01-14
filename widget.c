@@ -1762,11 +1762,11 @@ rectselect(Widget wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, i
 	vismax = lastvisible(wid);
 	indexmin = min(srci, dsti);
 	indexmax = max(srci, dsti);
-	rowmin = indexmin / wid->ncols;
 	colmin = indexmin % wid->ncols;
 	colmax = indexmax % wid->ncols;
 	indexmin = min(indexmin, wid->nitems - 1);
 	indexmax = min(indexmax, wid->nitems - 1);
+	rowmin = indexmin / wid->ncols;
 	rowsrc = srci / wid->ncols;
 	changed = FALSE;
 	for (i = vismin; i <= vismax; i++) {
