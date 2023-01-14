@@ -2712,7 +2712,7 @@ dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 {
 	XEvent ev;
 	Window lastwin, win, dragwin;
-	Atom version;
+	Atom lastaction, action, version;
 	WidgetEvent retval;
 	int sendposition;
 	int accept, inside, x, y, w, h;
@@ -2730,6 +2730,7 @@ dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 	wid->seltime = lasttime;
 	XSetSelectionOwner(wid->dpy, wid->atoms[XDND_SELECTION], wid->win, lasttime);
 	dragwin = createdragwin(wid, clicki);
+	lastaction = action = None;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		switch (processevent(wid, &ev)) {
 		case WIDGET_CLOSE:
@@ -2773,18 +2774,24 @@ dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 			y = ev.xclient.data.l[2] & 0xFFFF;
 			w = ev.xclient.data.l[3] >> 16;
 			h = ev.xclient.data.l[3] & 0xFFFF;
+			if ((Atom)ev.xclient.data.l[4] != None)
+				action = (Atom)ev.xclient.data.l[4];
+			else
+				action = wid->atoms[XDND_ACTION_COPY];
 			break;
 		case MotionNotify:
 			if (ev.xmotion.time - lasttime < MOTION_TIME)
 				break;
 			XMoveWindow(wid->dpy, dragwin, ev.xmotion.x_root + DND_DISTANCE, ev.xmotion.y_root + DND_DISTANCE);
 			inside = between(ev.xmotion.x, ev.xmotion.y, x, y, w, h);
-			if ((sendposition || !inside) && lastwin != None) {
-				if (FLAG(ev.xmotion.state, ControlMask|ShiftMask))
+			if ((lastaction != action || sendposition || !inside) && lastwin != None) {
+				if (lastaction != None)
+					d[4] = lastaction;
+				else if (FLAG(ev.xmotion.state, ControlMask|ShiftMask))
 					d[4] = wid->atoms[XDND_ACTION_LINK];
-				if (FLAG(ev.xmotion.state, ShiftMask))
+				else if (FLAG(ev.xmotion.state, ShiftMask))
 					d[4] = wid->atoms[XDND_ACTION_MOVE];
-				if (FLAG(ev.xmotion.state, ControlMask))
+				else if (FLAG(ev.xmotion.state, ControlMask))
 					d[4] = wid->atoms[XDND_ACTION_COPY];
 				else
 					d[4] = wid->atoms[XDND_ACTION_ASK];
@@ -2795,6 +2802,7 @@ dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 				sendposition = TRUE;
 			}
 			lasttime = ev.xmotion.time;
+			lastaction = action;
 			if ((win = getdropwin(wid, &version)) == lastwin)
 				break;
 			sendposition = TRUE;
@@ -2816,6 +2824,7 @@ dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 			else
 				widgetcursor(wid, CURSOR_DRAG);
 			lastwin = win;
+			lastaction = action = None;
 			break;
 		}
 	}
