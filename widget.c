@@ -17,6 +17,7 @@
 #include <X11/xpm.h>
 #include <X11/Xft/Xft.h>
 #include <X11/Xcursor/Xcursor.h>
+#include <X11/extensions/Xrender.h>
 #include <X11/extensions/shape.h>
 #include <X11/extensions/sync.h>
 
@@ -30,6 +31,7 @@
 #define DEF_FG          "#FFFFFF"
 #define DEF_SELBG       "#121212"
 #define DEF_SELFG       "#707880"
+#define DEF_OPACITY     1.0
 
 /* ellipsis has two dots rather than three; the third comes from the extension */
 #define ELLIPSIS        ".."
@@ -45,9 +47,7 @@
 #define PPM_COLOR       "255\n"
 
 #define ALARMFLAGS      (XSyncCACounter | XSyncCAValue | XSyncCAValueType | XSyncCATestType | XSyncCADelta)
-#define DEPTH(d)        (DefaultDepth((d), DefaultScreen((d))))
-#define VISUAL(d)       (DefaultVisual((d), DefaultScreen((d))))
-#define COLORMAP(d)     (DefaultColormap((d), DefaultScreen((d))))
+#define SCREEN(d)       (DefaultScreen((d)))
 #define WIDTH(d)        (DisplayWidth((d), DefaultScreen((d))))
 #define HEIGHT(d)       (DisplayHeight((d), DefaultScreen((d))))
 #define ROOT(d)         (DefaultRootWindow((d)))
@@ -240,14 +240,19 @@ struct Widget {
 	XftFont *font;
 	Atom dropaction;
 	Window dropsrc;
+	Visual *visual;
+	Colormap colormap;
+	unsigned int depth;
 
 	Atom lastprop;
 	char *lasttext;
 
-	Pixmap pix;                     /* the pixmap of the window */
+	Pixmap pix;                     /* the pixmap of the icon grid */
 	Pixmap namepix;                 /* temporary pixmap for the labels */
 	Pixmap stipple;                 /* stipple for painting icons of selected items */
 	Pixmap rectbord;                /* rectangular selection border */
+
+	XftDraw *draw;                  /* used for drawing with alpha channel */
 
 	/*
 	 * Size of the rectbord pixmap.
@@ -435,6 +440,8 @@ static int
 createwin(Widget wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
 {
 	Atom version = XDND_VERSION;    /* yes, version is an Atom */
+	XftDraw *draw;
+	Pixmap bg;
 	unsigned int dw, dh;
 	int x, y;
 	int dx, dy;
@@ -476,12 +483,12 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 	wid->win = XCreateWindow(
 		wid->dpy, ROOT(wid->dpy),
 		x, y, wid->w, wid->h, 0,
-		CopyFromParent, CopyFromParent, CopyFromParent,
+		wid->depth, InputOutput, wid->visual,
 		CWBackPixel | CWEventMask | CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
 			.border_pixel = 0,
-			.colormap = COLORMAP(wid->dpy),
-			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
+			.colormap = wid->colormap,
+			.background_pixel = 0,
 			.event_mask = StructureNotifyMask | ExposureMask
 			            | KeyPressMask | PointerMotionMask
 			            | ButtonReleaseMask | ButtonPressMask
@@ -490,12 +497,26 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 	);
 	if (wid->win == None)
 		return RET_ERROR;
+	bg = XCreatePixmap(
+		wid->dpy,
+		wid->win,
+		THUMBSIZE,
+		THUMBSIZE,
+		wid->depth
+	);
+	if (bg == None)
+		return RET_ERROR;
+	draw = XftDrawCreate(wid->dpy, bg, wid->visual, wid->colormap);
+	XftDrawRect(draw, &wid->colors[SELECT_NOT][COLOR_BG], 0, 0, THUMBSIZE, THUMBSIZE);
+	XftDrawDestroy(draw);
+	XSetWindowBackgroundPixmap(wid->dpy, wid->win, bg);
+	XFreePixmap(wid->dpy, bg);
 	wid->namepix = XCreatePixmap(
 		wid->dpy,
 		wid->win,
 		LABELWIDTH,
 		wid->fonth,
-		DEPTH(wid->dpy)
+		wid->depth
 	);
 	if (wid->namepix == None)
 		return RET_ERROR;
@@ -547,10 +568,17 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 }
 
 static int
-ealloccolor(Widget wid, const char *s, XftColor *color)
+ealloccolor(Widget wid, const char *s, XftColor *color, unsigned short alpha)
 {
-	if(!XftColorAllocName(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), s, color))
+	XColor screen, exact;
+
+	if (!XAllocNamedColor(wid->dpy, wid->colormap, s, &screen, &exact))
 		return RET_ERROR;
+	color->pixel = screen.pixel;
+	color->color.red = exact.red;
+	color->color.green = exact.green;
+	color->color.blue = exact.blue;
+	color->color.alpha = alpha;
 	return RET_OK;
 }
 
@@ -593,7 +621,7 @@ inittheme(Widget wid, const char *class, const char *name)
 {
 	XrmDatabase xdb;
 	int i, j, goterror;;
-	char *xrm, *s;
+	char *xrm, *s, *endp;
 	char *resources[SELECT_LAST][COLOR_LAST] = {
 		[SELECT_NOT][COLOR_BG] = "background",
 		[SELECT_NOT][COLOR_FG] = "foreground",
@@ -608,18 +636,27 @@ inittheme(Widget wid, const char *class, const char *name)
 	};
 	int colorerror[SELECT_LAST][COLOR_LAST] = { { FALSE, FALSE }, { FALSE, FALSE } };
 	int fonterror = FALSE;
+	unsigned short alpha;
+	double opacity;
 
 	xdb = NULL;
 	goterror = FALSE;
 	if ((xrm = XResourceManagerString(wid->dpy)) != NULL)
 		xdb = XrmGetStringDatabase(xrm);
+	alpha = DEF_OPACITY * 0xFFFF;
+	if ((s = getresource(xdb, class, name, "opacity")) != NULL) {
+		opacity = strtod(s, &endp);
+		if (endp == s || *endp != '\0' || opacity < 0.0 || opacity > 1.0)
+			opacity = DEF_OPACITY;
+		alpha = opacity * 0xFFFF;
+	}
 	for (i = 0; i < SELECT_LAST; i++) {
 		for (j = 0; j < COLOR_LAST; j++) {
 			s = getresource(xdb, class, name, resources[i][j]);
 			if (s == NULL) {
 				/* could not found resource; use default value */
 				s = defvalue[i][j];
-			} else if (ealloccolor(wid, s, &wid->colors[i][j]) == RET_ERROR) {
+			} else if (ealloccolor(wid, s, &wid->colors[i][j], alpha) == RET_ERROR) {
 				/* resource found, but allocation failed; use default value */
 				warnx("\"%s\": could not load color (falling back to \"%s\")", s, defvalue[i][j]);
 				s = defvalue[i][j];
@@ -627,11 +664,12 @@ inittheme(Widget wid, const char *class, const char *name)
 				/* resource found and successfully allocated */
 				continue;
 			}
-			if (ealloccolor(wid, s, &wid->colors[i][j]) == RET_ERROR) {
+			if (ealloccolor(wid, s, &wid->colors[i][j], alpha) == RET_ERROR) {
 				warnx("\"%s\": could not load color", s);
 				colorerror[i][j] = TRUE;
 				goterror = TRUE;
 			}
+			alpha = 0xFFFF;
 		}
 	}
 	s = getresource(xdb, class, name, "faceName");
@@ -665,7 +703,7 @@ error:
 		for (j = 0; j < COLOR_LAST; j++) {
 			if (colorerror[i][j])
 				continue;
-			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
+			XftColorFree(wid->dpy, wid->visual, wid->colormap, &wid->colors[i][j]);
 		}
 	}
 	if (!fonterror)
@@ -706,9 +744,12 @@ calcsize(Widget wid, int w, int h)
 	if (ncols != wid->ncols || nrows != wid->nrows) {
 		if (wid->pix != None)
 			XFreePixmap(wid->dpy, wid->pix);
+		if (wid->draw != None)
+			XftDrawDestroy(wid->draw);
 		wid->pixw = wid->ncols * wid->itemw;
 		wid->pixh = wid->nrows * wid->itemh;
-		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, DEPTH(wid->dpy));
+		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, wid->depth);
+		wid->draw = XftDrawCreate(wid->dpy, wid->pix, wid->visual, wid->colormap);
 		ret = TRUE;
 	}
 	if (wid->w > wid->rectw || wid->h > wid->recth) {
@@ -735,11 +776,9 @@ drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int
 	int w;
 
 	w = textwidth(wid, text, len);
-	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
-	XFillRectangle(wid->dpy, wid->namepix, wid->gc, 0, 0, LABELWIDTH, wid->fonth);
-	XSetForeground(wid->dpy, wid->gc, color[COLOR_BG].pixel);
-	XFillRectangle(wid->dpy, wid->namepix, wid->gc, x, 0, w, wid->fonth);
-	draw = XftDrawCreate(wid->dpy, pix, VISUAL(wid->dpy), COLORMAP(wid->dpy));
+	draw = XftDrawCreate(wid->dpy, pix, wid->visual, wid->colormap);
+	XftDrawRect(draw, &wid->colors[SELECT_NOT][COLOR_BG], 0, 0, LABELWIDTH, wid->fonth);
+	XftDrawRect(draw, &color[COLOR_BG], x, 0, w, wid->fonth);
 	XftDrawStringUtf8(draw, &color[COLOR_FG], wid->font, x, wid->font->ascent, (const FcChar8 *)text, len);
 	XftDrawDestroy(draw);
 }
@@ -970,8 +1009,7 @@ drawitem(Widget wid, int index)
 	y = (i / wid->ncols) % wid->nrows;
 	x *= wid->itemw;
 	y *= wid->itemh;
-	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
-	XFillRectangle(wid->dpy, wid->pix, wid->gc, x, y, wid->itemw, wid->itemh);
+	XftDrawRect(wid->draw, &wid->colors[SELECT_NOT][COLOR_BG], x, y, wid->itemw, wid->itemh);
 	drawicon(wid, index, x, y);
 	drawlabel(wid, index, x, y);
 done:
@@ -984,8 +1022,7 @@ drawitems(Widget wid)
 {
 	int i, n;
 
-	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
-	XFillRectangle(wid->dpy, wid->pix, wid->gc, 0, 0, wid->w, wid->nrows * wid->itemh);
+	XftDrawRect(wid->draw, &wid->colors[SELECT_NOT][COLOR_BG], 0, 0, wid->w, wid->nrows * wid->itemh);
 	n = lastvisible(wid);
 	for (i = wid->row * wid->ncols; i <= n; i++) {
 		drawitem(wid, i);
@@ -1104,17 +1141,21 @@ gethandlepos(Widget wid)
 static void
 drawscroller(Widget wid, int y)
 {
+	XftDraw *draw;
+	XftColor color;
 	Pixmap pix;
 
-	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, DEPTH(wid->dpy))) == None)
+	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, wid->depth)) == None)
 		return;
-	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_BG].pixel);
-	XFillRectangle(wid->dpy, pix, wid->gc, 0, 0, SCROLLER_SIZE, SCROLLER_SIZE);
-	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_FG].pixel);
-	XFillRectangle(wid->dpy, pix, wid->gc, 1, y + 1, HANDLE_MAX_SIZE, wid->handlew);
+	draw = XftDrawCreate(wid->dpy, pix, wid->visual, wid->colormap);
+	color = wid->colors[SELECT_NOT][COLOR_BG];
+	color.color.alpha = 0xFFFF;
+	XftDrawRect(draw, &color, 0, 0, SCROLLER_SIZE, SCROLLER_SIZE);
+	XftDrawRect(draw, &wid->colors[SELECT_NOT][COLOR_FG], 1, y + 1, HANDLE_MAX_SIZE, wid->handlew);
 	XSetWindowBackgroundPixmap(wid->dpy, wid->scroller, pix);
 	XClearWindow(wid->dpy, wid->scroller);
 	XFreePixmap(wid->dpy, pix);
+	XftDrawDestroy(draw);
 }
 
 static int
@@ -1921,7 +1962,12 @@ checkheader(FILE *fp, char *header, size_t size)
 static int
 pixmapfromdata(Widget wid, char **data, Pixmap *pix, Pixmap *mask)
 {
-	XpmAttributes xa = { 0 };
+	XpmAttributes xa = {
+		.valuemask = XpmVisual | XpmColormap | XpmDepth,
+		.visual = wid->visual,
+		.colormap = wid->colormap,
+		.depth = wid->depth,
+	};
 
 	if (XpmCreatePixmapFromData(wid->dpy, wid->win, data, pix, mask, &xa) != XpmSuccess) {
 		*pix = None;
@@ -2015,11 +2061,11 @@ createdragwin(Widget wid, int index)
 	win = XCreateWindow(
 		wid->dpy, ROOT(wid->dpy),
 		xroot, yroot, w, h, 0,
-		CopyFromParent, CopyFromParent, CopyFromParent,
+		wid->depth, InputOutput, wid->visual,
 		CWBackPixel | CWOverrideRedirect| CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
 			.border_pixel = 0,
-			.colormap = COLORMAP(wid->dpy),
+			.colormap = wid->colormap,
 			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
 			.override_redirect = True
 		}
@@ -2061,7 +2107,7 @@ createdragwin(Widget wid, int index)
 		XFreeGC(wid->dpy, gc);
 		XSetWindowBackgroundPixmap(wid->dpy, win, pix);
 	} else {
-		if ((pix = XCreatePixmap(wid->dpy, win, w, h, DEPTH(wid->dpy))) == None) {
+		if ((pix = XCreatePixmap(wid->dpy, win, w, h, wid->depth)) == None) {
 			XDestroyWindow(wid->dpy, win);
 			return None;
 		}
@@ -2192,6 +2238,40 @@ getdroptext(Widget wid, Atom prop)
 done:
 	XFree(p);
 	return text;
+}
+
+static void
+xinitvisual(Widget wid)
+{
+	XVisualInfo tpl = {
+		.screen = SCREEN(wid->dpy),
+		.depth = 32,
+		.class = TrueColor
+	};
+	XVisualInfo *infos;
+	XRenderPictFormat *fmt;
+	long masks = VisualScreenMask | VisualDepthMask | VisualClassMask;
+	int nitems;
+	int i;
+
+	wid->visual = NULL;
+	if ((infos = XGetVisualInfo(wid->dpy, masks, &tpl, &nitems)) != NULL) {
+		for (i = 0; i < nitems; i++) {
+			fmt = XRenderFindVisualFormat(wid->dpy, infos[i].visual);
+			if (fmt->type == PictTypeDirect && fmt->direct.alphaMask) {
+				wid->depth = infos[i].depth;
+				wid->visual = infos[i].visual;
+				wid->colormap = XCreateColormap(wid->dpy, ROOT(wid->dpy), wid->visual, AllocNone);
+				break;
+			}
+		}
+		XFree(infos);
+	}
+	if (wid->visual == NULL) {
+		wid->depth = DefaultDepth(wid->dpy, SCREEN(wid->dpy));
+		wid->visual = DefaultVisual(wid->dpy, SCREEN(wid->dpy));
+		wid->colormap = DefaultColormap(wid->dpy, SCREEN(wid->dpy));
+	}
 }
 
 /*
@@ -2901,6 +2981,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.win = None,
 		.scroller = None,
 		.lock = PTHREAD_MUTEX_INITIALIZER,
+		.draw = NULL,
 		.thumbs = NULL,
 		.thumbhead = NULL,
 		.linelen = NULL,
@@ -2920,6 +3001,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.rectw = 0,
 		.recth = 0,
 		.state = STATE_NORMAL,
+		.namepix = None,
 		.stipple = None,
 		.lastprop = None,
 		.lasttext = NULL,
@@ -2941,6 +3023,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		warnx("could not connect to X server");
 		goto error;
 	}
+	xinitvisual(wid);
 	if (!XSyncQueryExtension(wid->dpy, &wid->syncevent, &tmp)) {
 		warnx("could not query XSync extension");
 		goto error;
@@ -2969,11 +3052,11 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	wid->scroller = XCreateWindow(
 		wid->dpy, wid->win,
 		0, 0, SCROLLER_SIZE, SCROLLER_SIZE, 1,
-		CopyFromParent, CopyFromParent, CopyFromParent,
+		wid->depth, InputOutput, wid->visual,
 		CWBackPixel | CWBorderPixel | CWEventMask | CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
-			.colormap = COLORMAP(wid->dpy),
-			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
+			.colormap = wid->colormap,
+			.background_pixel = 0,
 			.border_pixel = wid->colors[SELECT_NOT][COLOR_FG].pixel,
 			.event_mask = ButtonPressMask | PointerMotionMask,
 		}
@@ -3131,6 +3214,8 @@ closewidget(Widget wid)
 		}
 	}
 	free(wid->icons);
+	if (wid->draw != NULL)
+		XftDrawDestroy(wid->draw);
 	if (wid->pix != None)
 		XFreePixmap(wid->dpy, wid->pix);
 	if (wid->rectbord != None)
@@ -3141,7 +3226,7 @@ closewidget(Widget wid)
 		XFreePixmap(wid->dpy, wid->stipple);
 	for (i = 0; i < SELECT_LAST; i++)
 		for (j = 0; j < COLOR_LAST; j++)
-			XftColorFree(wid->dpy, VISUAL(wid->dpy), COLORMAP(wid->dpy), &wid->colors[i][j]);
+			XftColorFree(wid->dpy, wid->visual, wid->colormap, &wid->colors[i][j]);
 	XftFontClose(wid->dpy, wid->font);
 	XDestroyWindow(wid->dpy, wid->scroller);
 	XDestroyWindow(wid->dpy, wid->win);
@@ -3231,8 +3316,8 @@ setthumbnail(Widget wid, char *path, int item)
 	};
 	wid->thumbs[item]->img = XCreateImage(
 		wid->dpy,
-		VISUAL(wid->dpy),
-		DEPTH(wid->dpy),
+		wid->visual,
+		wid->depth,
 		ZPixmap,
 		0, (char *)data,
 		w, h,

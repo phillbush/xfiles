@@ -17,6 +17,7 @@ XFiles depends on a few environment variables to be usable:
 XFiles can be customized by setting the following X resources:
 
 * `XFiles.faceName`:      Font for drawing text.
+* `XFiles.opacity`:       Background opacity (from 0.0 to 1.0).
 * `XFiles.background`:    Background color.
 * `XFiles.foreground`:    Text color.
 * `XFiles.selbackground`: Background color for selected entries.
