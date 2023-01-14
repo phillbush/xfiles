@@ -44,7 +44,7 @@ dialog() {
 			ln -s "$@" .
 			;;
 		("rm")
-			trash "$@"
+			dialog "rm" "$@"
 			;;
 		esac
 	' xfilesctl "$@"
@@ -149,7 +149,7 @@ filemenu() {
 		snarf "$@"
 		;;
 	("trash")
-		trash "$@"
+		dialog "rm" "$@"
 		;;
 	("edit")
 		"$TERMCMD" -e "$EDITOR" "$1"

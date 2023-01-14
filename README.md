@@ -32,6 +32,12 @@ XFiles does not come with any of the following features:
 * File opening:     Use `xdg-open` or [plumb] for that.
 * Clipboard copy:   Use `xclip` for that.
 
+**Installation.**
+Run `make all` to build, and `make install` to install the binary and
+the manual into `${PREFIX}` (`/usr/local`).
+Run `make install-script` to install the example script that comes with
+XFiles (it is recommended to edit this script for it to fit your needs).
+
 [fmutils]: https://github.com/phillbush/fmutils
 [plumb]: https://github.com/phillbush/plumb
 

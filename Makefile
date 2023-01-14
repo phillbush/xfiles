@@ -35,13 +35,17 @@ clean:
 install: all
 	install -d ${DESTDIR}${PREFIX}/bin
 	install -d ${DESTDIR}${MANPREFIX}/man1
-	install -m 755 ${SCRIPT} ${DESTDIR}${PREFIX}/bin/${SCRIPT}
 	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
 	install -m 644 ${MANS} ${DESTDIR}${MANPREFIX}/man1/${MANS}
 
+install-script:
+	install -m 755 ${SCRIPT} ${DESTDIR}${PREFIX}/bin/${SCRIPT}
+
 uninstall:
-	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT}
 	rm ${DESTDIR}${PREFIX}/bin/${PROG}
 	rm ${DESTDIR}${MANPREFIX}/man1/${MANS}
+
+install-script:
+	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT}
 
 .PHONY: all tags clean install uninstall
