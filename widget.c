@@ -250,6 +250,11 @@ struct Widget {
 	Pixmap rectbord;                /* rectangular selection border */
 
 	/*
+	 * Size of the rectbord pixmap.
+	 */
+	int rectw, recth;
+
+	/*
 	 * Lock used for synchronizing the thumbnail and the main threads.
 	 */
 	pthread_mutex_t lock;
@@ -676,9 +681,9 @@ calcsize(Widget wid, int w, int h)
 	int ncols, nrows, ret;
 	double d;
 
-	ret = 0;
+	ret = FALSE;
 	if (wid->w == w && wid->h == h)
-		return 0;
+		return FALSE;
 	etlock(&wid->lock);
 	ncols = wid->ncols;
 	nrows = wid->nrows;
@@ -701,13 +706,17 @@ calcsize(Widget wid, int w, int h)
 	if (ncols != wid->ncols || nrows != wid->nrows) {
 		if (wid->pix != None)
 			XFreePixmap(wid->dpy, wid->pix);
-		if (wid->rectbord != None)
-			XFreePixmap(wid->dpy, wid->rectbord);
 		wid->pixw = wid->ncols * wid->itemw;
 		wid->pixh = wid->nrows * wid->itemh;
 		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, DEPTH(wid->dpy));
+		ret = TRUE;
+	}
+	if (wid->w > wid->rectw || wid->h > wid->recth) {
+		wid->rectw = max(wid->rectw, wid->w);
+		wid->recth = max(wid->recth, wid->h);
+		if (wid->rectbord != None)
+			XFreePixmap(wid->dpy, wid->rectbord);
 		wid->rectbord = XCreatePixmap(wid->dpy, wid->win, wid->w, wid->h, CLIP_DEPTH);
-		ret = 1;
 	}
 	etunlock(&wid->lock);
 	return ret;
@@ -2908,6 +2917,8 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.seltime = 0,
 		.pix = None,
 		.rectbord = None,
+		.rectw = 0,
+		.recth = 0,
 		.state = STATE_NORMAL,
 		.stipple = None,
 		.lastprop = None,
