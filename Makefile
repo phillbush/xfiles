@@ -45,7 +45,7 @@ uninstall:
 	rm ${DESTDIR}${PREFIX}/bin/${PROG}
 	rm ${DESTDIR}${MANPREFIX}/man1/${MANS}
 
-install-script:
+uninstall-script:
 	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT}
 
 .PHONY: all tags clean install uninstall
