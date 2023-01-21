@@ -12,9 +12,11 @@
 #include "icons/file-audio.xpm"
 #include "icons/file-code.xpm"
 #include "icons/file-core.xpm"
+#include "icons/file-config.xpm"
 #include "icons/file-gear.xpm"
 #include "icons/file-image.xpm"
 #include "icons/file-info.xpm"
+#include "icons/file-object.xpm"
 #include "icons/file-text.xpm"
 #include "icons/file-video.xpm"
 #include "icons/file.xpm"
@@ -46,10 +48,11 @@
  * - Element [n-1] is the obligatory NULL.
  */
 static char *file_app[]        = { "fx", NULL };
-static char *file_archive[]    = { "f", "*.zip", "*.tar", "*.gz", "*.rar", NULL };
-static char *file_audio[]      = { "f", "*.mp[23]", "*.ogg", "*.opus", "*.flac", NULL };
+static char *file_archive[]    = { "f", "*.zip", "*.tar", "*.gz", "*.bz2", "*.rar", NULL };
+static char *file_audio[]      = { "f", "*.mp[23]", "*.m4a", "*.m3u", "*.ogg", "*.opus", "*.flac", NULL };
 static char *file_code[]       = { "f", "*.c", "*.h", "*.s", NULL };
 static char *file_core[]       = { "f", "*.core", NULL };
+static char *file_config[]     = { "f", "*.conf", "*.config", "*.yaml", "*.toml", "*.xml", "*.ini", NULL };
 #ifdef USE_NETPBM
 static char *file_xbm[]        = { "f", "*.xbm", NULL };
 static char *file__xpm[]       = { "f", "*.xpm", NULL };
@@ -62,9 +65,10 @@ static char *file_jpeg[]       = { "f", "*.jpeg", "*.jpg", NULL };
 #endif
 static char *file_image[]      = { "f", "*.x[pb]m", "*.png", "*.jpg", "*.jpeg", "*.p[bgp]m", "*.gif", NULL };
 static char *file_svg[]        = { "f", "*.svg", NULL };
-static char *file_readme[]     = { "f", "README", "README.md", NULL };
-static char *file_makefile[]   = { "f", "[Mm]akefile", NULL };
+static char *file_manual[]     = { "f", "*.[1-9]", "*.3p", "README", "README.md", "COPYING", "LICENSE", "COPYRIGHT", NULL };
+static char *file_makefile[]   = { "f", "[Mm]akefile", "configure", NULL };
 static char *file_pdf[]        = { "f", "*.pdf", NULL };
+static char *file_object[]     = { "f", "*.o", "*.so", "*.a", "lib*", NULL };
 static char *file_text[]       = { "f", "*.epub", "*.txt", "*.ps", "*.eps", "*.djvu", NULL };
 static char *file_video[]      = { "f", "*.mp4", "*.webm", "*.mkv", "*.mov", "*.ogv", NULL };
 static char *folder_bin[]      = { "d", "~/usr", "~/bin", NULL };
@@ -95,10 +99,12 @@ char **icons[][2] = {
 	{ file_audio,      file_audio_xpm,      },
 	{ file_code,       file_code_xpm,       },
 	{ file_core,       file_core_xpm,       },
+	{ file_config,     file_config_xpm,     },
 	{ file_makefile,   file_gear_xpm,       },
 	{ file_image,      file_image_xpm,      },
 	{ file_svg,        file_image_xpm,      },
-	{ file_readme,     file_info_xpm,       },
+	{ file_manual,     file_info_xpm,       },
+	{ file_object,     file_object_xpm,     },
 	{ file_pdf,        file_text_xpm,       },
 	{ file_text,       file_text_xpm,       },
 	{ file_video,      file_video_xpm,      },
