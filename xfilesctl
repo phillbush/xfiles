@@ -152,7 +152,7 @@ filemenu() {
 		dialog "rm" "$@"
 		;;
 	("edit")
-		"$TERMCMD" -e "$EDITOR" "$1"
+		"$TERMCMD" -e "$EDITOR" "$1" &
 		;;
 	esac
 }
@@ -196,7 +196,7 @@ case "$operation" in
 	;;
 (^[LlGg])
 	# call dmenu to go somewhere
-	newdir="$("$PROMPTCMD" -w "$WINDOWID")"
+	newdir="$("$PROMPTCMD" -w "$WINDOWID" </dev/null)" && \
 	changedir "$newdir"
 	;;
 (^[Cc])
