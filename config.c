@@ -11,10 +11,12 @@
 #include "icons/file-archive.xpm"
 #include "icons/file-audio.xpm"
 #include "icons/file-code.xpm"
+#include "icons/file-conf.xpm"
 #include "icons/file-core.xpm"
 #include "icons/file-gear.xpm"
 #include "icons/file-image.xpm"
 #include "icons/file-info.xpm"
+#include "icons/file-obj.xpm"
 #include "icons/file-text.xpm"
 #include "icons/file-video.xpm"
 #include "icons/file.xpm"
@@ -48,7 +50,8 @@
 static char *file_app[]      = { "fx", NULL };
 static char *file_archive[]  = { "f", "*.tar*", "*.t[bgx]", "*.bz2", "*.rar", "*.zip", NULL };
 static char *file_audio[]    = { "f", "*.mp[23]", "*.m4a", "*.ogg", "*.opus", "*.flac", NULL };
-static char *file_code[]     = { "f", "*.c", "*.cpp", "*.h", "*.hpp", "*.php", "*.rs", "*.ha", "*.sh", "*.s", "*.PL", "*.pl", NULL };
+static char *file_code[]     = { "f", "*.c", "*.cpp", "*.h", "*.hpp", "*.php", "*.lua", "*.rs", "*.ha", "*.sh", "*.s", "*.PL", "*.pl", NULL };
+static char *file_conf[]     = { "f", "*.c*nf", "*.yaml", "*.toml", "*.ini", "*.xml", NULL };
 static char *file_core[]     = { "f", "*.core", NULL };
 static char *file_gear[]     = { "f", "[Mm]akefile", "configure", "*in", NULL };
 #ifdef USE_NETPBM
@@ -64,6 +67,7 @@ static char *file_image[]    = { "f", "*.bmp", "*.gif", "*.png", "*.p[bgp]m",  "
 static char *file_jpeg[]     = { "f", "*.jpeg", "*.jpe", "*.jpg", "*.jfi", "*.jif", "*.jfif", NULL };
 static char *file_svg[]      = { "f", "*.svg", NULL };
 static char *file_info[]     = { "f", "README*", "*.[1-9]", NULL };
+static char *file_obj[]      = { "f", "*.so", "*.[So]", "*.a", NULL };
 static char *file_text[]     = { "f", "*.epub", "*.txt", "*.ps", "*.eps", "*.djvu", "*.[f]odt", "*.doc*", "LICENSE*", "COPYING*", "*.md", NULL };
 static char *file_pdf[]      = { "f", "*.pdf", NULL };
 static char *file_video[]    = { "f", "*.mp4", "*.webm", "*.mkv", "*.mov", "*.ogv", NULL };
@@ -94,12 +98,14 @@ char **icons[][2] = {
 	{ file_archive,    file_archive_xpm, },
 	{ file_audio,      file_audio_xpm,   },
 	{ file_code,       file_code_xpm,    },
+	{ file_conf,       file_conf_xpm,    },
 	{ file_core,       file_core_xpm,    },
 	{ file_gear,       file_gear_xpm,    },
 	{ file_image,      file_image_xpm,   },
 	{ file_jpeg,       file_image_xpm,   },
 	{ file_svg,        file_image_xpm,   },
 	{ file_info,       file_info_xpm,    },
+	{ file_obj,        file_obj_xpm,     },
 	{ file_text,       file_text_xpm,    },
 	{ file_pdf,        file_text_xpm,    },
 	{ file_video,      file_video_xpm,   },
