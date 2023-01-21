@@ -53,7 +53,7 @@ static char *file_audio[]    = { "f", "*.mp[23]", "*.m4a", "*.ogg", "*.opus", "*
 static char *file_code[]     = { "f", "*.c", "*.cpp", "*.h", "*.hpp", "*.php", "*.lua", "*.rs", "*.ha", "*.sh", "*.s", "*.PL", "*.pl", NULL };
 static char *file_conf[]     = { "f", "*.c*nf", "*.yaml", "*.toml", "*.ini", "*.xml", NULL };
 static char *file_core[]     = { "f", "*.core", NULL };
-static char *file_gear[]     = { "f", "[Mm]akefile", "configure", "*in", NULL };
+static char *file_gear[]     = { "f", "[Mm]akefile", "configure", "*.in", "*.am", NULL };
 #ifdef USE_NETPBM
 static char *file_bmp[]      = { "f", "*.bmp", NULL };
 static char *file_gif[]      = { "f", "*.gif", NULL };
