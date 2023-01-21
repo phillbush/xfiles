@@ -49,6 +49,7 @@ static char *file_archive[]    = { "f", "*.zip", "*.tar", "*.gz", "*.rar", NULL 
 static char *file_audio[]      = { "f", "*.mp[23]", "*.ogg", "*.opus", "*.flac", NULL };
 static char *file_code[]       = { "f", "*.c", "*.h", "*.s", NULL };
 static char *file_core[]       = { "f", "*.core", NULL };
+#ifdef USE_NETPBM
 static char *file_xbm[]        = { "f", "*.xbm", NULL };
 static char *file__xpm[]       = { "f", "*.xpm", NULL };
 static char *file_ppm[]        = { "f", "*.p[bgp]m", NULL };
@@ -57,6 +58,7 @@ static char *file_bmp[]        = { "f", "*.bmp", NULL };
 static char *file_gif[]        = { "f", "*.gif", NULL };
 static char *file_tiff[]       = { "f", "*.tiff", NULL };
 static char *file_jpeg[]       = { "f", "*.jpeg", "*.jpg", NULL };
+#endif
 static char *file_image[]      = { "f", "*.x[pb]m", "*.png", "*.jpg", "*.jpeg", "*.p[bgp]m", "*.gif", NULL };
 static char *file_svg[]        = { "f", "*.svg", NULL };
 static char *file_readme[]     = { "f", "README", "README.md", NULL };
@@ -122,6 +124,7 @@ size_t nicons = LEN(icons);
  */
 #define PNMSCALE " 2>/dev/null | pnmscalefixed -xysize "THUMBSIZE" "THUMBSIZE" "
 
+#ifdef USE_NETPBM
 static char *ppmtoppm[NCMDARGS] = {
 	"/bin/sh", "-c",
 	"<\"${1}\" ppmtoppm"PNMSCALE">\"${2}\""
@@ -154,6 +157,14 @@ static char *jpegtopnm[NCMDARGS] = {
 	"/bin/sh", "-c",
 	"<\"${1}\" jpegtopnm"PNMSCALE">\"${2}\""
 };
+#else
+static char *imagemagick[NCMDARGS] = {
+	"/bin/sh", "-c",
+	"convert \"${1}[0]\" -background '#0A0A0A' -flatten " \
+	"-format ppm -thumbnail \""THUMBSIZE"x"THUMBSIZE"\" " \
+	"-define filename:literal=true \"${2}\"",
+};
+#endif
 static char *ffmpegthumb[NCMDARGS] = {
 	"/bin/sh", "-c",
 	"ffmpegthumbnailer -c png -i \"${1}\" " \
@@ -179,6 +190,7 @@ static char *pdftoppm[NCMDARGS] = {
  */
 char **thumbs[][2] = {
 	{ file_video,      ffmpegthumb, },
+#ifdef USE_NETPBM
 	{ file_xbm,        xbmtopbm, },
 	{ file__xpm,       xpmtoppm, },
 	{ file_ppm,        ppmtoppm, },
@@ -187,6 +199,9 @@ char **thumbs[][2] = {
 	{ file_gif,        giftopnm, },
 	{ file_tiff,       tifftopnm, },
 	{ file_jpeg,       jpegtopnm, },
+#else
+	{ file_image,      imagemagick, },
+#endif
 	{ file_svg,        rsvgconvert, },
 	{ file_pdf,        pdftoppm,    },
 	{ NULL,            NULL, },
