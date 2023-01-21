@@ -1,5 +1,5 @@
 /* XPM */
-static char * folder_download_xpm[] = {
+static char * folder_dl_xpm[] = {
 "64 64 10 1",
 " 	c None",
 ".	c #C4A000",

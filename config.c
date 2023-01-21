@@ -22,7 +22,7 @@
 #include "icons/folder-book.xpm"
 #include "icons/folder-code.xpm"
 #include "icons/folder-db.xpm"
-#include "icons/folder-download.xpm"
+#include "icons/folder-dl.xpm"
 #include "icons/folder-game.xpm"
 #include "icons/folder-gear.xpm"
 #include "icons/folder-home.xpm"
@@ -45,44 +45,44 @@
  *   the string expands to the home directory.
  * - Element [n-1] is the obligatory NULL.
  */
-static char *file_app[]        = { "fx", NULL };
-static char *file_archive[]    = { "f", "*.zip", "*.tar", "*.gz", "*.rar", NULL };
-static char *file_audio[]      = { "f", "*.mp[23]", "*.ogg", "*.opus", "*.flac", NULL };
-static char *file_code[]       = { "f", "*.c", "*.h", "*.s", NULL };
-static char *file_core[]       = { "f", "*.core", NULL };
+static char *file_app[]      = { "fx", NULL };
+static char *file_archive[]  = { "f", "*.zip", "*.tar", "*.gz", "*.rar", NULL };
+static char *file_audio[]    = { "f", "*.mp[23]", "*.ogg", "*.opus", "*.flac", NULL };
+static char *file_code[]     = { "f", "*.c", "*.h", "*.s", NULL };
+static char *file_core[]     = { "f", "*.core", NULL };
 #ifdef USE_NETPBM
-static char *file_xbm[]        = { "f", "*.xbm", NULL };
-static char *file__xpm[]       = { "f", "*.xpm", NULL };
-static char *file_ppm[]        = { "f", "*.p[bgp]m", NULL };
-static char *file_png[]        = { "f", "*.png", NULL };
-static char *file_bmp[]        = { "f", "*.bmp", NULL };
-static char *file_gif[]        = { "f", "*.gif", NULL };
-static char *file_tiff[]       = { "f", "*.tiff", NULL };
-static char *file_jpeg[]       = { "f", "*.jpeg", "*.jpg", NULL };
+static char *file_xbm[]      = { "f", "*.xbm", NULL };
+static char *file__xpm[]     = { "f", "*.xpm", NULL };
+static char *file_ppm[]      = { "f", "*.p[bgp]m", NULL };
+static char *file_png[]      = { "f", "*.png", NULL };
+static char *file_bmp[]      = { "f", "*.bmp", NULL };
+static char *file_gif[]      = { "f", "*.gif", NULL };
+static char *file_tiff[]     = { "f", "*.tiff", NULL };
+static char *file_jpeg[]     = { "f", "*.jpeg", "*.jpg", NULL };
 #endif
-static char *file_image[]      = { "f", "*.x[pb]m", "*.png", "*.jpg", "*.jpeg", "*.p[bgp]m", "*.gif", NULL };
-static char *file_svg[]        = { "f", "*.svg", NULL };
-static char *file_readme[]     = { "f", "README", "README.md", NULL };
-static char *file_makefile[]   = { "f", "[Mm]akefile", NULL };
-static char *file_pdf[]        = { "f", "*.pdf", NULL };
-static char *file_text[]       = { "f", "*.epub", "*.txt", "*.ps", "*.eps", "*.djvu", NULL };
-static char *file_video[]      = { "f", "*.mp4", "*.webm", "*.mkv", "*.mov", "*.ogv", NULL };
-static char *folder_bin[]      = { "d", "~/usr", "~/bin", NULL };
-static char *folder_code[]     = { "d", "~/prj", "~/proj", "~/code", "~/[Pp]rojects", NULL };
-static char *folder_db[]       = { "d", "~/var", "~/.local", "~/.local/share", NULL };
-static char *folder_docs[]     = { "d", "~/doc", "~/docs", "~/[Dd]ox", "~/[Dd]ocuments", NULL };
-static char *folder_download[] = { "d", "~/tmp", "~/dl", "~/[Dd]ownloads", NULL };
-static char *folder_game[]     = { "d", "~/game", "~/[Gg]ames", NULL };
-static char *folder_image[]    = { "d", "~/img", "~/[Pp]ix", "~/[Pp]ic*", "~/[Ii]mage*", NULL };
-static char *folder_config[]   = { "d", "~/.config", "/etc", "~/etc", "~/lib", NULL };
-static char *folder_meme[]     = { "d", "~/mem", "~/meme", "~/[Mm]emes", NULL };
-static char *folder_mount[]    = { "d", "~/mnt", "~/mount", "/[Mm]edia", "/mnt", NULL };
-static char *folder_music[]    = { "d", "~/mus", "~/music", "/[Mm]usic", NULL };
-static char *folder_video[]    = { "d", "~/vid", "~/[Vv]ideo", "/[Vv]ideos", NULL };
-static char *folder_home[]     = { "d", "~", NULL };
-static char *folder_up[]       = { "d", "..", NULL };
-static char *folder_link[]     = { "dl", NULL };
-static char *folder[]          = { "d", NULL };
+static char *file_image[]    = { "f", "*.x[pb]m", "*.png", "*.jpg", "*.jpeg", "*.p[bgp]m", "*.gif", NULL };
+static char *file_svg[]      = { "f", "*.svg", NULL };
+static char *file_readme[]   = { "f", "README", "README.md", NULL };
+static char *file_gear[]     = { "f", "[Mm]akefile", NULL };
+static char *file_pdf[]      = { "f", "*.pdf", NULL };
+static char *file_text[]     = { "f", "*.epub", "*.txt", "*.ps", "*.eps", "*.djvu", NULL };
+static char *file_video[]    = { "f", "*.mp4", "*.webm", "*.mkv", "*.mov", "*.ogv", NULL };
+static char *folder_bin[]    = { "d", "~/usr", "~/bin", NULL };
+static char *folder_code[]   = { "d", "~/prj", "~/proj", "~/code", "~/[Pp]rojects", NULL };
+static char *folder_db[]     = { "d", "~/var", "~/.local", "~/.local/share", NULL };
+static char *folder_docs[]   = { "d", "~/doc", "~/docs", "~/[Dd]ox", "~/[Dd]ocuments", NULL };
+static char *folder_dl[]     = { "d", "~/tmp", "~/dl", "~/[Dd]ownloads", NULL };
+static char *folder_game[]   = { "d", "~/game", "~/[Gg]ames", NULL };
+static char *folder_image[]  = { "d", "~/img", "~/[Pp]ix", "~/[Pp]ic*", "~/[Ii]mage*", NULL };
+static char *folder_config[] = { "d", "~/.config", "/etc", "~/etc", "~/lib", NULL };
+static char *folder_meme[]   = { "d", "~/mem", "~/meme", "~/[Mm]emes", NULL };
+static char *folder_mount[]  = { "d", "~/mnt", "~/mount", "/[Mm]edia", "/mnt", NULL };
+static char *folder_music[]  = { "d", "~/mus", "~/music", "/[Mm]usic", NULL };
+static char *folder_video[]  = { "d", "~/vid", "~/[Vv]ideo", "/[Vv]ideos", NULL };
+static char *folder_home[]   = { "d", "~", NULL };
+static char *folder_up[]     = { "d", "..", NULL };
+static char *folder_link[]   = { "dl", NULL };
+static char *folder[]        = { "d", NULL };
 
 /*
  * Finally, link file patterns with icons.
@@ -90,35 +90,35 @@ static char *folder[]          = { "d", NULL };
  * Last element must have null pattern.
  */
 char **icons[][2] = {
-	{ file_app,        file_app_xpm,        },
-	{ file_archive,    file_archive_xpm,    },
-	{ file_audio,      file_audio_xpm,      },
-	{ file_code,       file_code_xpm,       },
-	{ file_core,       file_core_xpm,       },
-	{ file_makefile,   file_gear_xpm,       },
-	{ file_image,      file_image_xpm,      },
-	{ file_svg,        file_image_xpm,      },
-	{ file_readme,     file_info_xpm,       },
-	{ file_pdf,        file_text_xpm,       },
-	{ file_text,       file_text_xpm,       },
-	{ file_video,      file_video_xpm,      },
-	{ folder_up,       folder_up_xpm,       },
-	{ folder_bin,      folder_apps_xpm,     },
-	{ folder_code,     folder_code_xpm,     },
-	{ folder_db,       folder_db_xpm,       },
-	{ folder_docs,     folder_book_xpm,     },
-	{ folder_download, folder_download_xpm, },
-	{ folder_game,     folder_game_xpm,     },
-	{ folder_image,    folder_image_xpm,    },
-	{ folder_config,   folder_gear_xpm,     },
-	{ folder_home,     folder_home_xpm,     },
-	{ folder_meme,     folder_meme_xpm,     },
-	{ folder_mount,    folder_mount_xpm,    },
-	{ folder_music,    folder_music_xpm,    },
-	{ folder_video,    folder_video_xpm,    },
-	{ folder_link,     folder_link_xpm,     },
-	{ folder,          folder_xpm,          },
-	{ NULL,            file_xpm,            },
+	{ file_app,        file_app_xpm,     },
+	{ file_archive,    file_archive_xpm, },
+	{ file_audio,      file_audio_xpm,   },
+	{ file_code,       file_code_xpm,    },
+	{ file_core,       file_core_xpm,    },
+	{ file_gear,       file_gear_xpm,    },
+	{ file_image,      file_image_xpm,   },
+	{ file_svg,        file_image_xpm,   },
+	{ file_readme,     file_info_xpm,    },
+	{ file_pdf,        file_text_xpm,    },
+	{ file_text,       file_text_xpm,    },
+	{ file_video,      file_video_xpm,   },
+	{ folder_up,       folder_up_xpm,    },
+	{ folder_bin,      folder_apps_xpm,  },
+	{ folder_code,     folder_code_xpm,  },
+	{ folder_db,       folder_db_xpm,    },
+	{ folder_docs,     folder_book_xpm,  },
+	{ folder_dl,       folder_dl_xpm,    },
+	{ folder_game,     folder_game_xpm,  },
+	{ folder_image,    folder_image_xpm, },
+	{ folder_config,   folder_gear_xpm,  },
+	{ folder_home,     folder_home_xpm,  },
+	{ folder_meme,     folder_meme_xpm,  },
+	{ folder_mount,    folder_mount_xpm, },
+	{ folder_music,    folder_music_xpm, },
+	{ folder_video,    folder_video_xpm, },
+	{ folder_link,     folder_link_xpm,  },
+	{ folder,          folder_xpm,       },
+	{ NULL,            file_xpm,         },
 };
 size_t nicons = LEN(icons);
 
