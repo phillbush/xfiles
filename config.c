@@ -26,6 +26,7 @@
 #include "icons/folder-game.xpm"
 #include "icons/folder-gear.xpm"
 #include "icons/folder-home.xpm"
+#include "icons/folder-image.xpm"
 #include "icons/folder-link.xpm"
 #include "icons/folder-meme.xpm"
 #include "icons/folder-mount.xpm"
@@ -72,6 +73,7 @@ static char *folder_db[]       = { "d", "~/var", "~/.local", "~/.local/share", N
 static char *folder_docs[]     = { "d", "~/doc", "~/docs", "~/[Dd]ox", "~/[Dd]ocuments", NULL };
 static char *folder_download[] = { "d", "~/tmp", "~/dl", "~/[Dd]ownloads", NULL };
 static char *folder_game[]     = { "d", "~/game", "~/[Gg]ames", NULL };
+static char *folder_image[]    = { "d", "~/img", "~/[Pp]ix", "~/[Pp]ic*", "~/[Ii]mage*", NULL };
 static char *folder_config[]   = { "d", "~/.config", "/etc", "~/etc", "~/lib", NULL };
 static char *folder_meme[]     = { "d", "~/mem", "~/meme", "~/[Mm]emes", NULL };
 static char *folder_mount[]    = { "d", "~/mnt", "~/mount", "/[Mm]edia", "/mnt", NULL };
@@ -107,6 +109,7 @@ char **icons[][2] = {
 	{ folder_docs,     folder_book_xpm,     },
 	{ folder_download, folder_download_xpm, },
 	{ folder_game,     folder_game_xpm,     },
+	{ folder_image,    folder_image_xpm,    },
 	{ folder_config,   folder_gear_xpm,     },
 	{ folder_home,     folder_home_xpm,     },
 	{ folder_meme,     folder_meme_xpm,     },
