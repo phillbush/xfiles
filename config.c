@@ -65,7 +65,7 @@ static char *file_jpeg[]       = { "f", "*.jpeg", "*.jpg", NULL };
 #endif
 static char *file_image[]      = { "f", "*.x[pb]m", "*.png", "*.jpg", "*.jpeg", "*.p[bgp]m", "*.gif", NULL };
 static char *file_svg[]        = { "f", "*.svg", NULL };
-static char *file_manual[]     = { "f", "*.[1-9]", "*.3p", "README", "README.md", "COPYING", "LICENSE", "COPYRIGHT", NULL };
+static char *file_info[]       = { "f", "*.[1-9]", "*.3p", "README", "README.md", "COPYING", "LICENSE", "COPYRIGHT", NULL };
 static char *file_makefile[]   = { "f", "[Mm]akefile", "configure", NULL };
 static char *file_pdf[]        = { "f", "*.pdf", NULL };
 static char *file_object[]     = { "f", "*.o", "*.so", "*.a", "lib*", NULL };
@@ -80,9 +80,9 @@ static char *folder_game[]     = { "d", "~/game", "~/[Gg]ames", NULL };
 static char *folder_image[]    = { "d", "~/img", "~/[Pp]ix", "~/[Pp]ic*", "~/[Ii]mage*", NULL };
 static char *folder_config[]   = { "d", "~/.config", "/etc", "~/etc", "~/lib", NULL };
 static char *folder_meme[]     = { "d", "~/mem", "~/meme", "~/[Mm]emes", NULL };
-static char *folder_mount[]    = { "d", "~/mnt", "~/mount", "/[Mm]edia", "/mnt", NULL };
-static char *folder_music[]    = { "d", "~/mus", "~/music", "/[Mm]usic", NULL };
-static char *folder_video[]    = { "d", "~/vid", "~/[Vv]ideo", "/[Vv]ideos", NULL };
+static char *folder_mount[]    = { "d", "~/mnt", "~/mount", "/mnt", NULL };
+static char *folder_music[]    = { "d", "~/mus", "~/music", "~/[Mm]usic", NULL };
+static char *folder_video[]    = { "d", "~/vid", "~/[Vv]ideo", "~/[Vv]ideos", NULL };
 static char *folder_home[]     = { "d", "~", NULL };
 static char *folder_up[]       = { "d", "..", NULL };
 static char *folder_link[]     = { "dl", NULL };
@@ -103,11 +103,11 @@ char **icons[][2] = {
 	{ file_makefile,   file_gear_xpm,       },
 	{ file_image,      file_image_xpm,      },
 	{ file_svg,        file_image_xpm,      },
-	{ file_manual,     file_info_xpm,       },
-	{ file_object,     file_object_xpm,     },
+	{ file_info,       file_info_xpm,       },
 	{ file_pdf,        file_text_xpm,       },
 	{ file_text,       file_text_xpm,       },
 	{ file_video,      file_video_xpm,      },
+	{ file_object,     file_object_xpm,     },
 	{ folder_up,       folder_up_xpm,       },
 	{ folder_bin,      folder_apps_xpm,     },
 	{ folder_code,     folder_code_xpm,     },
