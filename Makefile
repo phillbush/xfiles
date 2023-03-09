@@ -1,5 +1,5 @@
 PROG = xfiles
-OBJS = ${PROG:=.o} widget.o util.o config.o
+OBJS = ${PROG:=.o} widget.o util.o config.o ctrlsel.o
 SRCS = ${OBJS:.o=.c}
 MANS = ${PROG:=.1}
 SCRIPT = xfilesctl
@@ -24,7 +24,7 @@ ${PROG}: ${OBJS}
 	${CC} -std=c99 -pedantic ${DEFS} ${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
 
 xfiles.o: util.h widget.h icons/file.xpm icons/folder.xpm
-widget.o: util.h widget.h winicon.data icons/x.xpm
+widget.o: util.h widget.h ctrlsel.h winicon.data icons/x.xpm
 
 tags: ${SRCS}
 	ctags ${SRCS}

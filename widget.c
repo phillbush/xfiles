@@ -21,9 +21,16 @@
 #include <X11/extensions/shape.h>
 #include <X11/extensions/sync.h>
 
+#include "ctrlsel.h"
 #include "util.h"
 #include "widget.h"
 #include "winicon.data"         /* window icon, for the window manager */
+
+#define XDND_VERSION    5               /* XDND protocol version */
+#define NCLIENTMSG_DATA 5               /* number of members on a the .data.l[] array of a XClientMessageEvent */
+
+/* free and set to null */
+#define FREE(x)         do{free(x); x = NULL;}while(0)
 
 /* default theme configuration */
 #define DEF_FONT        "monospace:size=9"
@@ -70,18 +77,9 @@
 #define ALL_ROWS(w)     (WHL_ROWS(w) + MOD_ROWS(w))
 
 enum {
-	/* number of members on a the .data.l[] array of a XClientMessageEvent */
-	NCLIENTMSG_DATA = 5,
-
-	/* drag and drop miniwindow */
-	DND_DISTANCE    = 8,                    /* distance from pointer to dnd miniwindow */
-
 	/* distance the cursor must move to be considered a drag */
 	DRAG_THRESHOLD  = 8,
 	DRAG_SQUARE     = (DRAG_THRESHOLD * DRAG_THRESHOLD),
-
-	/* XDND protocol version */
-	XDND_VERSION    = 5,
 
 	/* buttons not defined by X.h */
 	BUTTON8         = 8,
@@ -139,6 +137,13 @@ enum {
 };
 
 enum {
+	TARGET_STRING,
+	TARGET_UTF8,
+	TARGET_URI,
+	TARGET_LAST
+};
+
+enum {
 	COLOR_BG,
 	COLOR_FG,
 	COLOR_LAST,
@@ -169,12 +174,8 @@ enum {
 	XDND_ACTION_PRIVATE,
 	XDND_ACTION_DIRECT_SAVE,
 
-	/* xdnd types we accept */
-	XDND_URI_LIST,
-	TEXT_URI_LIST,
-	TEXT_PLAIN,
-
 	/* selection targets */
+	TEXT_URI_LIST,
 	UTF8_STRING,
 	COMPOUND_TEXT,
 	DELETE,
@@ -273,6 +274,8 @@ struct Widget {
 	 *                             titlebar when the item is selected.
 	 */
 	char ***items;                  /* see comment above */
+	char *selbuf, *uribuf, *dndbuf; /* buffer for selections */
+	size_t selbufsiz, uribufsiz;
 	int nitems;                     /* number of items */
 	int *linelen;                   /* for each item, the lengths of its largest label line */
 	int *nlines;                    /* for each item, the number of label lines */
@@ -289,6 +292,11 @@ struct Widget {
 	 * can easily access a selection in the list, and remove it for
 	 * example, given the index of an item.
 	 */
+	struct CtrlSelTarget targets[TARGET_LAST];
+	struct CtrlSelTarget dragtarget;
+	struct CtrlSelTarget droptarget;
+	struct CtrlSelContext *selctx, *dragctx;
+	struct CtrlSelContext dropctx;
 	struct Selection *sel;          /* list of selections */
 	struct Selection *rectsel;      /* list of selections by rectsel */
 	struct Selection **issel;       /* array of pointers to Selections */
@@ -410,9 +418,7 @@ static char *atomnames[ATOM_LAST] = {
 	[XDND_ACTION_ASK]            = "XdndActionAsk",
 	[XDND_ACTION_PRIVATE]        = "XdndActionPrivate",
 	[XDND_ACTION_DIRECT_SAVE]    = "XdndActionDirectSave",
-	[XDND_URI_LIST]              = "XdndUriList",
 	[TEXT_URI_LIST]              = "text/uri-list",
-	[TEXT_PLAIN]                 = "text/plain",
 	[ATOM_PAIR]                  = "ATOM_PAIR",
 	[COMPOUND_TEXT]              = "COMPOUND_TEXT",
 	[UTF8_STRING]                = "UTF8_STRING",
@@ -439,7 +445,6 @@ static char *atomnames[ATOM_LAST] = {
 static int
 createwin(Widget wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
 {
-	Atom version = XDND_VERSION;    /* yes, version is an Atom */
 	XftDraw *draw;
 	Pixmap bg;
 	unsigned int dw, dh;
@@ -554,14 +559,6 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		wid->atoms[_NET_WM_PID],
 		XA_CARDINAL, 32, PropModeReplace,
 		(unsigned char *)&pid,
-		1
-	);
-	XChangeProperty(
-		wid->dpy, wid->win,
-		wid->atoms[XDND_AWARE],
-		XA_ATOM, 32,
-		PropModeReplace,
-		(unsigned char *)&version,
 		1
 	);
 	return RET_OK;
@@ -1268,6 +1265,70 @@ getpointerclick(Widget wid, int x, int y)
 }
 
 static void
+disownprimary(Widget wid)
+{
+	if (wid->selctx == NULL)
+		return;
+	ctrlsel_disown(wid->selctx);
+	FREE(wid->selctx);
+}
+
+static void
+disowndnd(Widget wid)
+{
+	if (wid->dragctx == NULL)
+		return;
+	ctrlsel_dnddisown(wid->dragctx);
+	FREE(wid->dragctx);
+}
+
+static void
+ownprimary(Widget wid, Time time)
+{
+	struct Selection *sel;
+	size_t i, j;
+	int success;
+
+	if (wid->sel == NULL)
+		return;
+	disownprimary(wid);
+	if ((wid->selctx = malloc(sizeof(*wid->selctx))) == NULL) {
+		warn("malloc");
+		return;
+	}
+	i = j = 0;
+	for (sel = wid->sel; sel != NULL; sel = sel->next) {
+		if (sel->next != NULL)
+			i += snprintf(wid->selbuf + i, wid->selbufsiz - i, "%s\n", wid->items[sel->index][ITEM_PATH]);
+		j += snprintf(wid->uribuf + j, wid->uribufsiz - j, "file://%s\r\n", wid->items[sel->index][ITEM_PATH]);
+	}
+	ctrlsel_filltarget(
+		XA_STRING, XA_STRING,
+		8, (unsigned char *)wid->selbuf, i,
+		&wid->targets[TARGET_STRING]
+	);
+	ctrlsel_filltarget(
+		wid->atoms[UTF8_STRING], wid->atoms[UTF8_STRING],
+		8, (unsigned char *)wid->selbuf, i,
+		&wid->targets[TARGET_UTF8]
+	);
+	ctrlsel_filltarget(
+		wid->atoms[TEXT_URI_LIST], wid->atoms[TEXT_URI_LIST],
+		8, (unsigned char *)wid->uribuf, j,
+		&wid->targets[TARGET_URI]
+	);
+	success = ctrlsel_setowner(
+		wid->dpy, wid->win,
+		XA_PRIMARY, time, 0,
+		wid->targets, TARGET_LAST,
+		wid->selctx
+	);
+	if (!success) {
+		FREE(wid->selctx);
+	}
+}
+
+static void
 cleanwidget(Widget wid)
 {
 	struct Thumb *thumb;
@@ -1279,24 +1340,27 @@ cleanwidget(Widget wid)
 		tmp = thumb;
 		thumb = thumb->next;
 		XDestroyImage(((struct Thumb *)tmp)->img);
-		free(tmp);
+		FREE(tmp);
 	}
 	sel = wid->sel;
 	while (sel != NULL) {
 		tmp = sel;
 		sel = sel->next;
-		free(tmp);
+		FREE(tmp);
 	}
 	wid->sel = NULL;
 	wid->rectsel = NULL;
-	free(wid->thumbs);
-	wid->thumbs = NULL;
-	free(wid->linelen);
-	wid->linelen = NULL;
-	free(wid->nlines);
-	wid->nlines = NULL;
-	free(wid->issel);
-	wid->issel = NULL;
+	FREE(wid->thumbs);
+	FREE(wid->linelen);
+	FREE(wid->nlines);
+	FREE(wid->issel);
+	FREE(wid->selbuf);
+	wid->selbufsiz = 0;
+	FREE(wid->uribuf);
+	wid->uribufsiz = 0;
+	FREE(wid->dndbuf);
+	disownprimary(wid);
+	disowndnd(wid);
 }
 
 static void
@@ -1332,7 +1396,7 @@ selectitem(Widget wid, int index, int select, int rectsel)
 			sel->prev->next = sel->next;
 		if (*header == sel)
 			*header = sel->next;
-		free(sel);
+		FREE(sel);
 		wid->issel[index] = NULL;
 	} else {
 		return;
@@ -1381,296 +1445,6 @@ unselectitems(Widget wid)
 	while (wid->sel) {
 		selectitem(wid, wid->sel->index, FALSE, 0);
 	}
-}
-
-static void
-ownprimary(Widget wid, Time time)
-{
-	if (wid->sel == NULL)
-		return;
-	wid->seltime = time;
-	XSetSelectionOwner(wid->dpy, XA_PRIMARY, wid->win, time);
-}
-
-static unsigned long
-getatomsprop(Widget wid, Window win, Atom prop, Atom *type, Atom **atoms)
-{
-	unsigned char *p;
-	unsigned long len;
-	unsigned long dl;   /* dummy variable */
-	int di;             /* dummy variable */
-	int state;
-
-	p = NULL;
-	state = XGetWindowProperty(
-		wid->dpy, win,
-		prop, 0L, 0x1FFFFFFF,
-		False,
-		*type, type,
-		&di, &len, &dl, &p
-	);
-	if (state != Success || len == 0 || p == NULL) {
-		*atoms = NULL;
-		XFree(p);
-		return 0;
-	}
-	*atoms = (Atom *)p;
-	return len;
-}
-
-static unsigned long
-getatompairs(Widget wid, Window win, Atom prop, Atom **pairs)
-{
-	unsigned long len;
-	Atom *p;
-	Atom type;
-	size_t size;
-
-	p = NULL;
-	*pairs = NULL;
-	type = wid->atoms[ATOM_PAIR];
-	if ((len = getatomsprop(wid, win, prop, &type, &p)) == 0)
-		goto error;
-	if (type != wid->atoms[ATOM_PAIR])
-		goto error;
-	size = len * sizeof(**pairs);
-	if ((*pairs = malloc(size)) == NULL)
-		goto error;
-	memcpy(*pairs, p, size);
-	XFree(p);
-	return len;
-error:
-	XFree(p);
-	return 0;
-}
-
-static Bool
-convert(Widget wid, Window requestor, Atom target, Atom property)
-{
-	struct Selection *sel;
-
-	if (target == wid->atoms[MULTIPLE]) {
-		/*
-		 * A MULTIPLE should be handled when processing a
-		 * SelectionRequest event.  We do not support nested
-		 * MULTIPLE targets.
-		 */
-		return False;
-	}
-	if (target == wid->atoms[TIMESTAMP]) {
-		/*
-		 * According to ICCCM, to avoid some race conditions, it
-		 * is important that requestors be able to discover the
-		 * timestamp the owner used to acquire ownership.
-		 * Requester do that by requesting sellection owners to
-		 * convert to `TIMESTAMP`.  Selections owners must
-		 * return the timestamp as an `XA_INTEGER`.
-		 */
-		XChangeProperty(
-			wid->dpy,
-			requestor,
-			property,
-			XA_INTEGER, 32,
-			PropModeReplace,
-			(unsigned char *)&wid->seltime,
-			1
-		);
-		return True;
-	}
-	if (target == wid->atoms[TARGETS]) {
-		/*
-		 * According to ICCCM, when requested for the `TARGETS`
-		 * target, the selection owner should return a list of
-		 * atoms representing the targets for which an attempt
-		 * to convert the selection will (hopefully) succeed.
-		 */
-		XChangeProperty(
-			wid->dpy,
-			requestor,
-			property,
-			XA_ATOM, 32,
-			PropModeReplace,
-			(unsigned char *)(Atom[]){
-				wid->atoms[XDND_URI_LIST],
-				wid->atoms[TEXT_URI_LIST],
-				wid->atoms[TEXT_PLAIN],
-				wid->atoms[UTF8_STRING],
-				wid->atoms[DELETE],
-				wid->atoms[MULTIPLE],
-				wid->atoms[TARGETS],
-				wid->atoms[TEXT],
-				wid->atoms[TIMESTAMP],
-				XA_STRING,
-			},
-			10      /* the 10 atoms in the preceding array */
-		);
-		return True;
-	}
-	if (target == wid->atoms[DELETE]) {
-		if (wid->sel != NULL)
-			unselectitems(wid);
-		XChangeProperty(
-			wid->dpy,
-			requestor,
-			property,
-			wid->atoms[_NULL],
-			8L,
-			PropModeReplace,
-			(unsigned char *)"",
-			0
-		);
-		return True;
-	}
-	if (target != wid->atoms[XDND_URI_LIST] &&
-	    target != wid->atoms[TEXT_URI_LIST] &&
-	    target != wid->atoms[TEXT_PLAIN] &&
-	    target != wid->atoms[TEXT] &&
-	    target != wid->atoms[UTF8_STRING] &&
-	    target != wid->atoms[COMPOUND_TEXT] &&
-	    target != XA_STRING) {
-		return FALSE;
-	}
-	XChangeProperty(
-		wid->dpy,
-		requestor,
-		property,
-		target,
-		8L,
-		PropModeReplace,
-		NULL,
-		0
-	);
-	for (sel = wid->sel; sel != NULL; sel = sel->next) {
-		if (target == wid->atoms[XDND_URI_LIST] ||
-		    target == wid->atoms[TEXT_URI_LIST]) {
-			XChangeProperty(
-				wid->dpy,
-				requestor,
-				property,
-				target,
-				8L,
-				PropModeAppend,
-				(unsigned char *)"file://",
-				7
-			);
-		}
-		XChangeProperty(
-			wid->dpy,
-			requestor,
-			property,
-			target,
-			8L,
-			PropModeAppend,
-			(unsigned char *)wid->items[sel->index][ITEM_PATH],
-			strlen(wid->items[sel->index][ITEM_PATH])
-		);
-		if (target != wid->atoms[XDND_URI_LIST] &&
-		    target != wid->atoms[TEXT_URI_LIST] &&
-		    sel->next == NULL) {
-			break;
-		}
-		if (target == wid->atoms[XDND_URI_LIST] ||
-		    target == wid->atoms[TEXT_URI_LIST]) {
-			XChangeProperty(
-				wid->dpy,
-				requestor,
-				property,
-				target,
-				8L,
-				PropModeAppend,
-				(unsigned char *)"\r",
-				1
-			);
-		}
-		XChangeProperty(
-			wid->dpy,
-			requestor,
-			property,
-			target,
-			8L,
-			PropModeAppend,
-			(unsigned char *)"\n",
-			1
-		);
-	}
-	XChangeProperty(
-		wid->dpy,
-		requestor,
-		property,
-		target,
-		8L,
-		PropModeAppend,
-		(unsigned char[]){ '\0' },
-		1
-	);
-	return True;
-}
-
-static void
-sendselection(Widget wid, XSelectionRequestEvent *xev)
-{
-	enum { PAIR_TARGET, PAIR_PROPERTY, PAIR_LAST };
-	;
-	XSelectionEvent sev;
-	Atom *pairs;
-	Atom pair[PAIR_LAST];
-	unsigned long natoms, i;
-	Bool success;
-
-	sev = (XSelectionEvent){
-		.type           = SelectionNotify,
-		.display        = xev->display,
-		.requestor      = xev->requestor,
-		.selection      = xev->selection,
-		.time           = xev->time,
-		.target         = xev->target,
-		.property       = None,
-	};
-	if (xev->time != CurrentTime && xev->time < wid->seltime) {
-		/*
-		 * According to ICCCM, the selection owner should
-		 * compare the timestamp with the period it has owned
-		 * the selection and, if the time is outside, refuse the
-		 * `SelectionRequest` by sending the requestor window a
-		 * `SelectionNotify` event with the property set to
-		 * `None` (by means of a `SendEvent` request with an
-		 * empty event mask).
-		 */
-		goto done;
-	}
-	if (xev->target == wid->atoms[MULTIPLE]) {
-		if (xev->property == None)
-			goto done;
-		natoms = getatompairs(wid, xev->requestor, xev->property, &pairs);
-	} else {
-		pair[PAIR_TARGET] = xev->target;
-		pair[PAIR_PROPERTY] = xev->property;
-		pairs = pair;
-		natoms = 2;
-	}
-	success = True;
-	for (i = 0; i < natoms; i += 2) {
-		if (!convert(wid, xev->requestor, pairs[i + PAIR_TARGET], pairs[i + PAIR_PROPERTY])) {
-			success = False;
-			pairs[i + PAIR_PROPERTY] = None;
-		}
-	}
-	if (xev->target == wid->atoms[MULTIPLE]) {
-		XChangeProperty(
-			xev->display,
-			xev->requestor,
-			xev->property,
-			wid->atoms[ATOM_PAIR],
-			32, PropModeReplace,
-			(unsigned char *)pairs, natoms
-		);
-		free(pairs);
-	}
-	if (success) {
-		sev.property = (xev->property == None) ? xev->target : xev->property;
-	}
-done:
-	XSendEvent(xev->display, xev->requestor, False, NoEventMask, (XEvent *)&sev);
 }
 
 static int
@@ -1868,16 +1642,8 @@ endevent(Widget wid)
 	}
 }
 
-static Bool
-translatetoroot(Widget wid, int *x, int *y)
-{
-	Window win;
-
-	return XTranslateCoordinates(wid->dpy, wid->win, ROOT(wid->dpy), 0, 0, x, y, &win);
-}
-
 static int
-querypointer(Widget wid, Window win, int *retx, int *rety, Window *retwin)
+querypointer(Widget wid, Window win, int *retx, int *rety, unsigned int *retmask)
 {
 	Window root, child;
 	unsigned int mask;
@@ -1893,8 +1659,8 @@ querypointer(Widget wid, Window win, int *retx, int *rety, Window *retwin)
 		&x, &y,
 		&mask
 	);
-	if (retwin != NULL)
-		*retwin = child;
+	if (retmask != NULL)
+		*retmask = mask;
 	if (retx != NULL)
 		*retx = x;
 	if (rety != NULL)
@@ -1995,50 +1761,6 @@ fillselitems(Widget wid, int *selitems, int clicked)
 }
 
 static Window
-getdropwin(Widget wid, Atom *version)
-{
-	Atom type;
-	Atom *p;
-	Window win;
-
-	*version = None;
-	win = ROOT(wid->dpy);
-	type = XA_ATOM;
-	while (querypointer(wid, win, NULL, NULL, &win)) {
-		if (win == None)
-			break;
-		if (getatomsprop(wid, win, wid->atoms[XDND_AWARE], &type, &p) > 0) {
-			*version = *p;
-			XFree(p);
-			return win;
-		}
-	}
-	return None;
-}
-
-static void
-clientmsg(Display *dpy, Window win, Atom atom, long d[5])
-{
-	XEvent ev;
-
-	ev.xclient.type = ClientMessage;
-	ev.xclient.display = dpy;
-	ev.xclient.serial = 0;
-	ev.xclient.send_event = True;
-	ev.xclient.message_type = atom;
-	ev.xclient.window = win;
-	ev.xclient.format = 32;
-	ev.xclient.data.l[0] = d[0];
-	ev.xclient.data.l[1] = d[1];
-	ev.xclient.data.l[2] = d[2];
-	ev.xclient.data.l[3] = d[3];
-	ev.xclient.data.l[4] = d[4];
-	if (!XSendEvent(dpy, win, False, 0x0, &ev)) {
-		warnx("could not send event");
-	}
-}
-
-static Window
 createdragwin(Widget wid, int index)
 {
 	Window win;
@@ -2052,8 +1774,6 @@ createdragwin(Widget wid, int index)
 	if (!querypointer(wid, ROOT(wid->dpy), &xroot, &yroot, NULL))
 		return None;
 	w = h = THUMBSIZE;
-	xroot += DND_DISTANCE;
-	yroot += DND_DISTANCE;
 	if (wid->thumbs[index] != NULL) {
 		w = wid->thumbs[index]->w;
 		h = wid->thumbs[index]->h;
@@ -2126,44 +1846,6 @@ createdragwin(Widget wid, int index)
 	return win;
 }
 
-static void
-finishdrop(Widget wid)
-{
-	long d[NCLIENTMSG_DATA];
-
-	d[0] = wid->win;
-	d[1] = d[2] = d[3] = d[4] = 0;
-	if (wid->dropsrc == None)
-		return;
-	clientmsg(wid->dpy, wid->dropsrc, wid->atoms[XDND_FINISHED], d);
-	wid->dropaction = None;
-	wid->dropsrc = None;
-}
-
-static void
-tryconvertsel(Widget wid, XSelectionEvent *xev)
-{
-	Atom sel;
-
-	if (xev->target == wid->atoms[TEXT_URI_LIST])
-		sel = wid->atoms[UTF8_STRING];
-	else if (xev->target == wid->atoms[UTF8_STRING])
-		sel = wid->atoms[TEXT_PLAIN];
-	else if (xev->target == wid->atoms[TEXT_PLAIN])
-		sel = wid->atoms[TEXT];
-	else if (xev->target == wid->atoms[TEXT])
-		sel = wid->atoms[XA_STRING];
-	else
-		return;         /* give up */
-	XConvertSelection(
-		wid->dpy,
-		wid->atoms[XDND_SELECTION],
-		sel, sel,
-		wid->win,
-		xev->time
-	);
-}
-
 static char *
 gettextprop(Widget wid, Atom prop)
 {
@@ -2188,46 +1870,6 @@ gettextprop(Widget wid, Atom prop)
 		&p
 	);
 	if (status != Success || len == 0 || p == NULL) {
-		goto done;
-	}
-	if ((text = emalloc(len + 1)) == NULL) {
-		goto done;
-	}
-	memcpy(text, p, len);
-	text[len] = '\0';
-done:
-	XFree(p);
-	return text;
-}
-
-static char *
-getdroptext(Widget wid, Atom prop)
-{
-	char *text;
-	unsigned char *p;
-	unsigned long len;
-	unsigned long dl;               /* dummy variable */
-	int format, status;
-	Atom type;
-
-	text = NULL;
-	status = XGetWindowProperty(
-		wid->dpy,
-		wid->win,
-		prop,
-		0L,
-		0x1FFFFFFF,
-		False,
-		AnyPropertyType,
-		&type, &format,
-		&len, &dl,
-		&p
-	);
-	if (status != Success || len == 0 || p == NULL) {
-		goto done;
-	}
-	if (type == wid->atoms[INCR]) {
-		/* we do not do incremental transfer */
 		goto done;
 	}
 	if ((text = emalloc(len + 1)) == NULL) {
@@ -2443,59 +2085,48 @@ draw:
 static WidgetEvent
 processevent(Widget wid, XEvent *ev)
 {
-	long d[NCLIENTMSG_DATA];
-	int x, y;
-
+	if (wid->selctx != NULL) {
+		switch (ctrlsel_send(wid->selctx, ev)) {
+		case CTRLSEL_LOST:
+			unselectitems(wid);
+			disownprimary(wid);
+			return WIDGET_INTERNAL;
+		case CTRLSEL_INTERNAL:
+			return WIDGET_INTERNAL;
+		default:
+			break;
+		}
+	}
+	if (wid->dragctx != NULL) {
+		switch (ctrlsel_dndsend(wid->dragctx, ev)) {
+		case CTRLSEL_SENT:
+			disowndnd(wid);
+			return WIDGET_REFRESH;
+		case CTRLSEL_LOST:
+			disowndnd(wid);
+			return WIDGET_INTERNAL;
+		case CTRLSEL_INTERNAL:
+			return WIDGET_INTERNAL;
+		default:
+			break;
+		}
+	}
+	switch (ctrlsel_dndreceive(&wid->dropctx, ev)) {
+	case CTRLSEL_RECEIVED:
+		FREE(wid->droptarget.buffer);
+		return WIDGET_INTERNAL;
+	case CTRLSEL_INTERNAL:
+		return WIDGET_INTERNAL;
+	default:
+		break;
+	}
 	wid->redraw = FALSE;
 	switch (ev->type) {
 	case ClientMessage:
 		if (ev->xclient.message_type == wid->atoms[WM_PROTOCOLS] &&
-		    (Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW]) {
+		    (Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
 			return WIDGET_CLOSE;
-		} else if (ev->xclient.message_type == wid->atoms[XDND_ENTER]) {
-			wid->dropsrc = (Window)ev->xclient.data.l[0];
-			wid->dropaction = None;
-		} else if (ev->xclient.message_type == wid->atoms[XDND_LEAVE] &&
-		           (Window)ev->xclient.data.l[0] != None &&
-		           (Window)ev->xclient.data.l[0] == wid->dropsrc) {
-			wid->dropaction = None;
-			wid->dropsrc = None;
-		} else if (ev->xclient.message_type == wid->atoms[XDND_DROP] &&
-		           (Window)ev->xclient.data.l[0] != None &&
-		           (Window)ev->xclient.data.l[0] == wid->dropsrc) {
-			XConvertSelection(
-				wid->dpy,
-				wid->atoms[XDND_SELECTION],
-				wid->atoms[TEXT_URI_LIST],
-				wid->atoms[TEXT_URI_LIST],
-				wid->win,
-				(Time)ev->xclient.data.l[2]
-			);
-		} else if (ev->xclient.message_type == wid->atoms[XDND_POSITION] &&
-		           (Window)ev->xclient.data.l[0] != None &&
-		           (Window)ev->xclient.data.l[0] == wid->dropsrc) {
-			d[0] = wid->win;
-			d[1] = 0x1;
-			if (translatetoroot(wid, &x, &y)) {
-				d[2] = (x << 16) | (y & 0xFFFF);
-				d[3] = (wid->w << 16) | (wid->h & 0xFFFF);
-			} else {
-				d[2] = d[3] = 0;
-			}
-			if ((Atom)ev->xclient.data.l[4] == wid->atoms[XDND_ACTION_COPY] ||
-			    (Atom)ev->xclient.data.l[4] == wid->atoms[XDND_ACTION_MOVE] ||
-			    (Atom)ev->xclient.data.l[4] == wid->atoms[XDND_ACTION_LINK] ||
-			    (Atom)ev->xclient.data.l[4] == wid->atoms[XDND_ACTION_ASK]) {
-				wid->dropaction = (Atom)ev->xclient.data.l[4];
-			} else {
-				wid->dropaction = wid->atoms[XDND_ACTION_ASK];
-			}
-			d[4] = wid->dropaction;
-			clientmsg(wid->dpy, (Window)ev->xclient.data.l[0], wid->atoms[XDND_STATUS], d);
-		} else {
-			return WIDGET_NONE;
-		}
-		break;
+		return WIDGET_NONE;
 	case Expose:
 		if (ev->xexpose.count == 0)
 			commitdraw(wid);
@@ -2507,16 +2138,6 @@ processevent(Widget wid, XEvent *ev)
 			drawitems(wid);
 		}
 		break;
-	case SelectionRequest:
-		if (ev->xselectionrequest.selection == XA_PRIMARY ||
-		    ev->xselectionrequest.selection == wid->atoms[XDND_SELECTION])
-			sendselection(wid, &ev->xselectionrequest);
-		break;
-	case SelectionClear:
-		if (wid->sel == NULL)
-			break;
-		unselectitems(wid);
-		break;
 	case PropertyNotify:
 		if (ev->xproperty.window != wid->win)
 			break;
@@ -2524,7 +2145,7 @@ processevent(Widget wid, XEvent *ev)
 			break;
 		if (ev->xproperty.atom != wid->atoms[_CONTROL_GOTO])
 			break;
-		free(wid->lasttext);
+		FREE(wid->lasttext);
 		wid->lastprop = wid->atoms[_CONTROL_GOTO];
 		wid->lasttext = gettextprop(wid, wid->atoms[_CONTROL_GOTO]);
 		break;
@@ -2550,7 +2171,7 @@ checklastprop(Widget wid, char **text)
 			*text = str;
 			return WIDGET_GOTO;
 		} else {
-			free(str);
+			FREE(str);
 		}
 	}
 	return WIDGET_NONE;
@@ -2710,130 +2331,58 @@ done:
 static WidgetEvent
 dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 {
-	XEvent ev;
-	Window lastwin, win, dragwin;
-	Atom lastaction, action, version;
-	WidgetEvent retval;
-	int sendposition;
-	int accept, inside, x, y, w, h;
-	long d[NCLIENTMSG_DATA];
+	struct Selection *sel;
+	Window dragwin;
+	unsigned int mask;
+	int state, i, x, y;
 
-	retval = WIDGET_NONE;
-	lastwin = None;
-	dragwin = None;
-	wid->state = STATE_SELECTING;
-	widgetcursor(wid, CURSOR_DRAG);
-	d[0] = wid->win;
-	accept = TRUE;
-	sendposition = TRUE;
-	x = y = w = h = 0;
-	wid->seltime = lasttime;
-	XSetSelectionOwner(wid->dpy, wid->atoms[XDND_SELECTION], wid->win, lasttime);
-	dragwin = createdragwin(wid, clicki);
-	lastaction = action = None;
-	while (!XNextEvent(wid->dpy, &ev)) {
-		switch (processevent(wid, &ev)) {
-		case WIDGET_CLOSE:
-			return WIDGET_CLOSE;
-		case WIDGET_NONE:
-			break;
-		default:
-			continue;
-		}
-		switch (ev.type) {
-		case ButtonPress:
-		case ButtonRelease:
-			if (lastwin == wid->win) {
-				clicki = getpointerclick(wid, ev.xbutton.x, ev.xbutton.y);
-				if (clicki < 1)
-					goto done;
-				*nitems = fillselitems(wid, selitems, clicki);
-				if (FLAG(ev.xbutton.state, ControlMask|ShiftMask))
-					retval = WIDGET_DROPLINK;
-				if (FLAG(ev.xbutton.state, ShiftMask))
-					retval = WIDGET_DROPMOVE;
-				if (FLAG(ev.xbutton.state, ControlMask))
-					retval = WIDGET_DROPCOPY;
-				else
-					retval = WIDGET_DROPASK;
-			} else if (lastwin != None) {
-				d[1] = d[2] = d[3] = d[4] = 0;
-				d[2] = ev.xbutton.time;
-				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_DROP], d);
-			}
-			goto done;
-		case ClientMessage:
-			if (ev.xclient.message_type != wid->atoms[XDND_STATUS])
-				break;
-			if ((Window)ev.xclient.data.l[0] != lastwin)
-				break;
-			accept = (ev.xclient.data.l[1] & 0x1);
-			sendposition = (ev.xclient.data.l[1] & 0x2);
-			widgetcursor(wid, accept ? CURSOR_DRAG : CURSOR_NODROP);
-			x = ev.xclient.data.l[2] >> 16;
-			y = ev.xclient.data.l[2] & 0xFFFF;
-			w = ev.xclient.data.l[3] >> 16;
-			h = ev.xclient.data.l[3] & 0xFFFF;
-			if ((Atom)ev.xclient.data.l[4] != None)
-				action = (Atom)ev.xclient.data.l[4];
-			else
-				action = wid->atoms[XDND_ACTION_COPY];
-			break;
-		case MotionNotify:
-			if (ev.xmotion.time - lasttime < MOTION_TIME)
-				break;
-			XMoveWindow(wid->dpy, dragwin, ev.xmotion.x_root + DND_DISTANCE, ev.xmotion.y_root + DND_DISTANCE);
-			inside = between(ev.xmotion.x, ev.xmotion.y, x, y, w, h);
-			if ((lastaction != action || sendposition || !inside) && lastwin != None) {
-				if (lastaction != None)
-					d[4] = lastaction;
-				else if (FLAG(ev.xmotion.state, ControlMask|ShiftMask))
-					d[4] = wid->atoms[XDND_ACTION_LINK];
-				else if (FLAG(ev.xmotion.state, ShiftMask))
-					d[4] = wid->atoms[XDND_ACTION_MOVE];
-				else if (FLAG(ev.xmotion.state, ControlMask))
-					d[4] = wid->atoms[XDND_ACTION_COPY];
-				else
-					d[4] = wid->atoms[XDND_ACTION_ASK];
-				d[1] = 0;
-				d[2] = (ev.xmotion.x_root << 16) | (ev.xmotion.y_root & 0xFFFF);
-				d[3] = ev.xmotion.time;
-				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_POSITION], d);
-				sendposition = TRUE;
-			}
-			lasttime = ev.xmotion.time;
-			lastaction = action;
-			if ((win = getdropwin(wid, &version)) == lastwin)
-				break;
-			sendposition = TRUE;
-			x = y = w = h = 0;
-			if (version > XDND_VERSION)
-				version = XDND_VERSION;
-			if (lastwin != None && lastwin != wid->win) {
-				d[1] = d[2] = d[3] = d[4] = 0;
-				clientmsg(wid->dpy, lastwin, wid->atoms[XDND_LEAVE], d);
-			}
-			if (win != None && win != wid->win) {
-				d[1] = version << 24;
-				d[2] = wid->atoms[TEXT_URI_LIST];
-				d[3] = d[4] = None;
-				clientmsg(wid->dpy, win, wid->atoms[XDND_ENTER], d);
-			}
-			if (win == None)
-				widgetcursor(wid, CURSOR_NODROP);
-			else
-				widgetcursor(wid, CURSOR_DRAG);
-			lastwin = win;
-			lastaction = action = None;
-			break;
-		}
+	if (wid->sel == NULL)
+		return WIDGET_NONE;
+	disowndnd(wid);
+	if ((wid->dragctx = malloc(sizeof(*wid->dragctx))) == NULL) {
+		warn("malloc");
+		return WIDGET_NONE;
 	}
-done:
+	dragwin = createdragwin(wid, clicki);
+	i = 0;
+	for (sel = wid->sel; sel != NULL; sel = sel->next)
+		i += snprintf(wid->dndbuf + i, wid->uribufsiz - i, "file://%s\r\n", wid->items[sel->index][ITEM_PATH]);
+	ctrlsel_filltarget(
+		wid->atoms[TEXT_URI_LIST],
+		wid->atoms[TEXT_URI_LIST],
+		8, (unsigned char *)wid->dndbuf, i,
+		&wid->dragtarget
+	);
+	state = ctrlsel_dndown(
+		wid->dpy,
+		wid->win,
+		dragwin,
+		lasttime,
+		&wid->dragtarget,
+		1,
+		wid->dragctx
+	);
 	if (dragwin != None)
 		XDestroyWindow(wid->dpy, dragwin);
-	widgetcursor(wid, CURSOR_NORMAL);
-	wid->state = STATE_NORMAL;
-	return retval;
+	if (state != CTRLSEL_DROPOTHER)
+		FREE(wid->dragctx);
+	if (state == CTRLSEL_ERROR) {
+		warnx("could not perform drag-and-drop");
+	} else if (state == CTRLSEL_DROPSELF) {
+		querypointer(wid, wid->win, &x, &y, &mask);
+		clicki = getpointerclick(wid, x, y);
+		if (clicki < 1)
+			return WIDGET_NONE;
+		*nitems = fillselitems(wid, selitems, clicki);
+		if (FLAG(mask, ControlMask|ShiftMask))
+			return WIDGET_DROPLINK;
+		if (FLAG(mask, ShiftMask))
+			return WIDGET_DROPMOVE;
+		if (FLAG(mask, ControlMask))
+			return WIDGET_DROPCOPY;
+		return WIDGET_DROPASK;
+	}
+	return WIDGET_NONE;
 }
 
 static WidgetEvent
@@ -2844,13 +2393,34 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
 	int clickx = 0;
 	int clicky = 0;
 	int clicki = -1;
-	int x, y;
 	int state;
+	int x, y;
 
 	while (!XNextEvent(wid->dpy, &ev)) {
-		switch (processevent(wid, &ev)) {
+		switch (ctrlsel_dndreceive(&wid->dropctx, &ev)) {
+		case CTRLSEL_RECEIVED:
+			if (wid->droptarget.buffer == NULL)
+				return WIDGET_INTERNAL;
+			*text = (char *)wid->droptarget.buffer;
+			*nitems = 1;
+			querypointer(wid, wid->win, &x, &y, NULL);
+			selitems[0] = getpointerclick(wid, x, y);
+			if (wid->droptarget.action == wid->atoms[XDND_ACTION_COPY])
+				return WIDGET_DROPCOPY;
+			if (wid->droptarget.action == wid->atoms[XDND_ACTION_MOVE])
+				return WIDGET_DROPMOVE;
+			if (wid->droptarget.action == wid->atoms[XDND_ACTION_LINK])
+				return WIDGET_DROPLINK;
+			return WIDGET_DROPASK;
+		case CTRLSEL_INTERNAL:
+			return WIDGET_INTERNAL;
+		default:
+			break;
+		}
+		switch ((state = processevent(wid, &ev))) {
 		case WIDGET_CLOSE:
-			return WIDGET_CLOSE;
+		case WIDGET_REFRESH:
+			return state;
 		case WIDGET_NONE:
 			break;
 		default:
@@ -2922,26 +2492,6 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
 			if (state != WIDGET_NONE)
 				return state;
 			break;
-		case SelectionNotify:
-			if (wid->dropsrc == None)
-				break;
-			if (ev.xselection.property == None) {
-				tryconvertsel(wid, &ev.xselection);
-				break;
-			}
-			if ((*text = getdroptext(wid, ev.xselection.property)) != NULL) {
-				querypointer(wid, wid->win, &x, &y, NULL);
-				*nitems = 1;
-				selitems[0] = getpointerclick(wid, x, y);
-				if (wid->dropaction == wid->atoms[XDND_ACTION_COPY])
-					return WIDGET_DROPCOPY;
-				if (wid->dropaction == wid->atoms[XDND_ACTION_MOVE])
-					return WIDGET_DROPMOVE;
-				if (wid->dropaction == wid->atoms[XDND_ACTION_LINK])
-					return WIDGET_DROPLINK;
-				return WIDGET_DROPASK;
-			}
-			break;
 		case ClientMessage:
 			if (ev.xclient.message_type == wid->atoms[XDND_FINISHED])
 				return WIDGET_REFRESH;
@@ -2965,7 +2515,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 {
 	XSyncSystemCounter *counters;
 	Widget wid;
-	int ncounters, tmp, i;
+	int success, ncounters, tmp, i;
 	char *progname, *s;
 
 	wid = NULL;
@@ -3014,6 +2564,11 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.stipple = None,
 		.lastprop = None,
 		.lasttext = NULL,
+		.selctx = NULL,
+		.dragctx = NULL,
+		.uribuf = NULL,
+		.dndbuf = NULL,
+		.selbuf = NULL,
 		.syncattr = (XSyncAlarmAttributes){
 			.trigger.counter        = None,
 			.trigger.value_type     = XSyncRelative,
@@ -3082,14 +2637,30 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		warnx("could not create graphics context");
 		goto error;
 	}
+	ctrlsel_filltarget(
+		wid->atoms[TEXT_URI_LIST],
+		wid->atoms[TEXT_URI_LIST],
+		0, NULL, 0,
+		&wid->droptarget
+	);
+	success = ctrlsel_dndwatch(
+		wid->dpy,
+		wid->win,
+		CTRLSEL_COPY | CTRLSEL_MOVE | CTRLSEL_LINK | CTRLSEL_ASK,
+		&wid->droptarget,
+		1,
+		&wid->dropctx
+	);
+	if (!success) {
+		ctrlsel_dndclose(&wid->dropctx);
+		goto error;
+	}
 	XSetForeground(wid->dpy, wid->stipgc, 0);
 	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
 	XSetForeground(wid->dpy, wid->stipgc, 1);
 	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, 1, 1);
 	XSetStipple(wid->dpy, wid->gc, wid->stipple);
 	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
-	wid->cursors[CURSOR_DRAG] = XcursorLibraryLoadCursor(wid->dpy, "dnd-none");
-	wid->cursors[CURSOR_NODROP] = XcursorLibraryLoadCursor(wid->dpy, "forbidden");
 	if ((counters = XSyncListSystemCounters(wid->dpy, &ncounters)) != NULL) {
 		for (i = 0; i < ncounters; i++) {
 			if (strcmp(counters[i].name, "SERVERTIME") == 0) {
@@ -3115,7 +2686,7 @@ error:
 		XDestroyWindow(wid->dpy, wid->win);
 	if (wid->dpy != NULL)
 		XCloseDisplay(wid->dpy);
-	free(wid);
+	FREE(wid);
 	return NULL;
 }
 
@@ -3155,25 +2726,34 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 		goto error;
 	}
 	if ((wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) == NULL) {
-		warn("calloc");
+		warn("malloc");
 		goto error;
 	}
-	for (i = 0; i < nitems; i++)
+	wid->selbufsiz = 0;
+	for (i = 0; i < nitems; i++) {
 		wid->thumbs[i] = NULL;
+		wid->selbufsiz += strlen(items[i][ITEM_PATH]) + 1; /* +1 for '\n' */
+	}
+	if ((wid->selbuf = malloc(wid->selbufsiz)) == NULL) {
+		warn("malloc");
+		goto error;
+	}
+	wid->uribufsiz = wid->selbufsiz + (nitems * 8);         /* 8 for "file://\r" */
+	if ((wid->uribuf = malloc(wid->uribufsiz)) == NULL) {
+		warn("malloc");
+		goto error;
+	}
+	if ((wid->dndbuf = malloc(wid->uribufsiz)) == NULL) {
+		warn("malloc");
+		goto error;
+	}
 	wid->thumbhead = NULL;
 	settitle(wid);
 	drawitems(wid);
 	commitdraw(wid);
 	return RET_OK;
 error:
-	free(wid->issel);
-	free(wid->linelen);
-	free(wid->nlines);
-	free(wid->thumbs);
-	wid->issel = NULL;
-	wid->linelen = NULL;
-	wid->nlines = NULL;
-	wid->thumbs = NULL;
+	cleanwidget(wid);
 	return RET_ERROR;
 }
 
@@ -3190,7 +2770,7 @@ pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl, char **text)
 	int retval;
 
 	*text = NULL;
-	finishdrop(wid);
+	wid->droptarget.buffer = NULL;
 	while (wid->start && XPending(wid->dpy) > 0) {
 		(void)XNextEvent(wid->dpy, &ev);
 		if (processevent(wid, &ev) == WIDGET_CLOSE) {
@@ -3212,7 +2792,7 @@ closewidget(Widget wid)
 {
 	int i, j;
 
-	finishdrop(wid);
+	ctrlsel_dndclose(&wid->dropctx);
 	cleanwidget(wid);
 	for (i = 0; i < wid->nicons; i++) {
 		if (wid->icons[i].pix != None) {
@@ -3222,7 +2802,7 @@ closewidget(Widget wid)
 			XFreePixmap(wid->dpy, wid->icons[i].mask);
 		}
 	}
-	free(wid->icons);
+	FREE(wid->icons);
 	if (wid->draw != NULL)
 		XftDrawDestroy(wid->draw);
 	if (wid->pix != None)
@@ -3242,7 +2822,7 @@ closewidget(Widget wid)
 	XFreeGC(wid->dpy, wid->stipgc);
 	XFreeGC(wid->dpy, wid->gc);
 	XCloseDisplay(wid->dpy);
-	free(wid);
+	FREE(wid);
 }
 
 int
@@ -3347,9 +2927,8 @@ setthumbnail(Widget wid, char *path, int item)
 error:
 	if (fp != NULL)
 		fclose(fp);
-	free(data);
-	free(wid->thumbs[item]);
-	wid->thumbs[item] = NULL;
+	FREE(data);
+	FREE(wid->thumbs[item]);
 }
 
 void

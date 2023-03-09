@@ -23,12 +23,6 @@ diff(int x, int y)
 	return x > y ? x - y : y - x;
 }
 
-int
-between(int x, int y, int x0, int y0, int w0, int h0)
-{
-	return x >= x0 && x < x0 + w0 && y >= y0 && y < y0 + h0;
-}
-
 void *
 emalloc(size_t size)
 {
