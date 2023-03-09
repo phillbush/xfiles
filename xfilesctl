@@ -178,13 +178,13 @@ case "$operation" in
 	dropmenu "$@"
 	;;
 ("drop-copy")
-	drop "cp" "$@"
+	dialog "cp" "$@"
 	;;
 ("drop-move")
-	drop "mv" "$@"
+	dialog "mv" "$@"
 	;;
 ("drop-link")
-	drop "ln" "$@"
+	dialog "ln" "$@"
 	;;
 (^BackSpace)
 	# go up

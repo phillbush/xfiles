@@ -604,7 +604,7 @@ ctrlsel_request(
 		.transfers = NULL,
 		.dndwindow = None,
 		.dndactions = 0x00,
-		.dndresult = None,
+		.dndresult = 0x00,
 	};
 	if (ntargets == 0)
 		return 1;
@@ -639,7 +639,7 @@ ctrlsel_setowner(
 		.transfers = NULL,
 		.dndwindow = None,
 		.dndactions = 0x00,
-		.dndresult = None,
+		.dndresult = 0x00,
 	};
 	(void)XSetSelectionOwner(display, selection, window, time);
 	if (XGetSelectionOwner(display, selection) != window)
@@ -1219,7 +1219,7 @@ ctrlsel_dndwatch(
 		.transfers = NULL,
 		.dndwindow = None,
 		.dndactions = actions,
-		.dndresult = None,
+		.dndresult = 0x00,
 	};
 	(void)XChangeProperty(
 		display,
@@ -1237,6 +1237,7 @@ static void
 finishdrop(struct CtrlSelContext *context)
 {
 	long d[NCLIENTMSG_DATA];
+	unsigned long i;
 	Atom finished;
 
 	if (context->dndwindow == None)
@@ -1244,6 +1245,8 @@ finishdrop(struct CtrlSelContext *context)
 	finished = XInternAtom(context->display, atomnames[XDND_FINISHED], False);
 	if (finished == None)
 		return;
+	for (i = 0; i < context->ntargets; i++)
+		context->targets[i].action = context->dndresult;
 	d[0] = context->window;
 	d[1] = d[2] = d[3] = d[4] = 0;
 	clientmsg(context->display, context->dndwindow, finished, d);
@@ -1254,6 +1257,7 @@ int
 ctrlsel_dndreceive(struct CtrlSelContext *context, XEvent *event)
 {
 	Atom atoms[XDND_ATOM_LAST];
+	Atom action;
 	long d[NCLIENTMSG_DATA];
 	
 	if (!XInternAtoms(context->display, atomnames, XDND_ATOM_LAST, False, atoms))
@@ -1268,12 +1272,11 @@ ctrlsel_dndreceive(struct CtrlSelContext *context, XEvent *event)
 	default:
 		break;
 	}
-
 	if (event->type != ClientMessage)
 		return CTRLSEL_NONE;
 	if (event->xclient.message_type == atoms[XDND_ENTER]) {
 		context->dndwindow = (Window)event->xclient.data.l[0];
-		context->dndresult = None;
+		context->dndresult = 0x00;
 	} else if (event->xclient.message_type == atoms[XDND_LEAVE]) {
 		if ((Window)event->xclient.data.l[0] == None ||
 		    (Window)event->xclient.data.l[0] != context->dndwindow)
@@ -1299,15 +1302,25 @@ ctrlsel_dndreceive(struct CtrlSelContext *context, XEvent *event)
 		     context->dndactions & CTRLSEL_ASK) ||
 		    ((Atom)event->xclient.data.l[4] == atoms[XDND_ACTION_PRIVATE] &&
 		     context->dndactions & CTRLSEL_PRIVATE)) {
-			context->dndresult = (Atom)event->xclient.data.l[4];
+			action = (Atom)event->xclient.data.l[4];
 		} else {
-			context->dndresult = atoms[XDND_ACTION_COPY];
+			action = atoms[XDND_ACTION_COPY];
 		}
 		d[0] = context->window;
 		d[1] = 0x1;
 		d[2] = 0;               /* our rectangle is the entire screen */
 		d[3] = 0xFFFFFFFF;      /* so we do not get lots of messages */
-		d[4] = context->dndresult;
+		d[4] = action;
+		if (action == atoms[XDND_ACTION_PRIVATE])
+			context->dndresult = CTRLSEL_PRIVATE;
+		else if (action == atoms[XDND_ACTION_ASK])
+			context->dndresult = CTRLSEL_ASK;
+		else if (action == atoms[XDND_ACTION_LINK])
+			context->dndresult = CTRLSEL_LINK;
+		else if (action == atoms[XDND_ACTION_MOVE])
+			context->dndresult = CTRLSEL_MOVE;
+		else
+			context->dndresult = CTRLSEL_COPY;
 		clientmsg(
 			context->display,
 			(Window)event->xclient.data.l[0],

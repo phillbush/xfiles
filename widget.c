@@ -26,7 +26,6 @@
 #include "widget.h"
 #include "winicon.data"         /* window icon, for the window manager */
 
-#define XDND_VERSION    5               /* XDND protocol version */
 #define NCLIENTMSG_DATA 5               /* number of members on a the .data.l[] array of a XClientMessageEvent */
 
 /* free and set to null */
@@ -150,30 +149,6 @@ enum {
 };
 
 enum {
-	/* xdnd window properties */
-	XDND_AWARE,
-	XDND_TYPELIST,
-	XDND_DIRECT_SAVE,
-
-	/* xdnd selections */
-	XDND_SELECTION,
-
-	/* xdnd client messages */
-	XDND_ENTER,
-	XDND_POSITION,
-	XDND_STATUS,
-	XDND_LEAVE,
-	XDND_DROP,
-	XDND_FINISHED,
-
-	/* xdnd actions */
-	XDND_ACTION_COPY,
-	XDND_ACTION_MOVE,
-	XDND_ACTION_LINK,
-	XDND_ACTION_ASK,
-	XDND_ACTION_PRIVATE,
-	XDND_ACTION_DIRECT_SAVE,
-
 	/* selection targets */
 	TEXT_URI_LIST,
 	UTF8_STRING,
@@ -239,8 +214,6 @@ struct Widget {
 	Window win;
 	XftColor colors[SELECT_LAST][COLOR_LAST];
 	XftFont *font;
-	Atom dropaction;
-	Window dropsrc;
 	Visual *visual;
 	Colormap colormap;
 	unsigned int depth;
@@ -402,22 +375,6 @@ struct Widget {
 };
 
 static char *atomnames[ATOM_LAST] = {
-	[XDND_AWARE]                 = "XdndAware",
-	[XDND_TYPELIST]              = "XdndTypeList",
-	[XDND_DIRECT_SAVE]           = "XdndDirectSave",
-	[XDND_SELECTION]             = "XdndSelection",
-	[XDND_ENTER]                 = "XdndEnter",
-	[XDND_POSITION]              = "XdndPosition",
-	[XDND_STATUS]                = "XdndStatus",
-	[XDND_LEAVE]                 = "XdndLeave",
-	[XDND_DROP]                  = "XdndDrop",
-	[XDND_FINISHED]              = "XdndFinished",
-	[XDND_ACTION_COPY]           = "XdndActionCopy",
-	[XDND_ACTION_MOVE]           = "XdndActionMove",
-	[XDND_ACTION_LINK]           = "XdndActionLink",
-	[XDND_ACTION_ASK]            = "XdndActionAsk",
-	[XDND_ACTION_PRIVATE]        = "XdndActionPrivate",
-	[XDND_ACTION_DIRECT_SAVE]    = "XdndActionDirectSave",
 	[TEXT_URI_LIST]              = "text/uri-list",
 	[ATOM_PAIR]                  = "ATOM_PAIR",
 	[COMPOUND_TEXT]              = "COMPOUND_TEXT",
@@ -2405,11 +2362,11 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
 			*nitems = 1;
 			querypointer(wid, wid->win, &x, &y, NULL);
 			selitems[0] = getpointerclick(wid, x, y);
-			if (wid->droptarget.action == wid->atoms[XDND_ACTION_COPY])
+			if (wid->droptarget.action == CTRLSEL_COPY)
 				return WIDGET_DROPCOPY;
-			if (wid->droptarget.action == wid->atoms[XDND_ACTION_MOVE])
+			if (wid->droptarget.action == CTRLSEL_MOVE)
 				return WIDGET_DROPMOVE;
-			if (wid->droptarget.action == wid->atoms[XDND_ACTION_LINK])
+			if (wid->droptarget.action == CTRLSEL_LINK)
 				return WIDGET_DROPLINK;
 			return WIDGET_DROPASK;
 		case CTRLSEL_INTERNAL:
@@ -2492,10 +2449,6 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
 			if (state != WIDGET_NONE)
 				return state;
 			break;
-		case ClientMessage:
-			if (ev.xclient.message_type == wid->atoms[XDND_FINISHED])
-				return WIDGET_REFRESH;
-			break;
 		default:
 			break;
 		}
@@ -2547,8 +2500,6 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.nlines = NULL,
 		.icons = NULL,
 		.highlight = -1,
-		.dropaction = None,
-		.dropsrc = None,
 		.title = "",
 		.class = class,
 		.sel = NULL,

@@ -23,8 +23,8 @@ enum {
 struct CtrlSelTarget {
 	Atom target;
 	Atom type;
-	Atom action;
 	int format;
+	unsigned int action;
 	unsigned long nitems;
 	unsigned long bufsize;
 	unsigned char *buffer;

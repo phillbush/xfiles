@@ -633,8 +633,8 @@ structure contains:
 struct CtrlSelTarget {
 	Atom            target;
 	Atom            type;
-	Atom            action;
 	int             format;
+	unsigned int    action;
 	unsigned long   nitems;
 	unsigned long   bufsize;
 	unsigned char  *buffer;
@@ -650,7 +650,14 @@ as explained earlier.
 The structure members must be  as follows:
 .Bl -tag -width Ds
 .It Fa "action"
-The atom identifying the action that resulted on the drop of a content by a drag-and-drop operation.
+The action that resulted on the drop of a content by a drag-and-drop operation.
+Its value is equal to one of the supported actions:
+.Ic "CTRLSEL_COPY" ,
+.Ic "CTRLSEL_MOVE" ,
+.Ic "CTRLSEL_LINK" ,
+.Ic "CTRLSEL_ASK" ,
+or
+.Ic "CTRLSEL_PRIVATE" .
 This member is only set by the
 .Fn ctrlsel_dndreceive
 function.
