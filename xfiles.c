@@ -73,7 +73,7 @@ struct Cwd {
 };
 
 struct FM {
-	Widget wid;
+	Widget *wid;
 	char ***entries;
 	int *foundicons;        /* array of indices to found icons */
 	int *selitems;          /* array of indices to selected items */

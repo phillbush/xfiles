@@ -393,7 +393,7 @@ static char *atomnames[ATOM_LAST] = {
 };
 
 static int
-createwin(Widget wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
+createwin(Widget *wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
 {
 	XftDraw *draw;
 	Pixmap bg;
@@ -515,7 +515,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 }
 
 static int
-ealloccolor(Widget wid, const char *s, XftColor *color, unsigned short alpha)
+ealloccolor(Widget *wid, const char *s, XftColor *color, unsigned short alpha)
 {
 	XColor screen, exact;
 
@@ -555,7 +555,7 @@ getresource(XrmDatabase xdb, const char *class, const char *name, const char *re
 }
 
 static int
-textwidth(Widget wid, const char *text, int len)
+textwidth(Widget *wid, const char *text, int len)
 {
 	XGlyphInfo box;
 
@@ -564,7 +564,7 @@ textwidth(Widget wid, const char *text, int len)
 }
 
 static int
-inittheme(Widget wid, const char *class, const char *name)
+inittheme(Widget *wid, const char *class, const char *name)
 {
 	XrmDatabase xdb;
 	int i, j, goterror;;
@@ -661,7 +661,7 @@ error:
 }
 
 static int
-calcsize(Widget wid, int w, int h)
+calcsize(Widget *wid, int w, int h)
 {
 	int ncols, nrows, ret;
 	double d;
@@ -717,7 +717,7 @@ isbreakable(char c)
 }
 
 static void
-drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int len)
+drawtext(Widget *wid, Drawable pix, XftColor *color, int x, const char *text, int len)
 {
 	XftDraw *draw;
 	int w;
@@ -731,7 +731,7 @@ drawtext(Widget wid, Drawable pix, XftColor *color, int x, const char *text, int
 }
 
 static void
-setrow(Widget wid, int row)
+setrow(Widget *wid, int row)
 {
 	etlock(&wid->lock);
 	wid->row = row;
@@ -739,7 +739,7 @@ setrow(Widget wid, int row)
 }
 
 static void
-drawicon(Widget wid, int index, int x, int y)
+drawicon(Widget *wid, int index, int x, int y)
 {
 	XGCValues val;
 	Pixmap pix, mask;
@@ -808,7 +808,7 @@ drawicon(Widget wid, int index, int x, int y)
 }
 
 static void
-drawlabel(Widget wid, int index, int x, int y)
+drawlabel(Widget *wid, int index, int x, int y)
 {
 	XftColor *color;
 	int i;
@@ -928,21 +928,21 @@ drawlabel(Widget wid, int index, int x, int y)
 }
 
 static int
-firstvisible(Widget wid)
+firstvisible(Widget *wid)
 {
 	/* gets index of last visible item */
 	return wid->row * wid->ncols;
 }
 
 static int
-lastvisible(Widget wid)
+lastvisible(Widget *wid)
 {
 	/* gets index of last visible item */
 	return min(wid->nitems, firstvisible(wid) + wid->nrows * wid->ncols) - 1;
 }
 
 static void
-drawitem(Widget wid, int index)
+drawitem(Widget *wid, int index)
 {
 	int i, x, y, min, max;
 
@@ -965,7 +965,7 @@ done:
 }
 
 static void
-drawitems(Widget wid)
+drawitems(Widget *wid)
 {
 	int i, n;
 
@@ -977,7 +977,7 @@ drawitems(Widget wid)
 }
 
 static void
-commitdraw(Widget wid)
+commitdraw(Widget *wid)
 {
 	etlock(&wid->lock);
 	XClearWindow(wid->dpy, wid->win);
@@ -1017,7 +1017,7 @@ done:
 }
 
 static void
-settitle(Widget wid)
+settitle(Widget *wid)
 {
 	char title[TITLE_BUFSIZE];
 	char nitems[STATUS_BUFSIZE];
@@ -1074,7 +1074,7 @@ settitle(Widget wid)
 }
 
 static int
-gethandlepos(Widget wid)
+gethandlepos(Widget *wid)
 {
 	int row;
 
@@ -1086,7 +1086,7 @@ gethandlepos(Widget wid)
 }
 
 static void
-drawscroller(Widget wid, int y)
+drawscroller(Widget *wid, int y)
 {
 	XftDraw *draw;
 	XftColor color;
@@ -1106,7 +1106,7 @@ drawscroller(Widget wid, int y)
 }
 
 static int
-scroll(Widget wid, int y)
+scroll(Widget *wid, int y)
 {
 	int prevhand, newhand;          /* position of the scroller handle */
 	int prevrow, newrow;
@@ -1169,7 +1169,7 @@ readsize(FILE *fp)
 }
 
 static int
-getitem(Widget wid, int row, int ydiff, int *x, int *y)
+getitem(Widget *wid, int row, int ydiff, int *x, int *y)
 {
 	int i, w, h;
 
@@ -1192,7 +1192,7 @@ getitem(Widget wid, int row, int ydiff, int *x, int *y)
 }
 
 static int
-getpointerclick(Widget wid, int x, int y)
+getpointerclick(Widget *wid, int x, int y)
 {
 	int iconx, textx, texty, i;
 
@@ -1215,7 +1215,7 @@ getpointerclick(Widget wid, int x, int y)
 }
 
 static void
-disownprimary(Widget wid)
+disownprimary(Widget *wid)
 {
 	if (wid->selctx == NULL)
 		return;
@@ -1224,7 +1224,7 @@ disownprimary(Widget wid)
 }
 
 static void
-disowndnd(Widget wid)
+disowndnd(Widget *wid)
 {
 	if (wid->dragctx == NULL)
 		return;
@@ -1233,7 +1233,7 @@ disowndnd(Widget wid)
 }
 
 static void
-ownprimary(Widget wid, Time time)
+ownprimary(Widget *wid, Time time)
 {
 	struct Selection *sel;
 	size_t i, j;
@@ -1279,7 +1279,7 @@ ownprimary(Widget wid, Time time)
 }
 
 static void
-cleanwidget(Widget wid)
+cleanwidget(Widget *wid)
 {
 	struct Thumb *thumb;
 	struct Selection *sel;
@@ -1314,7 +1314,7 @@ cleanwidget(Widget wid)
 }
 
 static void
-selectitem(Widget wid, int index, int select, int rectsel)
+selectitem(Widget *wid, int index, int select, int rectsel)
 {
 	struct Selection *sel;
 	struct Selection **header;
@@ -1355,7 +1355,7 @@ selectitem(Widget wid, int index, int select, int rectsel)
 }
 
 static void
-highlight(Widget wid, int index, int redraw)
+highlight(Widget *wid, int index, int redraw)
 {
 	int prevhili;
 
@@ -1371,7 +1371,7 @@ highlight(Widget wid, int index, int redraw)
 }
 
 static void
-selectitems(Widget wid, int a, int b)
+selectitems(Widget *wid, int a, int b)
 {
 	int i, min, max;
 
@@ -1390,7 +1390,7 @@ selectitems(Widget wid, int a, int b)
 }
 
 static void
-unselectitems(Widget wid)
+unselectitems(Widget *wid)
 {
 	while (wid->sel) {
 		selectitem(wid, wid->sel->index, FALSE, 0);
@@ -1398,7 +1398,7 @@ unselectitems(Widget wid)
 }
 
 static int
-mouse1click(Widget wid, XButtonPressedEvent *ev)
+mouse1click(Widget *wid, XButtonPressedEvent *ev)
 {
 	int prevhili, index;
 
@@ -1424,7 +1424,7 @@ mouse1click(Widget wid, XButtonPressedEvent *ev)
 }
 
 static void
-mouse3click(Widget wid, int x, int y)
+mouse3click(Widget *wid, int x, int y)
 {
 	int index;
 
@@ -1441,7 +1441,7 @@ mouse3click(Widget wid, int x, int y)
 }
 
 static void
-rectdraw(Widget wid, int row, int ydiff, int x0, int y0, int x, int y)
+rectdraw(Widget *wid, int row, int ydiff, int x0, int y0, int x, int y)
 {
 	int w, h;
 
@@ -1475,7 +1475,7 @@ rectdraw(Widget wid, int row, int ydiff, int x0, int y0, int x, int y)
 }
 
 static int
-rectselect(Widget wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, int dsty)
+rectselect(Widget *wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, int dsty)
 {
 	int row, col, tmp, i;
 	int changed;
@@ -1562,7 +1562,7 @@ rectselect(Widget wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, i
 }
 
 static void
-commitrectsel(Widget wid)
+commitrectsel(Widget *wid)
 {
 	struct Selection *sel, *next;
 
@@ -1585,7 +1585,7 @@ commitrectsel(Widget wid)
 }
 
 static void
-endevent(Widget wid)
+endevent(Widget *wid)
 {
 	if (wid->redraw) {
 		commitdraw(wid);
@@ -1593,7 +1593,7 @@ endevent(Widget wid)
 }
 
 static int
-querypointer(Widget wid, Window win, int *retx, int *rety, unsigned int *retmask)
+querypointer(Widget *wid, Window win, int *retx, int *rety, unsigned int *retmask)
 {
 	Window root, child;
 	unsigned int mask;
@@ -1619,7 +1619,7 @@ querypointer(Widget wid, Window win, int *retx, int *rety, unsigned int *retmask
 }
 
 static void
-scrollerset(Widget wid, int pos)
+scrollerset(Widget *wid, int pos)
 {
 	int prevrow, newrow, maxpos;
 
@@ -1661,7 +1661,7 @@ checkheader(FILE *fp, char *header, size_t size)
 }
 
 static int
-pixmapfromdata(Widget wid, char **data, Pixmap *pix, Pixmap *mask)
+pixmapfromdata(Widget *wid, char **data, Pixmap *pix, Pixmap *mask)
 {
 	XpmAttributes xa = {
 		.valuemask = XpmVisual | XpmColormap | XpmDepth,
@@ -1679,7 +1679,7 @@ pixmapfromdata(Widget wid, char **data, Pixmap *pix, Pixmap *mask)
 }
 
 static int
-fillselitems(Widget wid, int *selitems, int clicked)
+fillselitems(Widget *wid, int *selitems, int clicked)
 {
 	struct Selection *sel;
 	int nitems;
@@ -1696,7 +1696,7 @@ fillselitems(Widget wid, int *selitems, int clicked)
 }
 
 static Window
-createdragwin(Widget wid, int index)
+createdragwin(Widget *wid, int index)
 {
 	Window win;
 	GC gc;
@@ -1782,7 +1782,7 @@ createdragwin(Widget wid, int index)
 }
 
 static char *
-gettextprop(Widget wid, Atom prop)
+gettextprop(Widget *wid, Atom prop)
 {
 	char *text;
 	unsigned char *p;
@@ -1818,7 +1818,7 @@ done:
 }
 
 static void
-xinitvisual(Widget wid)
+xinitvisual(Widget *wid)
 {
 	XVisualInfo tpl = {
 		.screen = SCREEN(wid->dpy),
@@ -1857,7 +1857,7 @@ xinitvisual(Widget wid)
  */
 
 static WidgetEvent
-keypress(Widget wid, XKeyEvent *xev, int *selitems, int *nitems, char **text)
+keypress(Widget *wid, XKeyEvent *xev, int *selitems, int *nitems, char **text)
 {
 	KeySym ksym;
 	unsigned int state;
@@ -2018,7 +2018,7 @@ draw:
 }
 
 static WidgetEvent
-processevent(Widget wid, XEvent *ev)
+processevent(Widget *wid, XEvent *ev)
 {
 	if (wid->selctx != NULL) {
 		switch (ctrlsel_send(wid->selctx, ev)) {
@@ -2092,7 +2092,7 @@ processevent(Widget wid, XEvent *ev)
 }
 
 static WidgetEvent
-checklastprop(Widget wid, char **text)
+checklastprop(Widget *wid, char **text)
 {
 	Atom prop;
 	char *str;
@@ -2123,7 +2123,7 @@ checklastprop(Widget wid, char **text)
  */
 
 static WidgetEvent
-scrollmode(Widget wid, int x, int y)
+scrollmode(Widget *wid, int x, int y)
 {
 	XEvent ev;
 	int grabpos, pos, left;
@@ -2184,7 +2184,7 @@ done:
 }
 
 static WidgetEvent
-selmode(Widget wid, Time lasttime, int shift, int clickx, int clicky)
+selmode(Widget *wid, Time lasttime, int shift, int clickx, int clicky)
 {
 	XEvent ev;
 	int rectrow, rectydiff, ownsel;
@@ -2231,7 +2231,7 @@ done:
 }
 
 static WidgetEvent
-dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
+dragmode(Widget *wid, Time lasttime, int clicki, int *selitems, int *nitems)
 {
 	struct Selection *sel;
 	Window dragwin;
@@ -2288,7 +2288,7 @@ dragmode(Widget wid, Time lasttime, int clicki, int *selitems, int *nitems)
 }
 
 static WidgetEvent
-mainmode(Widget wid, int *selitems, int *nitems, char **text)
+mainmode(Widget *wid, int *selitems, int *nitems, char **text)
 {
 	XEvent ev;
 	Time lasttime = 0;
@@ -2408,10 +2408,10 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
  * in the given addresses, during Widget's lifetime.
  */
 
-Widget
+Widget *
 initwidget(const char *class, const char *name, const char *geom, int argc, char *argv[])
 {
-	Widget wid;
+	Widget *wid;
 	int success;
 	char *progname, *s;
 
@@ -2558,7 +2558,7 @@ error:
 }
 
 int
-setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
+setwidget(Widget *wid, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
 {
 	size_t i;
 
@@ -2626,13 +2626,13 @@ error:
 }
 
 void
-mapwidget(Widget wid)
+mapwidget(Widget *wid)
 {
 	XMapWindow(wid->dpy, wid->win);
 }
 
 WidgetEvent
-pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl, char **text)
+pollwidget(Widget *wid, int *selitems, int *nitems, Scroll *scrl, char **text)
 {
 	XEvent ev;
 	int retval;
@@ -2656,7 +2656,7 @@ pollwidget(Widget wid, int *selitems, int *nitems, Scroll *scrl, char **text)
 }
 
 void
-closewidget(Widget wid)
+closewidget(Widget *wid)
 {
 	int i, j;
 
@@ -2694,7 +2694,7 @@ closewidget(Widget wid)
 }
 
 int
-widopenicons(Widget wid, char **xpms[], int nxpms)
+widopenicons(Widget *wid, char **xpms[], int nxpms)
 {
 	int retval, i;
 
@@ -2714,7 +2714,7 @@ widopenicons(Widget wid, char **xpms[], int nxpms)
 }
 
 void
-setthumbnail(Widget wid, char *path, int item)
+setthumbnail(Widget *wid, char *path, int item)
 {
 	FILE *fp;
 	size_t size, i;
@@ -2800,14 +2800,14 @@ error:
 }
 
 void
-widget_busy(Widget wid)
+widget_busy(Widget *wid)
 {
 	XDefineCursor(wid->dpy, wid->win, wid->busycursor);
 	XFlush(wid->dpy);
 }
 
 unsigned long
-widgetwinid(Widget wid)
+widgetwinid(Widget *wid)
 {
 	return (unsigned long)wid->win;
 }
