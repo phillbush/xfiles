@@ -4,17 +4,19 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#ifndef RET_ERROR
-#define RET_ERROR (-1)
+#define LEN(a)          (sizeof(a) / sizeof((a)[0]))
+#define FLAG(f, b)      (((f) & (b)) == (b))
+#ifndef RETURN_FAILURE
+#define RETURN_FAILURE  (-1)
 #endif
-#ifndef RET_OK
-#define RET_OK 0
+#ifndef RETURN_SUCCESS
+#define RETURN_SUCCESS  0
 #endif
 #ifndef FALSE
-#define FALSE 0
+#define FALSE           0
 #endif
 #ifndef TRUE
-#define TRUE 1
+#define TRUE            1
 #endif
 
 pid_t efork(void);

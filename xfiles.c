@@ -130,9 +130,9 @@ wchdir(const char *path)
 {
 	if (chdir(path) == -1) {
 		warn("%s", path);
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	}
-	return RET_OK;
+	return RETURN_SUCCESS;
 }
 
 static int
@@ -308,12 +308,12 @@ setthumbpath(struct FM *fm, char *orig, char *thumb)
 	int i;
 
 	if (realpath(orig, buf) == NULL)
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	for (i = 0; buf[i] != '\0'; i++)
 		if (buf[i] == '/')
 			buf[i] = '%';
 	snprintf(thumb, PATH_MAX, "%s/%s.ppm", fm->thumbnaildir, buf);
-	return RET_OK;
+	return RETURN_SUCCESS;
 }
 
 static int
@@ -455,7 +455,7 @@ thumbnailer(void *arg)
 			continue;
 		if (strncmp(fm->entries[i][STATE_PATH], fm->thumbnaildir, fm->thumbnaildirlen) == 0)
 			continue;
-		if (setthumbpath(fm, fm->entries[i][STATE_PATH], path) == RET_ERROR)
+		if (setthumbpath(fm, fm->entries[i][STATE_PATH], path) == RETURN_FAILURE)
 			continue;
 		if (thumbexists(fm, fm->entries[i], path)) {
 			setthumbnail(fm->wid, path, i);
@@ -494,8 +494,8 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 	int islink, i;
 	char buf[PATH_MAX];
 
-	if (path != NULL && wchdir(path) == RET_ERROR)
-		return RET_ERROR;
+	if (path != NULL && wchdir(path) == RETURN_FAILURE)
+		return RETURN_FAILURE;
 	free(cwd->path);
 	free(cwd->here);
 	egetcwd(buf, sizeof(buf));
@@ -541,7 +541,7 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 		snprintf(buf, PATH_MAX, "%s", cwd->path);
 	}
 	cwd->here = estrdup(buf);
-	return RET_OK;
+	return RETURN_SUCCESS;
 }
 
 static void
@@ -607,7 +607,7 @@ forkexec(char *const argv[], char *path, int doublefork)
 
 	if ((pid1 = efork()) == 0) {
 		if (!doublefork || (pid2 = efork()) == 0) {
-			if (path != NULL && wchdir(path) == RET_ERROR)
+			if (path != NULL && wchdir(path) == RETURN_FAILURE)
 				exit(EXIT_FAILURE);
 			fd = open(DEV_NULL, O_RDWR);
 			(void)dup2(fd, STDIN_FILENO);
@@ -785,16 +785,16 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 		 * continue if the directory's ctime has changed
 		 */
 		if (stat(path, &sb) == -1) {
-			return RET_ERROR;
+			return RETURN_FAILURE;
 		}
 		if (!timespeclt(&fm->time, &sb.st_ctim)) {
-			return RET_OK;
+			return RETURN_SUCCESS;
 		}
 	}
 	widgetcursor(fm->wid, CURSOR_WATCH);
-	retval = RET_OK;
+	retval = RETURN_SUCCESS;
 	closethumbthread(fm);
-	if (diropen(fm, &cwd, path) == RET_ERROR)
+	if (diropen(fm, &cwd, path) == RETURN_FAILURE)
 		goto done;
 	if (fm->cwd->path != NULL && strcmp(cwd.path, fm->cwd->path) == 0) {
 		/*
@@ -824,8 +824,8 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 	fm->cwd->here = cwd.here;
 	fm->last = fm->cwd;
 	scrl = keepscroll ? &fm->cwd->state : NULL;
-	if (setwidget(fm->wid, fm->cwd->here, fm->entries, fm->foundicons, fm->nentries, scrl) == RET_ERROR) {
-		retval = RET_ERROR;
+	if (setwidget(fm->wid, fm->cwd->here, fm->entries, fm->foundicons, fm->nentries, scrl) == RETURN_FAILURE) {
+		retval = RETURN_FAILURE;
 		goto done;
 	}
 done:
@@ -844,13 +844,13 @@ openicons(struct FM *fm)
 		goto error;
 	for (i = 0; i < nicons; i++)
 		xpms[i] = icons[i][CONFIG_DATA];
-	if (widopenicons(fm->wid, xpms, nicons) == RET_ERROR)
+	if (widopenicons(fm->wid, xpms, nicons) == RETURN_FAILURE)
 		goto error;
 	free(xpms);
-	return RET_OK;
+	return RETURN_SUCCESS;
 error:
 	free(xpms);
-	return RET_ERROR;
+	return RETURN_FAILURE;
 
 }
 
@@ -927,17 +927,17 @@ main(int argc, char *argv[])
 	if ((fm.wid = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
 	(void)snprintf(winid, WINDOWID_BUFSIZE, "%lu", widgetwinid(fm.wid));
-	if (setenv(WINDOWID, winid, TRUE) == RET_ERROR) {
+	if (setenv(WINDOWID, winid, TRUE) == RETURN_FAILURE) {
 		warn("setenv");
 		exitval = EXIT_FAILURE;
 		goto error;
 	}
-	if (openicons(&fm) == RET_ERROR)
+	if (openicons(&fm) == RETURN_FAILURE)
 		goto error;
-	if (diropen(&fm, fm.cwd, path) == RET_ERROR)
+	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)
 		goto error;
 	fm.last = fm.cwd;
-	if (setwidget(fm.wid, fm.cwd->here, fm.entries, fm.foundicons, fm.nentries, NULL) == RET_ERROR)
+	if (setwidget(fm.wid, fm.cwd->here, fm.entries, fm.foundicons, fm.nentries, NULL) == RETURN_FAILURE)
 		goto error;
 	createthumbthread(&fm);
 	mapwidget(fm.wid);
@@ -950,7 +950,7 @@ main(int argc, char *argv[])
 			break;
 		case WIDGET_CONTEXT:
 			runcontext(&fm, MENU, nitems);
-			if (changedir(&fm, fm.cwd->path, FALSE) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, FALSE) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -964,13 +964,13 @@ main(int argc, char *argv[])
 			if (cwd == NULL)
 				break;
 			fm.cwd = cwd;
-			if (changedir(&fm, cwd->path, FALSE) == RET_ERROR) {
+			if (changedir(&fm, cwd->path, FALSE) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
 			break;
 		case WIDGET_REFRESH:
-			if (changedir(&fm, fm.cwd->path, TRUE) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, TRUE) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -983,7 +983,7 @@ main(int argc, char *argv[])
 			if (fm.entries[fm.selitems[0]][STATE_MODE] == NULL)
 				break;
 			if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
-				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RET_ERROR) {
+				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RETURN_FAILURE) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
@@ -1006,7 +1006,7 @@ main(int argc, char *argv[])
 				/* drag-and-drop in the same window */
 				runindrop(&fm, event, nitems);
 			}
-			if (changedir(&fm, fm.cwd->path, FALSE) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, FALSE) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -1019,13 +1019,13 @@ main(int argc, char *argv[])
 				runcontext(&fm, text, nitems);
 				force_refresh = FALSE;
 			}
-			if (changedir(&fm, fm.cwd->path, force_refresh) == RET_ERROR) {
+			if (changedir(&fm, fm.cwd->path, force_refresh) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
 			break;
 		case WIDGET_GOTO:
-			if (changedir(&fm, text, TRUE) == RET_ERROR) {
+			if (changedir(&fm, text, TRUE) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}

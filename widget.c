@@ -458,7 +458,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		}
 	);
 	if (wid->win == None)
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	bg = XCreatePixmap(
 		wid->dpy,
 		wid->win,
@@ -467,7 +467,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		wid->depth
 	);
 	if (bg == None)
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	draw = XftDrawCreate(wid->dpy, bg, wid->visual, wid->colormap);
 	XftDrawRect(draw, &wid->colors[SELECT_NOT][COLOR_BG], 0, 0, THUMBSIZE, THUMBSIZE);
 	XftDrawDestroy(draw);
@@ -481,7 +481,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		wid->depth
 	);
 	if (wid->namepix == None)
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	XmbSetWMProperties(
 		wid->dpy, wid->win,
 		class, class,
@@ -518,7 +518,7 @@ createwin(Widget wid, const char *class, const char *name, const char *geom, int
 		(unsigned char *)&pid,
 		1
 	);
-	return RET_OK;
+	return RETURN_SUCCESS;
 }
 
 static int
@@ -527,13 +527,13 @@ ealloccolor(Widget wid, const char *s, XftColor *color, unsigned short alpha)
 	XColor screen, exact;
 
 	if (!XAllocNamedColor(wid->dpy, wid->colormap, s, &screen, &exact))
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	color->pixel = screen.pixel;
 	color->color.red = exact.red;
 	color->color.green = exact.green;
 	color->color.blue = exact.blue;
 	color->color.alpha = alpha;
-	return RET_OK;
+	return RETURN_SUCCESS;
 }
 
 static int
@@ -541,8 +541,8 @@ eallocfont(Display *dpy, const char *s, XftFont **font)
 {
 	if ((*font = XftFontOpenXlfd(dpy, DefaultScreen(dpy), s)) == NULL)
 		if ((*font = XftFontOpenName(dpy, DefaultScreen(dpy), s)) == NULL)
-			return RET_ERROR;
-	return RET_OK;
+			return RETURN_FAILURE;
+	return RETURN_SUCCESS;
 }
 
 static char *
@@ -610,7 +610,7 @@ inittheme(Widget wid, const char *class, const char *name)
 			if (s == NULL) {
 				/* could not found resource; use default value */
 				s = defvalue[i][j];
-			} else if (ealloccolor(wid, s, &wid->colors[i][j], alpha) == RET_ERROR) {
+			} else if (ealloccolor(wid, s, &wid->colors[i][j], alpha) == RETURN_FAILURE) {
 				/* resource found, but allocation failed; use default value */
 				warnx("\"%s\": could not load color (falling back to \"%s\")", s, defvalue[i][j]);
 				s = defvalue[i][j];
@@ -618,7 +618,7 @@ inittheme(Widget wid, const char *class, const char *name)
 				/* resource found and successfully allocated */
 				continue;
 			}
-			if (ealloccolor(wid, s, &wid->colors[i][j], alpha) == RET_ERROR) {
+			if (ealloccolor(wid, s, &wid->colors[i][j], alpha) == RETURN_FAILURE) {
 				warnx("\"%s\": could not load color", s);
 				colorerror[i][j] = TRUE;
 				goterror = TRUE;
@@ -630,14 +630,14 @@ inittheme(Widget wid, const char *class, const char *name)
 	if (s == NULL) {
 		/* could not found resource; use default value */
 		s = DEF_FONT;
-	} else if (eallocfont(wid->dpy, s, &wid->font) == RET_ERROR) {
+	} else if (eallocfont(wid->dpy, s, &wid->font) == RETURN_FAILURE) {
 		/* resource found, but allocation failed; use default value */
 		warnx("\"%s\": could not open font (falling back to \"%s\")", s, DEF_FONT);
 		s = DEF_FONT;
 	} else {
 		goto done;
 	}
-	if (eallocfont(wid->dpy, s, &wid->font) == RET_ERROR) {
+	if (eallocfont(wid->dpy, s, &wid->font) == RETURN_FAILURE) {
 		warnx("\"%s\": could not open font", s);
 		fonterror = TRUE;
 		goterror = TRUE;
@@ -651,7 +651,7 @@ done:
 	wid->ellipsisw = textwidth(wid, ELLIPSIS, strlen(ELLIPSIS));
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
-	return RET_OK;
+	return RETURN_SUCCESS;
 error:
 	for (i = 0; i < SELECT_LAST; i++) {
 		for (j = 0; j < COLOR_LAST; j++) {
@@ -664,7 +664,7 @@ error:
 		XftFontClose(wid->dpy, wid->font);
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
-	return RET_ERROR;
+	return RETURN_FAILURE;
 }
 
 static int
@@ -1676,10 +1676,10 @@ checkheader(FILE *fp, char *header, size_t size)
 	char buf[PPM_BUFSIZE];
 
 	if (fread(buf, 1, size, fp) != size)
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	if (memcmp(buf, header, size) != 0)
-		return RET_ERROR;
-	return RET_OK;
+		return RETURN_FAILURE;
+	return RETURN_SUCCESS;
 }
 
 static int
@@ -1695,9 +1695,9 @@ pixmapfromdata(Widget wid, char **data, Pixmap *pix, Pixmap *mask)
 	if (XpmCreatePixmapFromData(wid->dpy, wid->win, data, pix, mask, &xa) != XpmSuccess) {
 		*pix = None;
 		*mask = None;
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	}
-	return RET_OK;
+	return RETURN_SUCCESS;
 }
 
 static int
@@ -2702,10 +2702,10 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 	settitle(wid);
 	drawitems(wid);
 	commitdraw(wid);
-	return RET_OK;
+	return RETURN_SUCCESS;
 error:
 	cleanwidget(wid);
-	return RET_ERROR;
+	return RETURN_FAILURE;
 }
 
 void
@@ -2784,13 +2784,13 @@ widopenicons(Widget wid, char **xpms[], int nxpms)
 	wid->nicons = nxpms;
 	if ((wid->icons = calloc(wid->nicons, sizeof(*wid->icons))) == NULL) {
 		warn("calloc");
-		return RET_ERROR;
+		return RETURN_FAILURE;
 	}
-	retval = RET_OK;
+	retval = RETURN_SUCCESS;
 	for (i = 0; i < wid->nicons; i++) {
-		if (pixmapfromdata(wid, xpms[i], &wid->icons[i].pix, &wid->icons[i].mask) == RET_ERROR) {
+		if (pixmapfromdata(wid, xpms[i], &wid->icons[i].pix, &wid->icons[i].mask) == RETURN_FAILURE) {
 			warnx("could not open %d-th default icon pixmap", i);
-			retval = RET_ERROR;
+			retval = RETURN_FAILURE;
 		}
 	}
 	return retval;
