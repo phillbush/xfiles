@@ -19,7 +19,6 @@
 #include <X11/Xcursor/Xcursor.h>
 #include <X11/extensions/Xrender.h>
 #include <X11/extensions/shape.h>
-#include <X11/extensions/sync.h>
 
 #include "ctrlsel.h"
 #include "util.h"
@@ -52,7 +51,6 @@
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
 
-#define ALARMFLAGS      (XSyncCACounter | XSyncCAValue | XSyncCAValueType | XSyncCATestType | XSyncCADelta)
 #define SCREEN(d)       (DefaultScreen((d)))
 #define WIDTH(d)        (DisplayWidth((d), DefaultScreen((d))))
 #define HEIGHT(d)       (DisplayHeight((d), DefaultScreen((d))))
@@ -346,14 +344,9 @@ struct Widget {
 	 *
 	 * TIP: To enable this feature in Firefox, set the option
 	 * "general.autoScroll" to True in about:config.
-	 *
-	 * We use the XSync extension for the scroller.
-	 * See https://nrk.neocities.org/articles/x11-timeout-with-xsyncalarm.html
 	 */
 	Window scroller;                /* the scroller popup window */
 	int handlew;                    /* size of scroller handle */
-	XSyncAlarmAttributes syncattr;
-	int syncevent;
 
 	/*
 	 * We can be either in the main loop (see pollwidget), in the
@@ -1625,21 +1618,6 @@ querypointer(Widget wid, Window win, int *retx, int *rety, unsigned int *retmask
 	return retval;
 }
 
-static int
-scrollerpos(Widget wid)
-{
-	int x, y;
-
-	if (querypointer(wid, wid->scroller, &x, &y, NULL) == True) {
-		if (y > SCROLLER_SIZE)
-			return y - SCROLLER_SIZE;
-		if (y < 0)
-			return y;
-		return 0;
-	}
-	return 0;
-}
-
 static void
 scrollerset(Widget wid, int pos)
 {
@@ -2147,7 +2125,6 @@ checklastprop(Widget wid, char **text)
 static WidgetEvent
 scrollmode(Widget wid, int x, int y)
 {
-	XSyncAlarm alarm;
 	XEvent ev;
 	int grabpos, pos, left;
 
@@ -2156,25 +2133,14 @@ scrollmode(Widget wid, int x, int y)
 	drawscroller(wid, gethandlepos(wid));
 	XMoveWindow(wid->dpy, wid->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
 	XMapRaised(wid->dpy, wid->scroller);
-	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
 	left = FALSE;
 	while (!XNextEvent(wid->dpy, &ev)) {
 		switch (processevent(wid, &ev)) {
 		case WIDGET_CLOSE:
-			XSyncDestroyAlarm(wid->dpy, alarm);
 			return WIDGET_CLOSE;
 		case WIDGET_NONE:
 			break;
 		default:
-			continue;
-		}
-		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
-			if ((pos = scrollerpos(wid)) != 0) {
-				if (scroll(wid, pos))
-					drawitems(wid);
-				commitdraw(wid);
-			}
-			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
 			continue;
 		}
 		switch (ev.type) {
@@ -2213,7 +2179,6 @@ scrollmode(Widget wid, int x, int y)
 	}
 done:
 	wid->state = STATE_NORMAL;
-	XSyncDestroyAlarm(wid->dpy, alarm);
 	XUnmapWindow(wid->dpy, wid->scroller);
 	return WIDGET_NONE;
 }
@@ -2222,40 +2187,21 @@ static WidgetEvent
 selmode(Widget wid, Time lasttime, int shift, int clickx, int clicky)
 {
 	XEvent ev;
-	XSyncAlarm alarm;
-	int rectrow, rectydiff, ownsel, x, y;
+	int rectrow, rectydiff, ownsel;
 
 	wid->state = STATE_SELECTING;
 	rectrow = wid->row;
 	rectydiff = wid->ydiff;
-	alarm = XSyncCreateAlarm(wid->dpy, ALARMFLAGS, &wid->syncattr);
 	ownsel = FALSE;
 	if (!shift)
 		unselectitems(wid);
 	while (!XNextEvent(wid->dpy, &ev)) {
 		switch (processevent(wid, &ev)) {
 		case WIDGET_CLOSE:
-			XSyncDestroyAlarm(wid->dpy, alarm);
 			return WIDGET_CLOSE;
 		case WIDGET_NONE:
 			break;
 		default:
-			continue;
-		}
-		if (ev.type == wid->syncevent + XSyncAlarmNotify) {
-			if (querypointer(wid, wid->win, &x, &y, NULL)) {
-				if (y > wid->h)
-					y -= wid->h;
-				else if (y > 0)
-					y = 0;
-				if (scroll(wid, y)) {
-					drawitems(wid);
-				}
-				if (y != 0) {
-					commitdraw(wid);
-				}
-			}
-			XSyncChangeAlarm(wid->dpy, alarm, ALARMFLAGS, &wid->syncattr);
 			continue;
 		}
 		switch (ev.type) {
@@ -2279,7 +2225,6 @@ done:
 	rectdraw(wid, 0, 0, 0, 0, 0, 0);
 	commitrectsel(wid);
 	commitdraw(wid);
-	XSyncDestroyAlarm(wid->dpy, alarm);
 	if (ownsel)
 		ownprimary(wid, ev.xbutton.time);
 	return WIDGET_NONE;
@@ -2466,9 +2411,8 @@ mainmode(Widget wid, int *selitems, int *nitems, char **text)
 Widget
 initwidget(const char *class, const char *name, const char *geom, int argc, char *argv[])
 {
-	XSyncSystemCounter *counters;
 	Widget wid;
-	int success, ncounters, tmp, i;
+	int success;
 	char *progname, *s;
 
 	wid = NULL;
@@ -2520,11 +2464,6 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.uribuf = NULL,
 		.dndbuf = NULL,
 		.selbuf = NULL,
-		.syncattr = (XSyncAlarmAttributes){
-			.trigger.counter        = None,
-			.trigger.value_type     = XSyncRelative,
-			.trigger.test_type      = XSyncPositiveComparison,
-		},
 	};
 	if (!XInitThreads()) {
 		warnx("XInitThreads");
@@ -2539,14 +2478,6 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		goto error;
 	}
 	xinitvisual(wid);
-	if (!XSyncQueryExtension(wid->dpy, &wid->syncevent, &tmp)) {
-		warnx("could not query XSync extension");
-		goto error;
-	}
-	if (!XSyncInitialize(wid->dpy, &tmp, &tmp)) {
-		warnx("could not initialize XSync extension");
-		goto error;
-	}
 	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
 	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1) {
 		warn("fcntl");
@@ -2612,21 +2543,6 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, 1, 1);
 	XSetStipple(wid->dpy, wid->gc, wid->stipple);
 	wid->busycursor = XCreateFontCursor(wid->dpy, XC_watch);
-	if ((counters = XSyncListSystemCounters(wid->dpy, &ncounters)) != NULL) {
-		for (i = 0; i < ncounters; i++) {
-			if (strcmp(counters[i].name, "SERVERTIME") == 0) {
-				wid->syncattr.trigger.counter = counters[i].counter;
-				break;
-			}
-		}
-		XSyncFreeSystemCounterList(counters);
-	}
-	if (wid->syncattr.trigger.counter == None) {
-		warnx("could not use XSync extension");
-		goto error;
-	}
-	XSyncIntToValue(&wid->syncattr.trigger.wait_value, 128);
-	XSyncIntToValue(&wid->syncattr.delta, 0);
 	return wid;
 error:
 	if (wid->stipple != None)
