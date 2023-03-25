@@ -210,7 +210,7 @@ struct Widget {
 	Display *dpy;
 	Atom atoms[ATOM_LAST];
 	GC stipgc, gc;
-	Cursor cursors[CURSOR_LAST];    /* for the hourglass cursor, when loading */
+	Cursor busycursor;
 	Window win;
 	XftColor colors[SELECT_LAST][COLOR_LAST];
 	XftFont *font;
@@ -2611,7 +2611,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	XSetForeground(wid->dpy, wid->stipgc, 1);
 	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, 1, 1);
 	XSetStipple(wid->dpy, wid->gc, wid->stipple);
-	wid->cursors[CURSOR_WATCH] = XCreateFontCursor(wid->dpy, XC_watch);
+	wid->busycursor = XCreateFontCursor(wid->dpy, XC_watch);
 	if ((counters = XSyncListSystemCounters(wid->dpy, &ncounters)) != NULL) {
 		for (i = 0; i < ncounters; i++) {
 			if (strcmp(counters[i].name, "SERVERTIME") == 0) {
@@ -2646,6 +2646,7 @@ setwidget(Widget wid, const char *title, char **items[], int itemicons[], size_t
 {
 	size_t i;
 
+	XUndefineCursor(wid->dpy, wid->win);
 	cleanwidget(wid);
 	wid->items = items;
 	wid->nitems = nitems;
@@ -2883,12 +2884,9 @@ error:
 }
 
 void
-widgetcursor(Widget wid, int cursor)
+widget_busy(Widget wid)
 {
-	if (cursor == CURSOR_NORMAL || cursor < 0 || cursor >= CURSOR_LAST)
-		XUndefineCursor(wid->dpy, wid->win);
-	else
-		XDefineCursor(wid->dpy, wid->win, wid->cursors[cursor]);
+	XDefineCursor(wid->dpy, wid->win, wid->busycursor);
 	XFlush(wid->dpy);
 }
 

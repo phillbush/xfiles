@@ -791,7 +791,7 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 			return RETURN_SUCCESS;
 		}
 	}
-	widgetcursor(fm->wid, CURSOR_WATCH);
+	widget_busy(fm->wid);
 	retval = RETURN_SUCCESS;
 	closethumbthread(fm);
 	if (diropen(fm, &cwd, path) == RETURN_FAILURE)
@@ -830,7 +830,6 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 	}
 done:
 	createthumbthread(fm);
-	widgetcursor(fm->wid, CURSOR_NORMAL);
 	return retval;
 }
 

@@ -275,25 +275,6 @@ WidgetEvent pollwidget(Widget wid, int *selitems, int *nselitems, Scroll *scrl, 
 void setthumbnail(Widget wid, char *path, int index);
 
 /*
- * Set the cursor for the widget.  The only options available are
- * CURSOR_NORMAL (for the regular cursor) and CURSOR_WATCH (for a
- * hourglass cursor, generally used while processing something).
- *
- * This function must only be called after a widget has been created
- * with initwidget() and set with setwidget(); but can be called at
- * any time thereafter.
- *
- * The parameters are as follows:
- *
- * - wid:
- *   Widget previously created with initwidget().
- *
- * - cursor:
- *   Either CURSOR_NORMAL or CURSOR_WATCH.
- */
-void widgetcursor(Widget wid, int cursor);
-
-/*
  * Close the widget and free all memory used by it.
  *
  * This function must only be called once for each widget.
@@ -304,3 +285,5 @@ void widgetcursor(Widget wid, int cursor);
  *   Widget previously created with initwidget().
  */
 void closewidget(Widget wid);
+
+void widget_busy(Widget wid);
