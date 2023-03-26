@@ -73,7 +73,7 @@ struct Cwd {
 };
 
 struct FM {
-	Widget *wid;
+	Widget *widget;
 	char ***entries;
 	int *foundicons;        /* array of indices to found icons */
 	int *selitems;          /* array of indices to selected items */
@@ -458,7 +458,7 @@ thumbnailer(void *arg)
 		if (setthumbpath(fm, fm->entries[i][STATE_PATH], path) == RETURN_FAILURE)
 			continue;
 		if (thumbexists(fm, fm->entries[i], path)) {
-			setthumbnail(fm->wid, path, i);
+			setthumbnail(fm->widget, path, i);
 		}
 	}
 	pthread_exit(0);
@@ -791,7 +791,7 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 			return RETURN_SUCCESS;
 		}
 	}
-	widget_busy(fm->wid);
+	widget_busy(fm->widget);
 	retval = RETURN_SUCCESS;
 	closethumbthread(fm);
 	if (diropen(fm, &cwd, path) == RETURN_FAILURE)
@@ -824,7 +824,7 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 	fm->cwd->here = cwd.here;
 	fm->last = fm->cwd;
 	scrl = keepscroll ? &fm->cwd->state : NULL;
-	if (setwidget(fm->wid, fm->cwd->here, fm->entries, fm->foundicons, fm->nentries, scrl) == RETURN_FAILURE) {
+	if (setwidget(fm->widget, fm->cwd->here, fm->entries, fm->foundicons, fm->nentries, scrl) == RETURN_FAILURE) {
 		retval = RETURN_FAILURE;
 		goto done;
 	}
@@ -843,7 +843,7 @@ openicons(struct FM *fm)
 		goto error;
 	for (i = 0; i < nicons; i++)
 		xpms[i] = icons[i][CONFIG_DATA];
-	if (widopenicons(fm->wid, xpms, nicons) == RETURN_FAILURE)
+	if (widopenicons(fm->widget, xpms, nicons) == RETURN_FAILURE)
 		goto error;
 	free(xpms);
 	return RETURN_SUCCESS;
@@ -923,9 +923,9 @@ main(int argc, char *argv[])
 	else if (argc == 1)
 		path = *argv;
 	initthumbnailer(&fm);
-	if ((fm.wid = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
+	if ((fm.widget = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
-	(void)snprintf(winid, WINDOWID_BUFSIZE, "%lu", widgetwinid(fm.wid));
+	(void)snprintf(winid, WINDOWID_BUFSIZE, "%lu", widgetwinid(fm.widget));
 	if (setenv(WINDOWID, winid, TRUE) == RETURN_FAILURE) {
 		warn("setenv");
 		exitval = EXIT_FAILURE;
@@ -936,12 +936,12 @@ main(int argc, char *argv[])
 	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)
 		goto error;
 	fm.last = fm.cwd;
-	if (setwidget(fm.wid, fm.cwd->here, fm.entries, fm.foundicons, fm.nentries, NULL) == RETURN_FAILURE)
+	if (setwidget(fm.widget, fm.cwd->here, fm.entries, fm.foundicons, fm.nentries, NULL) == RETURN_FAILURE)
 		goto error;
 	createthumbthread(&fm);
-	mapwidget(fm.wid);
+	mapwidget(fm.widget);
 	text = NULL;
-	while ((event = pollwidget(fm.wid, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
+	while ((event = pollwidget(fm.widget, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
 		switch (event) {
 		case WIDGET_ERROR:
 			exitval = EXIT_FAILURE;
@@ -1045,6 +1045,6 @@ error:
 	free(fm.foundicons);
 	free(fm.selitems);
 	free(fm.thumbnaildir);
-	closewidget(fm.wid);
+	closewidget(fm.widget);
 	return exitval;
 }

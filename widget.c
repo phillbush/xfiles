@@ -205,11 +205,11 @@ struct Widget {
 	int redraw;
 
 	/* X11 stuff */
-	Display *dpy;
+	Display *display;
 	Atom atoms[ATOM_LAST];
 	GC stipgc, gc;
 	Cursor busycursor;
-	Window win;
+	Window window;
 	XftColor colors[SELECT_LAST][COLOR_LAST];
 	XftFont *font;
 	Visual *visual;
@@ -393,7 +393,7 @@ static char *atomnames[ATOM_LAST] = {
 };
 
 static int
-createwin(Widget *wid, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
+createwin(Widget *widget, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
 {
 	XftDraw *draw;
 	Pixmap bg;
@@ -404,8 +404,8 @@ createwin(Widget *wid, const char *class, const char *name, const char *geom, in
 	pid_t pid;
 
 	x = y = 0;
-	wid->w = DEF_WIDTH;
-	wid->h = DEF_HEIGHT;
+	widget->w = DEF_WIDTH;
+	widget->h = DEF_HEIGHT;
 	sizehints = 0;
 	pid = getpid();
 	if (geom != NULL) {
@@ -413,36 +413,36 @@ createwin(Widget *wid, const char *class, const char *name, const char *geom, in
 		dw = max(MIN_WIDTH, dw);
 		dh = max(MIN_HEIGHT, dh);
 		if (FLAG(flags, WidthValue)) {
-			wid->w = dw;
+			widget->w = dw;
 			sizehints |= USSize;
 		}
 		if (FLAG(flags, HeightValue)) {
-			wid->h = dh;
+			widget->h = dh;
 			sizehints |= USSize;
 		}
 		if (FLAG(flags, XValue | XNegative)) {
-			x = WIDTH(wid->dpy) - wid->w - (dx > 0 ? dx : 0);
+			x = WIDTH(widget->display) - widget->w - (dx > 0 ? dx : 0);
 			sizehints |= USPosition;
 		} else if (FLAG(flags, XValue)) {
 			x = dx;
 			sizehints |= USPosition;
 		}
 		if (FLAG(flags, YValue | YNegative)) {
-			y = HEIGHT(wid->dpy) - wid->h - (dy > 0 ? dy : 0);
+			y = HEIGHT(widget->display) - widget->h - (dy > 0 ? dy : 0);
 			sizehints |= USPosition;
 		} else if (FLAG(flags, XValue)) {
 			y = dy;
 			sizehints |= USPosition;
 		}
 	}
-	wid->win = XCreateWindow(
-		wid->dpy, ROOT(wid->dpy),
-		x, y, wid->w, wid->h, 0,
-		wid->depth, InputOutput, wid->visual,
+	widget->window = XCreateWindow(
+		widget->display, ROOT(widget->display),
+		x, y, widget->w, widget->h, 0,
+		widget->depth, InputOutput, widget->visual,
 		CWBackPixel | CWEventMask | CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
 			.border_pixel = 0,
-			.colormap = wid->colormap,
+			.colormap = widget->colormap,
 			.background_pixel = 0,
 			.event_mask = StructureNotifyMask | ExposureMask
 			            | KeyPressMask | PointerMotionMask
@@ -450,63 +450,63 @@ createwin(Widget *wid, const char *class, const char *name, const char *geom, in
 			            | PropertyChangeMask,
 		}
 	);
-	if (wid->win == None)
+	if (widget->window == None)
 		return RETURN_FAILURE;
 	bg = XCreatePixmap(
-		wid->dpy,
-		wid->win,
+		widget->display,
+		widget->window,
 		THUMBSIZE,
 		THUMBSIZE,
-		wid->depth
+		widget->depth
 	);
 	if (bg == None)
 		return RETURN_FAILURE;
-	draw = XftDrawCreate(wid->dpy, bg, wid->visual, wid->colormap);
-	XftDrawRect(draw, &wid->colors[SELECT_NOT][COLOR_BG], 0, 0, THUMBSIZE, THUMBSIZE);
+	draw = XftDrawCreate(widget->display, bg, widget->visual, widget->colormap);
+	XftDrawRect(draw, &widget->colors[SELECT_NOT][COLOR_BG], 0, 0, THUMBSIZE, THUMBSIZE);
 	XftDrawDestroy(draw);
-	XSetWindowBackgroundPixmap(wid->dpy, wid->win, bg);
-	XFreePixmap(wid->dpy, bg);
-	wid->namepix = XCreatePixmap(
-		wid->dpy,
-		wid->win,
+	XSetWindowBackgroundPixmap(widget->display, widget->window, bg);
+	XFreePixmap(widget->display, bg);
+	widget->namepix = XCreatePixmap(
+		widget->display,
+		widget->window,
 		LABELWIDTH,
-		wid->fonth,
-		wid->depth
+		widget->fonth,
+		widget->depth
 	);
-	if (wid->namepix == None)
+	if (widget->namepix == None)
 		return RETURN_FAILURE;
 	XmbSetWMProperties(
-		wid->dpy, wid->win,
+		widget->display, widget->window,
 		class, class,
 		argv, argc,
 		&(XSizeHints){ .flags = sizehints, },
 		NULL,
 		&(XClassHint){ .res_class = (char *)class, .res_name = (char *)name, }
 	);
-	XSetWMProtocols(wid->dpy, wid->win, &wid->atoms[WM_DELETE_WINDOW], 1);
+	XSetWMProtocols(widget->display, widget->window, &widget->atoms[WM_DELETE_WINDOW], 1);
 	XChangeProperty(
-		wid->dpy, wid->win,
-		wid->atoms[_NET_WM_NAME],
-		wid->atoms[UTF8_STRING], 8, PropModeReplace,
+		widget->display, widget->window,
+		widget->atoms[_NET_WM_NAME],
+		widget->atoms[UTF8_STRING], 8, PropModeReplace,
 		(unsigned char *)class,
 		strlen(class) + 1
 	);
 	XChangeProperty(
-		wid->dpy, wid->win,
-		wid->atoms[_NET_WM_WINDOW_TYPE],
+		widget->display, widget->window,
+		widget->atoms[_NET_WM_WINDOW_TYPE],
 		XA_ATOM, 32, PropModeReplace,
-		(unsigned char *)&wid->atoms[_NET_WM_WINDOW_TYPE_NORMAL],
+		(unsigned char *)&widget->atoms[_NET_WM_WINDOW_TYPE_NORMAL],
 		1
 	);
 	XChangeProperty(
-		wid->dpy, wid->win,
-		wid->atoms[_NET_WM_ICON],
+		widget->display, widget->window,
+		widget->atoms[_NET_WM_ICON],
 		XA_CARDINAL, 32, PropModeReplace,
 		(unsigned char *)icon, iconsize
 	);
 	XChangeProperty(
-		wid->dpy, wid->win,
-		wid->atoms[_NET_WM_PID],
+		widget->display, widget->window,
+		widget->atoms[_NET_WM_PID],
 		XA_CARDINAL, 32, PropModeReplace,
 		(unsigned char *)&pid,
 		1
@@ -515,11 +515,11 @@ createwin(Widget *wid, const char *class, const char *name, const char *geom, in
 }
 
 static int
-ealloccolor(Widget *wid, const char *s, XftColor *color, unsigned short alpha)
+ealloccolor(Widget *widget, const char *s, XftColor *color, unsigned short alpha)
 {
 	XColor screen, exact;
 
-	if (!XAllocNamedColor(wid->dpy, wid->colormap, s, &screen, &exact))
+	if (!XAllocNamedColor(widget->display, widget->colormap, s, &screen, &exact))
 		return RETURN_FAILURE;
 	color->pixel = screen.pixel;
 	color->color.red = exact.red;
@@ -530,10 +530,10 @@ ealloccolor(Widget *wid, const char *s, XftColor *color, unsigned short alpha)
 }
 
 static int
-eallocfont(Display *dpy, const char *s, XftFont **font)
+eallocfont(Display *display, const char *s, XftFont **font)
 {
-	if ((*font = XftFontOpenXlfd(dpy, DefaultScreen(dpy), s)) == NULL)
-		if ((*font = XftFontOpenName(dpy, DefaultScreen(dpy), s)) == NULL)
+	if ((*font = XftFontOpenXlfd(display, DefaultScreen(display), s)) == NULL)
+		if ((*font = XftFontOpenName(display, DefaultScreen(display), s)) == NULL)
 			return RETURN_FAILURE;
 	return RETURN_SUCCESS;
 }
@@ -555,16 +555,16 @@ getresource(XrmDatabase xdb, const char *class, const char *name, const char *re
 }
 
 static int
-textwidth(Widget *wid, const char *text, int len)
+textwidth(Widget *widget, const char *text, int len)
 {
 	XGlyphInfo box;
 
-	XftTextExtentsUtf8(wid->dpy, wid->font, (const FcChar8 *)text, len, &box);
+	XftTextExtentsUtf8(widget->display, widget->font, (const FcChar8 *)text, len, &box);
 	return box.width;
 }
 
 static int
-inittheme(Widget *wid, const char *class, const char *name)
+inittheme(Widget *widget, const char *class, const char *name)
 {
 	XrmDatabase xdb;
 	int i, j, goterror;;
@@ -588,7 +588,7 @@ inittheme(Widget *wid, const char *class, const char *name)
 
 	xdb = NULL;
 	goterror = FALSE;
-	if ((xrm = XResourceManagerString(wid->dpy)) != NULL)
+	if ((xrm = XResourceManagerString(widget->display)) != NULL)
 		xdb = XrmGetStringDatabase(xrm);
 	alpha = DEF_OPACITY * 0xFFFF;
 	if ((s = getresource(xdb, class, name, "opacity")) != NULL) {
@@ -603,7 +603,7 @@ inittheme(Widget *wid, const char *class, const char *name)
 			if (s == NULL) {
 				/* could not found resource; use default value */
 				s = defvalue[i][j];
-			} else if (ealloccolor(wid, s, &wid->colors[i][j], alpha) == RETURN_FAILURE) {
+			} else if (ealloccolor(widget, s, &widget->colors[i][j], alpha) == RETURN_FAILURE) {
 				/* resource found, but allocation failed; use default value */
 				warnx("\"%s\": could not load color (falling back to \"%s\")", s, defvalue[i][j]);
 				s = defvalue[i][j];
@@ -611,7 +611,7 @@ inittheme(Widget *wid, const char *class, const char *name)
 				/* resource found and successfully allocated */
 				continue;
 			}
-			if (ealloccolor(wid, s, &wid->colors[i][j], alpha) == RETURN_FAILURE) {
+			if (ealloccolor(widget, s, &widget->colors[i][j], alpha) == RETURN_FAILURE) {
 				warnx("\"%s\": could not load color", s);
 				colorerror[i][j] = TRUE;
 				goterror = TRUE;
@@ -623,14 +623,14 @@ inittheme(Widget *wid, const char *class, const char *name)
 	if (s == NULL) {
 		/* could not found resource; use default value */
 		s = DEF_FONT;
-	} else if (eallocfont(wid->dpy, s, &wid->font) == RETURN_FAILURE) {
+	} else if (eallocfont(widget->display, s, &widget->font) == RETURN_FAILURE) {
 		/* resource found, but allocation failed; use default value */
 		warnx("\"%s\": could not open font (falling back to \"%s\")", s, DEF_FONT);
 		s = DEF_FONT;
 	} else {
 		goto done;
 	}
-	if (eallocfont(wid->dpy, s, &wid->font) == RETURN_FAILURE) {
+	if (eallocfont(widget->display, s, &widget->font) == RETURN_FAILURE) {
 		warnx("\"%s\": could not open font", s);
 		fonterror = TRUE;
 		goterror = TRUE;
@@ -638,10 +638,10 @@ inittheme(Widget *wid, const char *class, const char *name)
 done:
 	if (goterror)
 		goto error;
-	wid->fonth = wid->font->height;
-	wid->itemw = ITEM_WIDTH;
-	wid->itemh = THUMBSIZE + (NLINES + 1) * wid->fonth;
-	wid->ellipsisw = textwidth(wid, ELLIPSIS, strlen(ELLIPSIS));
+	widget->fonth = widget->font->height;
+	widget->itemw = ITEM_WIDTH;
+	widget->itemh = THUMBSIZE + (NLINES + 1) * widget->fonth;
+	widget->ellipsisw = textwidth(widget, ELLIPSIS, strlen(ELLIPSIS));
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
 	return RETURN_SUCCESS;
@@ -650,63 +650,63 @@ error:
 		for (j = 0; j < COLOR_LAST; j++) {
 			if (colorerror[i][j])
 				continue;
-			XftColorFree(wid->dpy, wid->visual, wid->colormap, &wid->colors[i][j]);
+			XftColorFree(widget->display, widget->visual, widget->colormap, &widget->colors[i][j]);
 		}
 	}
 	if (!fonterror)
-		XftFontClose(wid->dpy, wid->font);
+		XftFontClose(widget->display, widget->font);
 	if (xdb != NULL)
 		XrmDestroyDatabase(xdb);
 	return RETURN_FAILURE;
 }
 
 static int
-calcsize(Widget *wid, int w, int h)
+calcsize(Widget *widget, int w, int h)
 {
 	int ncols, nrows, ret;
 	double d;
 
 	ret = FALSE;
-	if (wid->w == w && wid->h == h)
+	if (widget->w == w && widget->h == h)
 		return FALSE;
-	etlock(&wid->lock);
-	ncols = wid->ncols;
-	nrows = wid->nrows;
+	etlock(&widget->lock);
+	ncols = widget->ncols;
+	nrows = widget->nrows;
 	if (w > 0 && h > 0) {
-		wid->w = w;
-		wid->h = h;
-		wid->ydiff = 0;
+		widget->w = w;
+		widget->h = h;
+		widget->ydiff = 0;
 	}
-	wid->ncols = max(wid->w / wid->itemw, 1);
-	wid->nrows = max(WIN_ROWS(wid) + (wid->h % wid->itemh ? 2 : 1), 1);
-	wid->x0 = max((wid->w - wid->ncols * wid->itemw) / 2, 0);
-	wid->nscreens = ALL_ROWS(wid) - WIN_ROWS(wid);
-	wid->nscreens = max(wid->nscreens, 1);
-	d = (double)wid->nscreens / SCROLLER_MIN;
+	widget->ncols = max(widget->w / widget->itemw, 1);
+	widget->nrows = max(WIN_ROWS(widget) + (widget->h % widget->itemh ? 2 : 1), 1);
+	widget->x0 = max((widget->w - widget->ncols * widget->itemw) / 2, 0);
+	widget->nscreens = ALL_ROWS(widget) - WIN_ROWS(widget);
+	widget->nscreens = max(widget->nscreens, 1);
+	d = (double)widget->nscreens / SCROLLER_MIN;
 	d = (d < 1.0 ? 1.0 : d);
-	wid->handlew = max(SCROLLER_SIZE / d - 2, 1);
-	wid->handlew = min(wid->handlew, HANDLE_MAX_SIZE);
-	if (wid->handlew == HANDLE_MAX_SIZE && ALL_ROWS(wid) > WIN_ROWS(wid))
-		wid->handlew = HANDLE_MAX_SIZE - 1;
-	if (ncols != wid->ncols || nrows != wid->nrows) {
-		if (wid->pix != None)
-			XFreePixmap(wid->dpy, wid->pix);
-		if (wid->draw != None)
-			XftDrawDestroy(wid->draw);
-		wid->pixw = wid->ncols * wid->itemw;
-		wid->pixh = wid->nrows * wid->itemh;
-		wid->pix = XCreatePixmap(wid->dpy, wid->win, wid->pixw, wid->pixh, wid->depth);
-		wid->draw = XftDrawCreate(wid->dpy, wid->pix, wid->visual, wid->colormap);
+	widget->handlew = max(SCROLLER_SIZE / d - 2, 1);
+	widget->handlew = min(widget->handlew, HANDLE_MAX_SIZE);
+	if (widget->handlew == HANDLE_MAX_SIZE && ALL_ROWS(widget) > WIN_ROWS(widget))
+		widget->handlew = HANDLE_MAX_SIZE - 1;
+	if (ncols != widget->ncols || nrows != widget->nrows) {
+		if (widget->pix != None)
+			XFreePixmap(widget->display, widget->pix);
+		if (widget->draw != None)
+			XftDrawDestroy(widget->draw);
+		widget->pixw = widget->ncols * widget->itemw;
+		widget->pixh = widget->nrows * widget->itemh;
+		widget->pix = XCreatePixmap(widget->display, widget->window, widget->pixw, widget->pixh, widget->depth);
+		widget->draw = XftDrawCreate(widget->display, widget->pix, widget->visual, widget->colormap);
 		ret = TRUE;
 	}
-	if (wid->w > wid->rectw || wid->h > wid->recth) {
-		wid->rectw = max(wid->rectw, wid->w);
-		wid->recth = max(wid->recth, wid->h);
-		if (wid->rectbord != None)
-			XFreePixmap(wid->dpy, wid->rectbord);
-		wid->rectbord = XCreatePixmap(wid->dpy, wid->win, wid->w, wid->h, CLIP_DEPTH);
+	if (widget->w > widget->rectw || widget->h > widget->recth) {
+		widget->rectw = max(widget->rectw, widget->w);
+		widget->recth = max(widget->recth, widget->h);
+		if (widget->rectbord != None)
+			XFreePixmap(widget->display, widget->rectbord);
+		widget->rectbord = XCreatePixmap(widget->display, widget->window, widget->w, widget->h, CLIP_DEPTH);
 	}
-	etunlock(&wid->lock);
+	etunlock(&widget->lock);
 	return ret;
 }
 
@@ -717,98 +717,98 @@ isbreakable(char c)
 }
 
 static void
-drawtext(Widget *wid, Drawable pix, XftColor *color, int x, const char *text, int len)
+drawtext(Widget *widget, Drawable pix, XftColor *color, int x, const char *text, int len)
 {
 	XftDraw *draw;
 	int w;
 
-	w = textwidth(wid, text, len);
-	draw = XftDrawCreate(wid->dpy, pix, wid->visual, wid->colormap);
-	XftDrawRect(draw, &wid->colors[SELECT_NOT][COLOR_BG], 0, 0, LABELWIDTH, wid->fonth);
-	XftDrawRect(draw, &color[COLOR_BG], x, 0, w, wid->fonth);
-	XftDrawStringUtf8(draw, &color[COLOR_FG], wid->font, x, wid->font->ascent, (const FcChar8 *)text, len);
+	w = textwidth(widget, text, len);
+	draw = XftDrawCreate(widget->display, pix, widget->visual, widget->colormap);
+	XftDrawRect(draw, &widget->colors[SELECT_NOT][COLOR_BG], 0, 0, LABELWIDTH, widget->fonth);
+	XftDrawRect(draw, &color[COLOR_BG], x, 0, w, widget->fonth);
+	XftDrawStringUtf8(draw, &color[COLOR_FG], widget->font, x, widget->font->ascent, (const FcChar8 *)text, len);
 	XftDrawDestroy(draw);
 }
 
 static void
-setrow(Widget *wid, int row)
+setrow(Widget *widget, int row)
 {
-	etlock(&wid->lock);
-	wid->row = row;
-	etunlock(&wid->lock);
+	etlock(&widget->lock);
+	widget->row = row;
+	etunlock(&widget->lock);
 }
 
 static void
-drawicon(Widget *wid, int index, int x, int y)
+drawicon(Widget *widget, int index, int x, int y)
 {
 	XGCValues val;
 	Pixmap pix, mask;
 	int icon;
 
-	icon = wid->itemicons[index];
-	pix = wid->icons[icon].pix;
-	mask = wid->icons[icon].mask;
-	if (wid->thumbs != NULL && wid->thumbs[index] != NULL) {
+	icon = widget->itemicons[index];
+	pix = widget->icons[icon].pix;
+	mask = widget->icons[icon].mask;
+	if (widget->thumbs != NULL && widget->thumbs[index] != NULL) {
 		/* draw thumbnail */
 		XPutImage(
-			wid->dpy,
-			wid->pix,
-			wid->gc,
-			wid->thumbs[index]->img,
+			widget->display,
+			widget->pix,
+			widget->gc,
+			widget->thumbs[index]->img,
 			0, 0,
-			x + (wid->itemw - wid->thumbs[index]->w) / 2,
-			y + (THUMBSIZE - wid->thumbs[index]->h) / 2,
-			wid->thumbs[index]->w,
-			wid->thumbs[index]->h
+			x + (widget->itemw - widget->thumbs[index]->w) / 2,
+			y + (THUMBSIZE - widget->thumbs[index]->h) / 2,
+			widget->thumbs[index]->w,
+			widget->thumbs[index]->h
 		);
-		if (wid->issel[index]) {
-			XSetFillStyle(wid->dpy, wid->gc, FillStippled);
-			XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_YES][COLOR_BG].pixel);
+		if (widget->issel[index]) {
+			XSetFillStyle(widget->display, widget->gc, FillStippled);
+			XSetForeground(widget->display, widget->gc, widget->colors[SELECT_YES][COLOR_BG].pixel);
 			XFillRectangle(
-				wid->dpy,
-				wid->pix,
-				wid->gc,
-				x + (wid->itemw - wid->thumbs[index]->w) / 2,
-				y + (THUMBSIZE - wid->thumbs[index]->h) / 2,
-				wid->thumbs[index]->w,
-				wid->thumbs[index]->h
+				widget->display,
+				widget->pix,
+				widget->gc,
+				x + (widget->itemw - widget->thumbs[index]->w) / 2,
+				y + (THUMBSIZE - widget->thumbs[index]->h) / 2,
+				widget->thumbs[index]->w,
+				widget->thumbs[index]->h
 			);
-			XSetFillStyle(wid->dpy, wid->gc, FillSolid);
+			XSetFillStyle(widget->display, widget->gc, FillSolid);
 		}
 	} else {
 		/* draw icon */
-		val.clip_x_origin = x + (wid->itemw - THUMBSIZE) / 2;
+		val.clip_x_origin = x + (widget->itemw - THUMBSIZE) / 2;
 		val.clip_y_origin = y;
 		val.clip_mask = mask;
-		XChangeGC(wid->dpy, wid->gc, GCClipXOrigin | GCClipYOrigin | GCClipMask, &val);
+		XChangeGC(widget->display, widget->gc, GCClipXOrigin | GCClipYOrigin | GCClipMask, &val);
 		XCopyArea(
-			wid->dpy,
-			pix, wid->pix,
-			wid->gc,
+			widget->display,
+			pix, widget->pix,
+			widget->gc,
 			0, 0,
 			THUMBSIZE, THUMBSIZE,
 			val.clip_x_origin,
 			y
 		);
-		if (wid->issel[index]) {
-			XSetFillStyle(wid->dpy, wid->gc, FillStippled);
-			XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_YES][COLOR_BG].pixel);
+		if (widget->issel[index]) {
+			XSetFillStyle(widget->display, widget->gc, FillStippled);
+			XSetForeground(widget->display, widget->gc, widget->colors[SELECT_YES][COLOR_BG].pixel);
 			XFillRectangle(
-				wid->dpy,
-				wid->pix,
-				wid->gc,
+				widget->display,
+				widget->pix,
+				widget->gc,
 				val.clip_x_origin, y,
 				THUMBSIZE, THUMBSIZE
 			);
-			XSetFillStyle(wid->dpy, wid->gc, FillSolid);
+			XSetFillStyle(widget->display, widget->gc, FillSolid);
 		}
 		val.clip_mask = None;
-		XChangeGC(wid->dpy, wid->gc, GCClipMask, &val);
+		XChangeGC(widget->display, widget->gc, GCClipMask, &val);
 	}
 }
 
 static void
-drawlabel(Widget *wid, int index, int x, int y)
+drawlabel(Widget *widget, int index, int x, int y)
 {
 	XftColor *color;
 	int i;
@@ -817,21 +817,21 @@ drawlabel(Widget *wid, int index, int x, int y)
 	int extensionw, extensionlen;
 	char *text, *extension;
 
-	color = wid->colors[(wid->issel != NULL && wid->issel[index]) ? SELECT_YES : SELECT_NOT];
-	text = wid->items[index][ITEM_NAME];
-	wid->nlines[index] = 1;
-	textx = x + wid->itemw / 2 - LABELWIDTH / 2;
+	color = widget->colors[(widget->issel != NULL && widget->issel[index]) ? SELECT_YES : SELECT_NOT];
+	text = widget->items[index][ITEM_NAME];
+	widget->nlines[index] = 1;
+	textx = x + widget->itemw / 2 - LABELWIDTH / 2;
 	extension = NULL;
 	maxw = 0;
 	textlen = 0;
-	wid->linelen[index] = 0;
-	for (i = 0; i < wid->nlines[index]; i++) {
+	widget->linelen[index] = 0;
+	for (i = 0; i < widget->nlines[index]; i++) {
 		while (isspace(text[textlen]))
 			textlen++;
 		text += textlen;
 		textlen = strlen(text);
-		textw = textwidth(wid, text, textlen);
-		if (wid->nlines[index] < NLINES && textw >= LABELWIDTH) {
+		textw = textwidth(widget, text, textlen);
+		if (widget->nlines[index] < NLINES && textw >= LABELWIDTH) {
 			textlen = len = 0;
 			w = 0;
 			while (w < LABELWIDTH) {
@@ -843,13 +843,13 @@ drawlabel(Widget *wid, int index, int x, int y)
 					len++;
 				while (text[len] != '\0' && !isspace(text[len]) && !isbreakable(text[len]))
 					len++;
-				w = textwidth(wid, text, len);
+				w = textwidth(widget, text, len);
 				if (text[len] == '\0') {
 					break;
 				}
 			}
 			if (textw > 0) {
-				wid->nlines[index] = min(wid->nlines[index] + 1, NLINES);
+				widget->nlines[index] = min(widget->nlines[index] + 1, NLINES);
 			} else {
 				textlen = len;
 				textw = w;
@@ -858,290 +858,290 @@ drawlabel(Widget *wid, int index, int x, int y)
 		textw = min(LABELWIDTH, textw);
 		maxw = max(textw, maxw);
 		drawtext(
-			wid,
-			wid->namepix, color,
+			widget,
+			widget->namepix, color,
 			max(LABELWIDTH / 2 - textw / 2, 0),
 			text, textlen
 		);
 		textw = min(textw, LABELWIDTH);
-		wid->linelen[index] = max(wid->linelen[index], textw);
+		widget->linelen[index] = max(widget->linelen[index], textw);
 		XCopyArea(
-			wid->dpy,
-			wid->namepix, wid->pix,
-			wid->gc,
+			widget->display,
+			widget->namepix, widget->pix,
+			widget->gc,
 			0, 0,
-			LABELWIDTH, wid->fonth,
-			textx, y + wid->itemh - (NLINES - i + 0.5) * wid->fonth
+			LABELWIDTH, widget->fonth,
+			textx, y + widget->itemh - (NLINES - i + 0.5) * widget->fonth
 		);
 	}
-	if (index == wid->highlight) {
-		XSetForeground(wid->dpy, wid->gc, color[COLOR_FG].pixel);
+	if (index == widget->highlight) {
+		XSetForeground(widget->display, widget->gc, color[COLOR_FG].pixel);
 		XDrawRectangle(
-			wid->dpy,
-			wid->pix,
-			wid->gc,
-			x + wid->itemw / 2 - maxw / 2 - 1,
-			y + wid->itemh - (NLINES + 0.5) * wid->fonth - 1,
-			maxw + 1, i * wid->fonth + 1
+			widget->display,
+			widget->pix,
+			widget->gc,
+			x + widget->itemw / 2 - maxw / 2 - 1,
+			y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1,
+			maxw + 1, i * widget->fonth + 1
 		);
 	}
 	if (textw >= LABELWIDTH &&
 	    (extension = strrchr(text, '.')) != NULL &&
 	    extension[1] != '\0') {
 		extensionlen = strlen(extension);
-		extensionw = textwidth(wid, extension, extensionlen);
+		extensionw = textwidth(widget, extension, extensionlen);
 	}
 	if (extension != NULL) {
 		/* draw ellipsis */
 		drawtext(
-			wid,
-			wid->namepix, color,
+			widget,
+			widget->namepix, color,
 			0,
 			ELLIPSIS, strlen(ELLIPSIS)
 		);
 		XCopyArea(
-			wid->dpy,
-			wid->namepix, wid->pix,
-			wid->gc,
+			widget->display,
+			widget->namepix, widget->pix,
+			widget->gc,
 			0, 0,
-			wid->ellipsisw, wid->fonth,
-			textx + textw - extensionw - wid->ellipsisw,
-			y + wid->itemh - (NLINES + 1 - wid->nlines[index] + 0.5) * wid->fonth
+			widget->ellipsisw, widget->fonth,
+			textx + textw - extensionw - widget->ellipsisw,
+			y + widget->itemh - (NLINES + 1 - widget->nlines[index] + 0.5) * widget->fonth
 		);
 
 		/* draw extension */
 		drawtext(
-			wid,
-			wid->namepix, color,
+			widget,
+			widget->namepix, color,
 			0, extension, extensionlen
 		);
 		XCopyArea(
-			wid->dpy,
-			wid->namepix, wid->pix,
-			wid->gc,
+			widget->display,
+			widget->namepix, widget->pix,
+			widget->gc,
 			0, 0,
-			extensionw, wid->fonth,
+			extensionw, widget->fonth,
 			textx + textw - extensionw,
-			y + wid->itemh - (NLINES + 1 - wid->nlines[index] + 0.5) * wid->fonth
+			y + widget->itemh - (NLINES + 1 - widget->nlines[index] + 0.5) * widget->fonth
 		);
 	}
 }
 
 static int
-firstvisible(Widget *wid)
+firstvisible(Widget *widget)
 {
 	/* gets index of last visible item */
-	return wid->row * wid->ncols;
+	return widget->row * widget->ncols;
 }
 
 static int
-lastvisible(Widget *wid)
+lastvisible(Widget *widget)
 {
 	/* gets index of last visible item */
-	return min(wid->nitems, firstvisible(wid) + wid->nrows * wid->ncols) - 1;
+	return min(widget->nitems, firstvisible(widget) + widget->nrows * widget->ncols) - 1;
 }
 
 static void
-drawitem(Widget *wid, int index)
+drawitem(Widget *widget, int index)
 {
 	int i, x, y, min, max;
 
-	etlock(&wid->lock);
-	min = firstvisible(wid);
-	max = lastvisible(wid);
+	etlock(&widget->lock);
+	min = firstvisible(widget);
+	max = lastvisible(widget);
 	if (index < min || index > max)
 		goto done;
 	i = index - min;
-	x = i % wid->ncols;
-	y = (i / wid->ncols) % wid->nrows;
-	x *= wid->itemw;
-	y *= wid->itemh;
-	XftDrawRect(wid->draw, &wid->colors[SELECT_NOT][COLOR_BG], x, y, wid->itemw, wid->itemh);
-	drawicon(wid, index, x, y);
-	drawlabel(wid, index, x, y);
+	x = i % widget->ncols;
+	y = (i / widget->ncols) % widget->nrows;
+	x *= widget->itemw;
+	y *= widget->itemh;
+	XftDrawRect(widget->draw, &widget->colors[SELECT_NOT][COLOR_BG], x, y, widget->itemw, widget->itemh);
+	drawicon(widget, index, x, y);
+	drawlabel(widget, index, x, y);
 done:
-	etunlock(&wid->lock);
-	wid->redraw = TRUE;
+	etunlock(&widget->lock);
+	widget->redraw = TRUE;
 }
 
 static void
-drawitems(Widget *wid)
+drawitems(Widget *widget)
 {
 	int i, n;
 
-	XftDrawRect(wid->draw, &wid->colors[SELECT_NOT][COLOR_BG], 0, 0, wid->w, wid->nrows * wid->itemh);
-	n = lastvisible(wid);
-	for (i = wid->row * wid->ncols; i <= n; i++) {
-		drawitem(wid, i);
+	XftDrawRect(widget->draw, &widget->colors[SELECT_NOT][COLOR_BG], 0, 0, widget->w, widget->nrows * widget->itemh);
+	n = lastvisible(widget);
+	for (i = widget->row * widget->ncols; i <= n; i++) {
+		drawitem(widget, i);
 	}
 }
 
 static void
-commitdraw(Widget *wid)
+commitdraw(Widget *widget)
 {
-	etlock(&wid->lock);
-	XClearWindow(wid->dpy, wid->win);
+	etlock(&widget->lock);
+	XClearWindow(widget->display, widget->window);
 	XCopyArea(
-		wid->dpy,
-		wid->pix, wid->win,
-		wid->gc,
-		0, wid->ydiff - MARGIN,
-		wid->pixw, wid->pixh,
-		wid->x0, 0
+		widget->display,
+		widget->pix, widget->window,
+		widget->gc,
+		0, widget->ydiff - MARGIN,
+		widget->pixw, widget->pixh,
+		widget->x0, 0
 	);
-	if (wid->state != STATE_SELECTING)
+	if (widget->state != STATE_SELECTING)
 		goto done;
 	XChangeGC(
-		wid->dpy,
-		wid->gc,
+		widget->display,
+		widget->gc,
 		GCClipXOrigin | GCClipYOrigin | GCClipMask,
 		&(XGCValues) {
 			.clip_x_origin = 0,
 			.clip_y_origin = 0,
-			.clip_mask = wid->rectbord,
+			.clip_mask = widget->rectbord,
 		}
 	);
-	XSetForeground(wid->dpy, wid->gc, wid->colors[SELECT_NOT][COLOR_FG].pixel);
-	XFillRectangle(wid->dpy, wid->win, wid->gc, 0, 0, wid->w, wid->h);
+	XSetForeground(widget->display, widget->gc, widget->colors[SELECT_NOT][COLOR_FG].pixel);
+	XFillRectangle(widget->display, widget->window, widget->gc, 0, 0, widget->w, widget->h);
 	XChangeGC(
-		wid->dpy,
-		wid->gc,
+		widget->display,
+		widget->gc,
 		GCClipMask,
 		&(XGCValues) {
 			.clip_mask = None,
 		}
 	);
-	XFlush(wid->dpy);
+	XFlush(widget->display);
 done:
-	etunlock(&wid->lock);
+	etunlock(&widget->lock);
 }
 
 static void
-settitle(Widget *wid)
+settitle(Widget *widget)
 {
 	char title[TITLE_BUFSIZE];
 	char nitems[STATUS_BUFSIZE];
 	char *selitem, *status;
 	int scrollpct;                  /* scroll percentage */
 
-	if (wid->row == 0 && wid->nscreens > 1)
+	if (widget->row == 0 && widget->nscreens > 1)
 		scrollpct = 0;
 	else
-		scrollpct = 100 * ((double)(wid->row + 1) / wid->nscreens);
-	(void)snprintf(nitems, STATUS_BUFSIZE, "%d items", wid->nitems - 1);
+		scrollpct = 100 * ((double)(widget->row + 1) / widget->nscreens);
+	(void)snprintf(nitems, STATUS_BUFSIZE, "%d items", widget->nitems - 1);
 	selitem = "";
 	status = nitems;
-	selitem = (wid->highlight > 0 ? wid->items[wid->highlight][ITEM_NAME] : "");
-	if (wid->highlight <= 0)
+	selitem = (widget->highlight > 0 ? widget->items[widget->highlight][ITEM_NAME] : "");
+	if (widget->highlight <= 0)
 		status = nitems;
-	else if (wid->items[wid->highlight][ITEM_STATUS] == NULL)
+	else if (widget->items[widget->highlight][ITEM_STATUS] == NULL)
 		status = STATUS_UNKNOWN;
 	else
-		status = wid->items[wid->highlight][ITEM_STATUS];
-	if (wid->title != NULL) {
+		status = widget->items[widget->highlight][ITEM_STATUS];
+	if (widget->title != NULL) {
 		(void)snprintf(
 			title, TITLE_BUFSIZE,
 			"%s%s%s (%s) - %s (%d%%)",
-			wid->title,
-			(strcmp(wid->title, "/") != 0 ? "/" : ""),
+			widget->title,
+			(strcmp(widget->title, "/") != 0 ? "/" : ""),
 			selitem,
 			status,
-			wid->class,
+			widget->class,
 			scrollpct
 		);
 	}
-	XmbSetWMProperties(wid->dpy, wid->win, title, title, NULL, 0, NULL, NULL, NULL);
+	XmbSetWMProperties(widget->display, widget->window, title, title, NULL, 0, NULL, NULL, NULL);
 	XChangeProperty(
-		wid->dpy,
-		wid->win,
-		wid->atoms[_NET_WM_NAME],
-		wid->atoms[UTF8_STRING],
+		widget->display,
+		widget->window,
+		widget->atoms[_NET_WM_NAME],
+		widget->atoms[UTF8_STRING],
 		8,
 		PropModeReplace,
 		(unsigned char *)title,
 		strlen(title)
 	);
 	XChangeProperty(
-		wid->dpy,
-		wid->win,
-		wid->atoms[_CONTROL_CWD],
-		wid->atoms[UTF8_STRING],
+		widget->display,
+		widget->window,
+		widget->atoms[_CONTROL_CWD],
+		widget->atoms[UTF8_STRING],
 		8,
 		PropModeReplace,
-		(unsigned char *)wid->title,
+		(unsigned char *)widget->title,
 		strlen(title)
 	);
 }
 
 static int
-gethandlepos(Widget *wid)
+gethandlepos(Widget *widget)
 {
 	int row;
 
-	if (wid->ydiff >= wid->itemh)
-		row = wid->nscreens;
+	if (widget->ydiff >= widget->itemh)
+		row = widget->nscreens;
 	else
-		row = wid->row;
-	return (HANDLE_MAX_SIZE - wid->handlew) * ((double)row / wid->nscreens);
+		row = widget->row;
+	return (HANDLE_MAX_SIZE - widget->handlew) * ((double)row / widget->nscreens);
 }
 
 static void
-drawscroller(Widget *wid, int y)
+drawscroller(Widget *widget, int y)
 {
 	XftDraw *draw;
 	XftColor color;
 	Pixmap pix;
 
-	if ((pix = XCreatePixmap(wid->dpy, wid->scroller, SCROLLER_SIZE, SCROLLER_SIZE, wid->depth)) == None)
+	if ((pix = XCreatePixmap(widget->display, widget->scroller, SCROLLER_SIZE, SCROLLER_SIZE, widget->depth)) == None)
 		return;
-	draw = XftDrawCreate(wid->dpy, pix, wid->visual, wid->colormap);
-	color = wid->colors[SELECT_NOT][COLOR_BG];
+	draw = XftDrawCreate(widget->display, pix, widget->visual, widget->colormap);
+	color = widget->colors[SELECT_NOT][COLOR_BG];
 	color.color.alpha = 0xFFFF;
 	XftDrawRect(draw, &color, 0, 0, SCROLLER_SIZE, SCROLLER_SIZE);
-	XftDrawRect(draw, &wid->colors[SELECT_NOT][COLOR_FG], 1, y + 1, HANDLE_MAX_SIZE, wid->handlew);
-	XSetWindowBackgroundPixmap(wid->dpy, wid->scroller, pix);
-	XClearWindow(wid->dpy, wid->scroller);
-	XFreePixmap(wid->dpy, pix);
+	XftDrawRect(draw, &widget->colors[SELECT_NOT][COLOR_FG], 1, y + 1, HANDLE_MAX_SIZE, widget->handlew);
+	XSetWindowBackgroundPixmap(widget->display, widget->scroller, pix);
+	XClearWindow(widget->display, widget->scroller);
+	XFreePixmap(widget->display, pix);
 	XftDrawDestroy(draw);
 }
 
 static int
-scroll(Widget *wid, int y)
+scroll(Widget *widget, int y)
 {
 	int prevhand, newhand;          /* position of the scroller handle */
 	int prevrow, newrow;
 
 	if (y == 0)
 		return FALSE;
-	if (ALL_ROWS(wid) + 1 < wid->nrows)
+	if (ALL_ROWS(widget) + 1 < widget->nrows)
 		return FALSE;
-	prevhand = gethandlepos(wid);
-	newrow = prevrow = wid->row;
-	wid->ydiff += y;
-	newrow += wid->ydiff / wid->itemh;
-	wid->ydiff %= wid->itemh;
-	if (wid->ydiff < 0) {
-		wid->ydiff += wid->itemh;
+	prevhand = gethandlepos(widget);
+	newrow = prevrow = widget->row;
+	widget->ydiff += y;
+	newrow += widget->ydiff / widget->itemh;
+	widget->ydiff %= widget->itemh;
+	if (widget->ydiff < 0) {
+		widget->ydiff += widget->itemh;
 		newrow--;
 	}
 	if (y > 0) {
-		if (newrow >= wid->nscreens) {
-			wid->ydiff = wid->itemh;
-			newrow = wid->nscreens - 1;
+		if (newrow >= widget->nscreens) {
+			widget->ydiff = widget->itemh;
+			newrow = widget->nscreens - 1;
 		}
 	} else if (y < 0) {
 		if (newrow < 0) {
-			wid->ydiff = 0;
+			widget->ydiff = 0;
 			newrow = 0;
 		}
 	}
-	setrow(wid, newrow);
-	newhand = gethandlepos(wid);
-	if (wid->state == STATE_SCROLLING && prevhand != newhand) {
-		drawscroller(wid, newhand);
+	setrow(widget, newrow);
+	newhand = gethandlepos(widget);
+	if (widget->state == STATE_SCROLLING && prevhand != newhand) {
+		drawscroller(widget, newhand);
 	}
 	if (prevrow != newrow) {
-		settitle(wid);
+		settitle(widget);
 		return TRUE;
 	}
 	return FALSE;
@@ -1169,164 +1169,164 @@ readsize(FILE *fp)
 }
 
 static int
-getitem(Widget *wid, int row, int ydiff, int *x, int *y)
+getitem(Widget *widget, int row, int ydiff, int *x, int *y)
 {
 	int i, w, h;
 
 	*y -= MARGIN;
 	*y += ydiff;
-	*x -= wid->x0;
-	if (*x < 0 || *x >= wid->ncols * wid->itemw)
+	*x -= widget->x0;
+	if (*x < 0 || *x >= widget->ncols * widget->itemw)
 		return -1;
-	if (*y < 0 || *y >= wid->h + ydiff)
+	if (*y < 0 || *y >= widget->h + ydiff)
 		return -1;
-	w = *x / wid->itemw;
-	h = *y / wid->itemh;
-	row *= wid->ncols;
-	i = row + h * wid->ncols + w;
+	w = *x / widget->itemw;
+	h = *y / widget->itemh;
+	row *= widget->ncols;
+	i = row + h * widget->ncols + w;
 	if (i < row)
 		return -1;
-	*x -= w * wid->itemw;
-	*y -= h * wid->itemh;
+	*x -= w * widget->itemw;
+	*y -= h * widget->itemh;
 	return i;
 }
 
 static int
-getpointerclick(Widget *wid, int x, int y)
+getpointerclick(Widget *widget, int x, int y)
 {
 	int iconx, textx, texty, i;
 
-	if ((i = getitem(wid, wid->row, wid->ydiff, &x, &y)) < 0)
+	if ((i = getitem(widget, widget->row, widget->ydiff, &x, &y)) < 0)
 		return -1;
-	if (i < 0 || i >= wid->nitems)
+	if (i < 0 || i >= widget->nitems)
 		return -1;
-	iconx = (wid->itemw - THUMBSIZE) / 2;
-	if (x >= iconx && x < iconx + THUMBSIZE && y >= 0 && y < THUMBSIZE + wid->fonth / 2)
+	iconx = (widget->itemw - THUMBSIZE) / 2;
+	if (x >= iconx && x < iconx + THUMBSIZE && y >= 0 && y < THUMBSIZE + widget->fonth / 2)
 		return i;
-	if (wid->linelen == NULL)
+	if (widget->linelen == NULL)
 		return -1;
-	textx = (wid->itemw - wid->linelen[i]) / 2;
-	texty = wid->itemh - (NLINES + 0.5) * wid->fonth;
-	if (x >= textx && x < textx + wid->linelen[i] &&
-	    y >= texty && y < texty + wid->nlines[i] * wid->fonth) {
+	textx = (widget->itemw - widget->linelen[i]) / 2;
+	texty = widget->itemh - (NLINES + 0.5) * widget->fonth;
+	if (x >= textx && x < textx + widget->linelen[i] &&
+	    y >= texty && y < texty + widget->nlines[i] * widget->fonth) {
 		return i;
 	}
 	return -1;
 }
 
 static void
-disownprimary(Widget *wid)
+disownprimary(Widget *widget)
 {
-	if (wid->selctx == NULL)
+	if (widget->selctx == NULL)
 		return;
-	ctrlsel_disown(wid->selctx);
-	FREE(wid->selctx);
+	ctrlsel_disown(widget->selctx);
+	FREE(widget->selctx);
 }
 
 static void
-disowndnd(Widget *wid)
+disowndnd(Widget *widget)
 {
-	if (wid->dragctx == NULL)
+	if (widget->dragctx == NULL)
 		return;
-	ctrlsel_dnddisown(wid->dragctx);
-	FREE(wid->dragctx);
+	ctrlsel_dnddisown(widget->dragctx);
+	FREE(widget->dragctx);
 }
 
 static void
-ownprimary(Widget *wid, Time time)
+ownprimary(Widget *widget, Time time)
 {
 	struct Selection *sel;
 	size_t i, j;
 	int success;
 
-	if (wid->sel == NULL)
+	if (widget->sel == NULL)
 		return;
-	disownprimary(wid);
-	if ((wid->selctx = malloc(sizeof(*wid->selctx))) == NULL) {
+	disownprimary(widget);
+	if ((widget->selctx = malloc(sizeof(*widget->selctx))) == NULL) {
 		warn("malloc");
 		return;
 	}
 	i = j = 0;
-	for (sel = wid->sel; sel != NULL; sel = sel->next) {
+	for (sel = widget->sel; sel != NULL; sel = sel->next) {
 		if (sel->next != NULL)
-			i += snprintf(wid->selbuf + i, wid->selbufsiz - i, "%s\n", wid->items[sel->index][ITEM_PATH]);
-		j += snprintf(wid->uribuf + j, wid->uribufsiz - j, "file://%s\r\n", wid->items[sel->index][ITEM_PATH]);
+			i += snprintf(widget->selbuf + i, widget->selbufsiz - i, "%s\n", widget->items[sel->index][ITEM_PATH]);
+		j += snprintf(widget->uribuf + j, widget->uribufsiz - j, "file://%s\r\n", widget->items[sel->index][ITEM_PATH]);
 	}
 	ctrlsel_filltarget(
 		XA_STRING, XA_STRING,
-		8, (unsigned char *)wid->selbuf, i,
-		&wid->targets[TARGET_STRING]
+		8, (unsigned char *)widget->selbuf, i,
+		&widget->targets[TARGET_STRING]
 	);
 	ctrlsel_filltarget(
-		wid->atoms[UTF8_STRING], wid->atoms[UTF8_STRING],
-		8, (unsigned char *)wid->selbuf, i,
-		&wid->targets[TARGET_UTF8]
+		widget->atoms[UTF8_STRING], widget->atoms[UTF8_STRING],
+		8, (unsigned char *)widget->selbuf, i,
+		&widget->targets[TARGET_UTF8]
 	);
 	ctrlsel_filltarget(
-		wid->atoms[TEXT_URI_LIST], wid->atoms[TEXT_URI_LIST],
-		8, (unsigned char *)wid->uribuf, j,
-		&wid->targets[TARGET_URI]
+		widget->atoms[TEXT_URI_LIST], widget->atoms[TEXT_URI_LIST],
+		8, (unsigned char *)widget->uribuf, j,
+		&widget->targets[TARGET_URI]
 	);
 	success = ctrlsel_setowner(
-		wid->dpy, wid->win,
+		widget->display, widget->window,
 		XA_PRIMARY, time, 0,
-		wid->targets, TARGET_LAST,
-		wid->selctx
+		widget->targets, TARGET_LAST,
+		widget->selctx
 	);
 	if (!success) {
-		FREE(wid->selctx);
+		FREE(widget->selctx);
 	}
 }
 
 static void
-cleanwidget(Widget *wid)
+cleanwidget(Widget *widget)
 {
 	struct Thumb *thumb;
 	struct Selection *sel;
 	void *tmp;
 
-	thumb = wid->thumbhead;
+	thumb = widget->thumbhead;
 	while (thumb != NULL) {
 		tmp = thumb;
 		thumb = thumb->next;
 		XDestroyImage(((struct Thumb *)tmp)->img);
 		FREE(tmp);
 	}
-	sel = wid->sel;
+	sel = widget->sel;
 	while (sel != NULL) {
 		tmp = sel;
 		sel = sel->next;
 		FREE(tmp);
 	}
-	wid->sel = NULL;
-	wid->rectsel = NULL;
-	FREE(wid->thumbs);
-	FREE(wid->linelen);
-	FREE(wid->nlines);
-	FREE(wid->issel);
-	FREE(wid->selbuf);
-	wid->selbufsiz = 0;
-	FREE(wid->uribuf);
-	wid->uribufsiz = 0;
-	FREE(wid->dndbuf);
-	disownprimary(wid);
-	disowndnd(wid);
+	widget->sel = NULL;
+	widget->rectsel = NULL;
+	FREE(widget->thumbs);
+	FREE(widget->linelen);
+	FREE(widget->nlines);
+	FREE(widget->issel);
+	FREE(widget->selbuf);
+	widget->selbufsiz = 0;
+	FREE(widget->uribuf);
+	widget->uribufsiz = 0;
+	FREE(widget->dndbuf);
+	disownprimary(widget);
+	disowndnd(widget);
 }
 
 static void
-selectitem(Widget *wid, int index, int select, int rectsel)
+selectitem(Widget *widget, int index, int select, int rectsel)
 {
 	struct Selection *sel;
 	struct Selection **header;
 
-	if (wid->issel == NULL || index <= 0 || index >= wid->nitems)
+	if (widget->issel == NULL || index <= 0 || index >= widget->nitems)
 		return;
 	/*
-	 * We have two lists of selections: the global list (wid->sel),
-	 * and the list used by rectangular selection (wid->rectsel).
+	 * We have two lists of selections: the global list (widget->sel),
+	 * and the list used by rectangular selection (widget->rectsel).
 	 */
-	header = rectsel ? &wid->rectsel : &wid->sel;
-	if (select && wid->issel[index] == NULL) {
+	header = rectsel ? &widget->rectsel : &widget->sel;
+	if (select && widget->issel[index] == NULL) {
 		if ((sel = malloc(sizeof(*sel))) == NULL)
 			return;
 		*sel = (struct Selection){
@@ -1337,9 +1337,9 @@ selectitem(Widget *wid, int index, int select, int rectsel)
 		if (*header != NULL)
 			(*header)->prev = sel;
 		*header = sel;
-		wid->issel[index] = sel;
-	} else if (!select && wid->issel[index] != NULL) {
-		sel = wid->issel[index];
+		widget->issel[index] = sel;
+	} else if (!select && widget->issel[index] != NULL) {
+		sel = widget->issel[index];
 		if (sel->next != NULL)
 			sel->next->prev = sel->prev;
 		if (sel->prev != NULL)
@@ -1347,35 +1347,35 @@ selectitem(Widget *wid, int index, int select, int rectsel)
 		if (*header == sel)
 			*header = sel->next;
 		FREE(sel);
-		wid->issel[index] = NULL;
+		widget->issel[index] = NULL;
 	} else {
 		return;
 	}
-	drawitem(wid, index);
+	drawitem(widget, index);
 }
 
 static void
-highlight(Widget *wid, int index, int redraw)
+highlight(Widget *widget, int index, int redraw)
 {
 	int prevhili;
 
-	if (wid->highlight == index)
+	if (widget->highlight == index)
 		return;
-	prevhili = wid->highlight;
-	wid->highlight = index;
+	prevhili = widget->highlight;
+	widget->highlight = index;
 	if (redraw)
-		drawitem(wid, index);
+		drawitem(widget, index);
 	/* we still have to redraw the previous one */
-	drawitem(wid, prevhili);
-	settitle(wid);
+	drawitem(widget, prevhili);
+	settitle(widget);
 }
 
 static void
-selectitems(Widget *wid, int a, int b)
+selectitems(Widget *widget, int a, int b)
 {
 	int i, min, max;
 
-	if (a < 0 || b < 0 || a >= wid->nitems || b >= wid->nitems)
+	if (a < 0 || b < 0 || a >= widget->nitems || b >= widget->nitems)
 		return;
 	if (a < b) {
 		min = a;
@@ -1385,89 +1385,89 @@ selectitems(Widget *wid, int a, int b)
 		max = a;
 	}
 	for (i = min; i <= max; i++) {
-		selectitem(wid, i, TRUE, 0);
+		selectitem(widget, i, TRUE, 0);
 	}
 }
 
 static void
-unselectitems(Widget *wid)
+unselectitems(Widget *widget)
 {
-	while (wid->sel) {
-		selectitem(wid, wid->sel->index, FALSE, 0);
+	while (widget->sel) {
+		selectitem(widget, widget->sel->index, FALSE, 0);
 	}
 }
 
 static int
-mouse1click(Widget *wid, XButtonPressedEvent *ev)
+mouse1click(Widget *widget, XButtonPressedEvent *ev)
 {
 	int prevhili, index;
 
-	index = getpointerclick(wid, ev->x, ev->y);
-	if (index > 0 && wid->issel[index] != NULL)
+	index = getpointerclick(widget, ev->x, ev->y);
+	if (index > 0 && widget->issel[index] != NULL)
 		return index;
 	if (!(ev->state & (ControlMask | ShiftMask)))
-		unselectitems(wid);
+		unselectitems(widget);
 	if (index < 0)
 		return index;
 	/*
 	 * If index != 0, there's no need to ask highlight() to redraw the item,
 	 * as selectitem() or selectitems() will already redraw it.
 	 */
-	prevhili = wid->highlight;
-	highlight(wid, index, (index == 0));
+	prevhili = widget->highlight;
+	highlight(widget, index, (index == 0));
 	if (prevhili != -1 && ev->state & ShiftMask)
-		selectitems(wid, wid->highlight, prevhili);
+		selectitems(widget, widget->highlight, prevhili);
 	else
-		selectitem(wid, wid->highlight, ((ev->state & ControlMask) ? wid->issel[wid->highlight] == NULL : TRUE), FALSE);
-	ownprimary(wid, ev->time);
+		selectitem(widget, widget->highlight, ((ev->state & ControlMask) ? widget->issel[widget->highlight] == NULL : TRUE), FALSE);
+	ownprimary(widget, ev->time);
 	return index;
 }
 
 static void
-mouse3click(Widget *wid, int x, int y)
+mouse3click(Widget *widget, int x, int y)
 {
 	int index;
 
-	index = getpointerclick(wid, x, y);
+	index = getpointerclick(widget, x, y);
 	if (index != -1) {
-		if (wid->issel[index] == NULL) {
-			highlight(wid, index, FALSE);
-			unselectitems(wid);
-			selectitem(wid, index, TRUE, FALSE);
+		if (widget->issel[index] == NULL) {
+			highlight(widget, index, FALSE);
+			unselectitems(widget);
+			selectitem(widget, index, TRUE, FALSE);
 		} else {
-			highlight(wid, index, TRUE);
+			highlight(widget, index, TRUE);
 		}
 	}
 }
 
 static void
-rectdraw(Widget *wid, int row, int ydiff, int x0, int y0, int x, int y)
+rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 {
 	int w, h;
 
-	XSetForeground(wid->dpy, wid->stipgc, 0);
+	XSetForeground(widget->display, widget->stipgc, 0);
 	XFillRectangle(
-		wid->dpy,
-		wid->rectbord,
-		wid->stipgc,
+		widget->display,
+		widget->rectbord,
+		widget->stipgc,
 		0, 0,
-		wid->w, wid->h
+		widget->w, widget->h
 	);
-	if (wid->state != STATE_SELECTING)
+	if (widget->state != STATE_SELECTING)
 		return;
-	if (row < wid->row) {
-		y0 -= min(wid->row - row, wid->nrows) * wid->itemh;
-	} else if (row > wid->row) {
-		y0 += min(row - wid->row, wid->nrows) * wid->itemh;
+	if (row < widget->row) {
+		y0 -= min(widget->row - row, widget->nrows) * widget->itemh;
+	} else if (row > widget->row) {
+		y0 += min(row - widget->row, widget->nrows) * widget->itemh;
 	}
-	y0 += ydiff - wid->ydiff;
+	y0 += ydiff - widget->ydiff;
 	w = (x0 > x) ? x0 - x : x - x0;
 	h = (y0 > y) ? y0 - y : y - y0;
-	XSetForeground(wid->dpy, wid->stipgc, 1);
+	XSetForeground(widget->display, widget->stipgc, 1);
 	XDrawRectangle(
-		wid->dpy,
-		wid->rectbord,
-		wid->stipgc,
+		widget->display,
+		widget->rectbord,
+		widget->stipgc,
 		min(x0, x),
 		min(y0, y),
 		w, h
@@ -1475,7 +1475,7 @@ rectdraw(Widget *wid, int row, int ydiff, int x0, int y0, int x, int y)
 }
 
 static int
-rectselect(Widget *wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, int dsty)
+rectselect(Widget *widget, int srcrow, int srcydiff, int srcx, int srcy, int dstx, int dsty)
 {
 	int row, col, tmp, i;
 	int changed;
@@ -1511,58 +1511,58 @@ rectselect(Widget *wid, int srcrow, int srcydiff, int srcx, int srcy, int dstx, 
 		dstx = srcx;
 		srcx = tmp;
 	}
-	if (dstx < wid->x0)              dstx = wid->x0;
-	if (srcx < wid->x0)              srcx = wid->x0;
-	if (dstx >= wid->x0 + wid->pixw) dstx = wid->x0 + wid->pixw - 1;
-	if (srcx >= wid->x0 + wid->pixw) srcx = wid->x0 + wid->pixw - 1;
+	if (dstx < widget->x0)              dstx = widget->x0;
+	if (srcx < widget->x0)              srcx = widget->x0;
+	if (dstx >= widget->x0 + widget->pixw) dstx = widget->x0 + widget->pixw - 1;
+	if (srcx >= widget->x0 + widget->pixw) srcx = widget->x0 + widget->pixw - 1;
 	if (dsty < MARGIN)               dsty = MARGIN;
 	if (srcy < MARGIN)               srcy = MARGIN;
-	if (dsty >= wid->h)              dsty = wid->h - 1;
-	if (srcy >= wid->h)              srcy = wid->h - 1;
-	if ((srci = getitem(wid, srcrow, srcydiff, &srcx, &srcy)) < 0)
+	if (dsty >= widget->h)              dsty = widget->h - 1;
+	if (srcy >= widget->h)              srcy = widget->h - 1;
+	if ((srci = getitem(widget, srcrow, srcydiff, &srcx, &srcy)) < 0)
 		return FALSE;
-	if ((dsti = getitem(wid, wid->row, wid->ydiff, &dstx, &dsty)) < 0)
+	if ((dsti = getitem(widget, widget->row, widget->ydiff, &dstx, &dsty)) < 0)
 		return FALSE;
-	vismin = firstvisible(wid);
-	vismax = lastvisible(wid);
+	vismin = firstvisible(widget);
+	vismax = lastvisible(widget);
 	indexmin = min(srci, dsti);
 	indexmax = max(srci, dsti);
-	colmin = indexmin % wid->ncols;
-	colmax = indexmax % wid->ncols;
-	indexmin = min(indexmin, wid->nitems - 1);
-	indexmax = min(indexmax, wid->nitems - 1);
-	rowmin = indexmin / wid->ncols;
-	rowsrc = srci / wid->ncols;
+	colmin = indexmin % widget->ncols;
+	colmax = indexmax % widget->ncols;
+	indexmin = min(indexmin, widget->nitems - 1);
+	indexmax = min(indexmax, widget->nitems - 1);
+	rowmin = indexmin / widget->ncols;
+	rowsrc = srci / widget->ncols;
 	changed = FALSE;
 	for (i = vismin; i <= vismax; i++) {
 		sel = TRUE;
-		row = i / wid->ncols;
-		col = i % wid->ncols;
-		x = wid->x0 + col * wid->itemw + (wid->itemw - THUMBSIZE) / 2;
-		y = (row - wid->row + 1) * wid->itemh -
-		    (NLINES - wid->nlines[i] + 0.5) * wid->fonth +
-		    MARGIN - wid->ydiff;
+		row = i / widget->ncols;
+		col = i % widget->ncols;
+		x = widget->x0 + col * widget->itemw + (widget->itemw - THUMBSIZE) / 2;
+		y = (row - widget->row + 1) * widget->itemh -
+		    (NLINES - widget->nlines[i] + 0.5) * widget->fonth +
+		    MARGIN - widget->ydiff;
 		if (i < indexmin || i > indexmax) {
 			sel = FALSE;
 		} else if ((col == colmin || col == colmax) && (minx > x + THUMBSIZE || maxx < x)) {
 			sel = FALSE;
 		} else if (col < colmin || col > colmax) {
 			sel = FALSE;
-		} else if (row == rowmin && row != rowsrc && row >= wid->row && miny > y) {
+		} else if (row == rowmin && row != rowsrc && row >= widget->row && miny > y) {
 			sel = FALSE;
 		}
-		if (!sel && (wid->issel[i] == NULL || wid->issel[i]->index > 0))
+		if (!sel && (widget->issel[i] == NULL || widget->issel[i]->index > 0))
 			continue;
-		if (sel && wid->issel[i] != NULL && wid->issel[i]->index > 0)
-			selectitem(wid, i, FALSE, FALSE);
-		selectitem(wid, i, sel, TRUE);
+		if (sel && widget->issel[i] != NULL && widget->issel[i]->index > 0)
+			selectitem(widget, i, FALSE, FALSE);
+		selectitem(widget, i, sel, TRUE);
 		changed = TRUE;
 	}
 	return changed;
 }
 
 static void
-commitrectsel(Widget *wid)
+commitrectsel(Widget *widget)
 {
 	struct Selection *sel, *next;
 
@@ -1570,30 +1570,30 @@ commitrectsel(Widget *wid)
 	 * We keep the items selected by rectangular selection on a
 	 * temporary list.  Move them to the regular list.
 	 */
-	while (wid->rectsel != NULL) {
-		next = wid->rectsel->next;
-		sel = wid->rectsel;
-		sel->next = wid->sel;
+	while (widget->rectsel != NULL) {
+		next = widget->rectsel->next;
+		sel = widget->rectsel;
+		sel->next = widget->sel;
 		sel->prev = NULL;
 		if (sel->index < 0)
 			sel->index *= -1;
-		if (wid->sel != NULL)
-			wid->sel->prev = sel;
-		wid->sel = sel;
-		wid->rectsel = next;
+		if (widget->sel != NULL)
+			widget->sel->prev = sel;
+		widget->sel = sel;
+		widget->rectsel = next;
 	}
 }
 
 static void
-endevent(Widget *wid)
+endevent(Widget *widget)
 {
-	if (wid->redraw) {
-		commitdraw(wid);
+	if (widget->redraw) {
+		commitdraw(widget);
 	}
 }
 
 static int
-querypointer(Widget *wid, Window win, int *retx, int *rety, unsigned int *retmask)
+querypointer(Widget *widget, Window win, int *retx, int *rety, unsigned int *retmask)
 {
 	Window root, child;
 	unsigned int mask;
@@ -1602,7 +1602,7 @@ querypointer(Widget *wid, Window win, int *retx, int *rety, unsigned int *retmas
 	int retval;
 
 	retval = XQueryPointer(
-		wid->dpy,
+		widget->display,
 		win,
 		&root, &child,
 		&rootx, &rooty,
@@ -1619,32 +1619,32 @@ querypointer(Widget *wid, Window win, int *retx, int *rety, unsigned int *retmas
 }
 
 static void
-scrollerset(Widget *wid, int pos)
+scrollerset(Widget *widget, int pos)
 {
 	int prevrow, newrow, maxpos;
 
-	maxpos = HANDLE_MAX_SIZE - wid->handlew;
+	maxpos = HANDLE_MAX_SIZE - widget->handlew;
 	if (maxpos <= 0) {
 		/* all files are visible, there's nothing to scroll */
 		return;
 	}
 	pos = max(pos, 0);
 	pos = min(pos, maxpos);
-	newrow = pos * wid->nscreens / maxpos;
+	newrow = pos * widget->nscreens / maxpos;
 	newrow = max(newrow, 0);
-	newrow = min(newrow, wid->nscreens);
-	if (newrow == wid->nscreens) {
-		wid->ydiff = wid->itemh;
-		newrow = wid->nscreens - 1;
+	newrow = min(newrow, widget->nscreens);
+	if (newrow == widget->nscreens) {
+		widget->ydiff = widget->itemh;
+		newrow = widget->nscreens - 1;
 	} else {
-		wid->ydiff = 0;
+		widget->ydiff = 0;
 	}
-	prevrow = wid->row;
-	setrow(wid, newrow);
-	drawscroller(wid, pos);
+	prevrow = widget->row;
+	setrow(widget, newrow);
+	drawscroller(widget, pos);
 	if (prevrow != newrow) {
-		settitle(wid);
-		drawitems(wid);
+		settitle(widget);
+		drawitems(widget);
 	}
 }
 
@@ -1661,16 +1661,16 @@ checkheader(FILE *fp, char *header, size_t size)
 }
 
 static int
-pixmapfromdata(Widget *wid, char **data, Pixmap *pix, Pixmap *mask)
+pixmapfromdata(Widget *widget, char **data, Pixmap *pix, Pixmap *mask)
 {
 	XpmAttributes xa = {
 		.valuemask = XpmVisual | XpmColormap | XpmDepth,
-		.visual = wid->visual,
-		.colormap = wid->colormap,
-		.depth = wid->depth,
+		.visual = widget->visual,
+		.colormap = widget->colormap,
+		.depth = widget->depth,
 	};
 
-	if (XpmCreatePixmapFromData(wid->dpy, wid->win, data, pix, mask, &xa) != XpmSuccess) {
+	if (XpmCreatePixmapFromData(widget->display, widget->window, data, pix, mask, &xa) != XpmSuccess) {
 		*pix = None;
 		*mask = None;
 		return RETURN_FAILURE;
@@ -1679,7 +1679,7 @@ pixmapfromdata(Widget *wid, char **data, Pixmap *pix, Pixmap *mask)
 }
 
 static int
-fillselitems(Widget *wid, int *selitems, int clicked)
+fillselitems(Widget *widget, int *selitems, int clicked)
 {
 	struct Selection *sel;
 	int nitems;
@@ -1687,7 +1687,7 @@ fillselitems(Widget *wid, int *selitems, int clicked)
 	nitems = 0;
 	if (clicked != -1)
 		selitems[nitems++] = clicked;
-	for (sel = wid->sel; sel != NULL; sel = sel->next) {
+	for (sel = widget->sel; sel != NULL; sel = sel->next) {
 		if (sel->index == clicked)
 			continue;
 		selitems[nitems++] = sel->index;
@@ -1696,7 +1696,7 @@ fillselitems(Widget *wid, int *selitems, int clicked)
 }
 
 static Window
-createdragwin(Widget *wid, int index)
+createdragwin(Widget *widget, int index)
 {
 	Window win;
 	GC gc;
@@ -1706,22 +1706,22 @@ createdragwin(Widget *wid, int index)
 
 	if (index <= 0)
 		return None;
-	if (!querypointer(wid, ROOT(wid->dpy), &xroot, &yroot, NULL))
+	if (!querypointer(widget, ROOT(widget->display), &xroot, &yroot, NULL))
 		return None;
 	w = h = THUMBSIZE;
-	if (wid->thumbs[index] != NULL) {
-		w = wid->thumbs[index]->w;
-		h = wid->thumbs[index]->h;
+	if (widget->thumbs[index] != NULL) {
+		w = widget->thumbs[index]->w;
+		h = widget->thumbs[index]->h;
 	}
 	win = XCreateWindow(
-		wid->dpy, ROOT(wid->dpy),
+		widget->display, ROOT(widget->display),
 		xroot, yroot, w, h, 0,
-		wid->depth, InputOutput, wid->visual,
+		widget->depth, InputOutput, widget->visual,
 		CWBackPixel | CWOverrideRedirect| CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
 			.border_pixel = 0,
-			.colormap = wid->colormap,
-			.background_pixel = wid->colors[SELECT_NOT][COLOR_BG].pixel,
+			.colormap = widget->colormap,
+			.background_pixel = widget->colors[SELECT_NOT][COLOR_BG].pixel,
 			.override_redirect = True
 		}
 	);
@@ -1729,60 +1729,60 @@ createdragwin(Widget *wid, int index)
 		return None;
 	opacity = DND_OPACITY;
 	XChangeProperty(
-		wid->dpy, win,
-		wid->atoms[_NET_WM_WINDOW_OPACITY],
+		widget->display, win,
+		widget->atoms[_NET_WM_WINDOW_OPACITY],
 		XA_CARDINAL, 32, PropModeReplace,
 		(unsigned char *)&opacity,
 		1
 	);
 	XChangeProperty(
-		wid->dpy, win,
-		wid->atoms[_NET_WM_WINDOW_TYPE],
+		widget->display, win,
+		widget->atoms[_NET_WM_WINDOW_TYPE],
 		XA_ATOM, 32, PropModeReplace,
-		(unsigned char *)&wid->atoms[_NET_WM_WINDOW_TYPE_DND],
+		(unsigned char *)&widget->atoms[_NET_WM_WINDOW_TYPE_DND],
 		1
 	);
-	if (wid->thumbs[index] == NULL) {
-		icon = wid->itemicons[index];
-		pix = wid->icons[icon].pix;
-		if ((mask = XCreatePixmap(wid->dpy, win, w, h, CLIP_DEPTH)) == None) {
-			XDestroyWindow(wid->dpy, win);
+	if (widget->thumbs[index] == NULL) {
+		icon = widget->itemicons[index];
+		pix = widget->icons[icon].pix;
+		if ((mask = XCreatePixmap(widget->display, win, w, h, CLIP_DEPTH)) == None) {
+			XDestroyWindow(widget->display, win);
 			return None;
 		}
-		if ((gc = XCreateGC(wid->dpy, mask, 0, NULL)) == None) {
-			XFreePixmap(wid->dpy, mask);
-			XDestroyWindow(wid->dpy, win);
+		if ((gc = XCreateGC(widget->display, mask, 0, NULL)) == None) {
+			XFreePixmap(widget->display, mask);
+			XDestroyWindow(widget->display, win);
 			return None;
 		}
-		XSetForeground(wid->dpy, gc, 0);
-		XFillRectangle(wid->dpy, mask, gc, 0, 0, w, h);
-		XCopyArea(wid->dpy, wid->icons[icon].mask, mask, gc, 0, 0, w, h, 0, 0);
-		XShapeCombineMask(wid->dpy, win, ShapeBounding, 0, 0, mask, ShapeSet);
-		XFreePixmap(wid->dpy, mask);
-		XFreeGC(wid->dpy, gc);
-		XSetWindowBackgroundPixmap(wid->dpy, win, pix);
+		XSetForeground(widget->display, gc, 0);
+		XFillRectangle(widget->display, mask, gc, 0, 0, w, h);
+		XCopyArea(widget->display, widget->icons[icon].mask, mask, gc, 0, 0, w, h, 0, 0);
+		XShapeCombineMask(widget->display, win, ShapeBounding, 0, 0, mask, ShapeSet);
+		XFreePixmap(widget->display, mask);
+		XFreeGC(widget->display, gc);
+		XSetWindowBackgroundPixmap(widget->display, win, pix);
 	} else {
-		if ((pix = XCreatePixmap(wid->dpy, win, w, h, wid->depth)) == None) {
-			XDestroyWindow(wid->dpy, win);
+		if ((pix = XCreatePixmap(widget->display, win, w, h, widget->depth)) == None) {
+			XDestroyWindow(widget->display, win);
 			return None;
 		}
 		XPutImage(
-			wid->dpy,
+			widget->display,
 			pix,
-			wid->gc,
-			wid->thumbs[index]->img,
+			widget->gc,
+			widget->thumbs[index]->img,
 			0, 0, 0, 0, w, h
 		);
-		XSetWindowBackgroundPixmap(wid->dpy, win, pix);
-		XFreePixmap(wid->dpy, pix);
+		XSetWindowBackgroundPixmap(widget->display, win, pix);
+		XFreePixmap(widget->display, pix);
 	}
-	XMapRaised(wid->dpy, win);
-	XFlush(wid->dpy);
+	XMapRaised(widget->display, win);
+	XFlush(widget->display);
 	return win;
 }
 
 static char *
-gettextprop(Widget *wid, Atom prop)
+gettextprop(Widget *widget, Atom prop)
 {
 	char *text;
 	unsigned char *p;
@@ -1793,8 +1793,8 @@ gettextprop(Widget *wid, Atom prop)
 
 	text = NULL;
 	status = XGetWindowProperty(
-		wid->dpy,
-		wid->win,
+		widget->display,
+		widget->window,
 		prop,
 		0L,
 		0x1FFFFFFF,
@@ -1818,10 +1818,10 @@ done:
 }
 
 static void
-xinitvisual(Widget *wid)
+xinitvisual(Widget *widget)
 {
 	XVisualInfo tpl = {
-		.screen = SCREEN(wid->dpy),
+		.screen = SCREEN(widget->display),
 		.depth = 32,
 		.class = TrueColor
 	};
@@ -1831,23 +1831,23 @@ xinitvisual(Widget *wid)
 	int nitems;
 	int i;
 
-	wid->visual = NULL;
-	if ((infos = XGetVisualInfo(wid->dpy, masks, &tpl, &nitems)) != NULL) {
+	widget->visual = NULL;
+	if ((infos = XGetVisualInfo(widget->display, masks, &tpl, &nitems)) != NULL) {
 		for (i = 0; i < nitems; i++) {
-			fmt = XRenderFindVisualFormat(wid->dpy, infos[i].visual);
+			fmt = XRenderFindVisualFormat(widget->display, infos[i].visual);
 			if (fmt->type == PictTypeDirect && fmt->direct.alphaMask) {
-				wid->depth = infos[i].depth;
-				wid->visual = infos[i].visual;
-				wid->colormap = XCreateColormap(wid->dpy, ROOT(wid->dpy), wid->visual, AllocNone);
+				widget->depth = infos[i].depth;
+				widget->visual = infos[i].visual;
+				widget->colormap = XCreateColormap(widget->display, ROOT(widget->display), widget->visual, AllocNone);
 				break;
 			}
 		}
 		XFree(infos);
 	}
-	if (wid->visual == NULL) {
-		wid->depth = DefaultDepth(wid->dpy, SCREEN(wid->dpy));
-		wid->visual = DefaultVisual(wid->dpy, SCREEN(wid->dpy));
-		wid->colormap = DefaultColormap(wid->dpy, SCREEN(wid->dpy));
+	if (widget->visual == NULL) {
+		widget->depth = DefaultDepth(widget->display, SCREEN(widget->display));
+		widget->visual = DefaultVisual(widget->display, SCREEN(widget->display));
+		widget->colormap = DefaultColormap(widget->display, SCREEN(widget->display));
 	}
 }
 
@@ -1857,7 +1857,7 @@ xinitvisual(Widget *wid)
  */
 
 static WidgetEvent
-keypress(Widget *wid, XKeyEvent *xev, int *selitems, int *nitems, char **text)
+keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text)
 {
 	KeySym ksym;
 	unsigned int state;
@@ -1865,7 +1865,7 @@ keypress(Widget *wid, XKeyEvent *xev, int *selitems, int *nitems, char **text)
 	int redrawall, previtem, index, shift, newrow, n, i;
 	char *kstr;
 
-	if (!XkbLookupKeySym(wid->dpy, xev->keycode, xev->state, &state, &ksym))
+	if (!XkbLookupKeySym(widget->display, xev->keycode, xev->state, &state, &ksym))
 		return WIDGET_NONE;
 	switch (ksym) {
 	case XK_KP_Enter:       ksym = XK_Return;       break;
@@ -1882,27 +1882,27 @@ keypress(Widget *wid, XKeyEvent *xev, int *selitems, int *nitems, char **text)
 	}
 	switch (ksym) {
 	case XK_Escape:
-		if (wid->sel == NULL)
+		if (widget->sel == NULL)
 			break;
-		unselectitems(wid);
+		unselectitems(widget);
 		break;
 	case XK_Return:
-		if (wid->highlight == -1)
+		if (widget->highlight == -1)
 			break;
-		*nitems = fillselitems(wid, selitems, wid->highlight);
+		*nitems = fillselitems(widget, selitems, widget->highlight);
 		return WIDGET_OPEN;
 	case XK_Menu:
-		*nitems = fillselitems(wid, selitems, -1);
+		*nitems = fillselitems(widget, selitems, -1);
 		return WIDGET_CONTEXT;
 	case XK_space:
-		if (wid->highlight == -1)
+		if (widget->highlight == -1)
 			break;
-		selectitem(wid, wid->highlight, wid->issel[wid->highlight] == NULL, FALSE);
+		selectitem(widget, widget->highlight, widget->issel[widget->highlight] == NULL, FALSE);
 		break;
 	case XK_Prior:
 	case XK_Next:
-		if (scroll(wid, (ksym == XK_Prior ? -1 : 1) * PAGE_STEP(wid)))
-			drawitems(wid);
+		if (scroll(widget, (ksym == XK_Prior ? -1 : 1) * PAGE_STEP(widget)))
+			drawitems(widget);
 		break;
 	case XK_Home:
 	case XK_End:
@@ -1914,37 +1914,37 @@ hjkl:
 		redrawall = TRUE;
 		if (ksym == XK_Home) {
 			index = 0;
-			wid->ydiff = 0;
-			setrow(wid, 0);
+			widget->ydiff = 0;
+			setrow(widget, 0);
 			goto draw;
 		}
 		if (ksym == XK_End) {
-			index = wid->nitems - 1;
-			wid->ydiff = 0;
-			setrow(wid, wid->nscreens);
+			index = widget->nitems - 1;
+			widget->ydiff = 0;
+			setrow(widget, widget->nscreens);
 			goto draw;
 		}
-		if (wid->highlight == -1) {
-			wid->highlight = 0;
-			setrow(wid, 0);
+		if (widget->highlight == -1) {
+			widget->highlight = 0;
+			setrow(widget, 0);
 		}
 		if (ksym == XK_Up || ksym == XK_k) {
-			n = -wid->ncols;
+			n = -widget->ncols;
 		} else if (ksym == XK_Down || ksym == XK_j) {
-			n = wid->highlight < (WHL_ROWS(wid)) * wid->ncols
-			  ? wid->nitems - wid->highlight - 1
+			n = widget->highlight < (WHL_ROWS(widget)) * widget->ncols
+			  ? widget->nitems - widget->highlight - 1
 			  : 0;
-			n = min(wid->ncols, n);
+			n = min(widget->ncols, n);
 		} else if (ksym == XK_Left || ksym == XK_h) {
 			n = -1;
 		} else {
 			n = 1;
 		}
-		if ((index = wid->highlight + n) < 0 || index >= wid->nitems)
+		if ((index = widget->highlight + n) < 0 || index >= widget->nitems)
 			break;
-		row[0] = wid->highlight / wid->ncols;
-		row[1] = index / wid->ncols;
-		newrow = wid->row;
+		row[0] = widget->highlight / widget->ncols;
+		row[1] = index / widget->ncols;
+		newrow = widget->row;
 		for (i = 0; i < 2; i++) {
 			/*
 			 * Try to make both previously highlighted item
@@ -1952,27 +1952,27 @@ hjkl:
 			 */
 			if (row[i] < newrow) {
 				newrow = row[i];
-			} else if (row[i] >= newrow + WIN_ROWS(wid)) {
-				newrow = row[i] - WIN_ROWS(wid) + 1;
+			} else if (row[i] >= newrow + WIN_ROWS(widget)) {
+				newrow = row[i] - WIN_ROWS(widget) + 1;
 			}
 		}
-		if (wid->row != newrow) {
-			wid->ydiff = 0;
-			setrow(wid, newrow);
+		if (widget->row != newrow) {
+			widget->ydiff = 0;
+			setrow(widget, newrow);
 			redrawall = TRUE;
-		} else if (wid->row == index / wid->ncols) {
-			wid->ydiff = 0;
-			wid->redraw = TRUE;
+		} else if (widget->row == index / widget->ncols) {
+			widget->ydiff = 0;
+			widget->redraw = TRUE;
 		}
 draw:
-		previtem = wid->highlight;
-		highlight(wid, index, TRUE);
+		previtem = widget->highlight;
+		highlight(widget, index, TRUE);
 		if (xev->state & ShiftMask)
-			selectitems(wid, index, previtem);
+			selectitems(widget, index, previtem);
 		else if (xev->state & ControlMask)
-			selectitem(wid, index, TRUE, 0);
+			selectitem(widget, index, TRUE, 0);
 		if (redrawall)
-			drawitems(wid);
+			drawitems(widget);
 		break;
 	default:
 		/*
@@ -2011,20 +2011,20 @@ draw:
 			break;
 		shift = FLAG(xev->state, ShiftMask);
 		(void)snprintf(*text, KSYM_BUFSIZE, "^%s%s", shift ? "S-" : "", kstr);
-		*nitems = fillselitems(wid, selitems, -1);
+		*nitems = fillselitems(widget, selitems, -1);
 		return WIDGET_KEYPRESS;
 	}
 	return WIDGET_NONE;
 }
 
 static WidgetEvent
-processevent(Widget *wid, XEvent *ev)
+processevent(Widget *widget, XEvent *ev)
 {
-	if (wid->selctx != NULL) {
-		switch (ctrlsel_send(wid->selctx, ev)) {
+	if (widget->selctx != NULL) {
+		switch (ctrlsel_send(widget->selctx, ev)) {
 		case CTRLSEL_LOST:
-			unselectitems(wid);
-			disownprimary(wid);
+			unselectitems(widget);
+			disownprimary(widget);
 			return WIDGET_INTERNAL;
 		case CTRLSEL_INTERNAL:
 			return WIDGET_INTERNAL;
@@ -2032,13 +2032,13 @@ processevent(Widget *wid, XEvent *ev)
 			break;
 		}
 	}
-	if (wid->dragctx != NULL) {
-		switch (ctrlsel_dndsend(wid->dragctx, ev)) {
+	if (widget->dragctx != NULL) {
+		switch (ctrlsel_dndsend(widget->dragctx, ev)) {
 		case CTRLSEL_SENT:
-			disowndnd(wid);
+			disowndnd(widget);
 			return WIDGET_REFRESH;
 		case CTRLSEL_LOST:
-			disowndnd(wid);
+			disowndnd(widget);
 			return WIDGET_INTERNAL;
 		case CTRLSEL_INTERNAL:
 			return WIDGET_INTERNAL;
@@ -2046,63 +2046,63 @@ processevent(Widget *wid, XEvent *ev)
 			break;
 		}
 	}
-	switch (ctrlsel_dndreceive(&wid->dropctx, ev)) {
+	switch (ctrlsel_dndreceive(&widget->dropctx, ev)) {
 	case CTRLSEL_RECEIVED:
-		FREE(wid->droptarget.buffer);
+		FREE(widget->droptarget.buffer);
 		return WIDGET_INTERNAL;
 	case CTRLSEL_INTERNAL:
 		return WIDGET_INTERNAL;
 	default:
 		break;
 	}
-	wid->redraw = FALSE;
+	widget->redraw = FALSE;
 	switch (ev->type) {
 	case ClientMessage:
-		if (ev->xclient.message_type == wid->atoms[WM_PROTOCOLS] &&
-		    (Atom)ev->xclient.data.l[0] == wid->atoms[WM_DELETE_WINDOW])
+		if (ev->xclient.message_type == widget->atoms[WM_PROTOCOLS] &&
+		    (Atom)ev->xclient.data.l[0] == widget->atoms[WM_DELETE_WINDOW])
 			return WIDGET_CLOSE;
 		return WIDGET_NONE;
 	case Expose:
 		if (ev->xexpose.count == 0)
-			commitdraw(wid);
+			commitdraw(widget);
 		break;
 	case ConfigureNotify:
-		if (calcsize(wid, ev->xconfigure.width, ev->xconfigure.height)) {
-			if (wid->row >= wid->nscreens)
-				setrow(wid, wid->nscreens - 1);
-			drawitems(wid);
+		if (calcsize(widget, ev->xconfigure.width, ev->xconfigure.height)) {
+			if (widget->row >= widget->nscreens)
+				setrow(widget, widget->nscreens - 1);
+			drawitems(widget);
 		}
 		break;
 	case PropertyNotify:
-		if (ev->xproperty.window != wid->win)
+		if (ev->xproperty.window != widget->window)
 			break;
 		if (ev->xproperty.state != PropertyNewValue)
 			break;
-		if (ev->xproperty.atom != wid->atoms[_CONTROL_GOTO])
+		if (ev->xproperty.atom != widget->atoms[_CONTROL_GOTO])
 			break;
-		FREE(wid->lasttext);
-		wid->lastprop = wid->atoms[_CONTROL_GOTO];
-		wid->lasttext = gettextprop(wid, wid->atoms[_CONTROL_GOTO]);
+		FREE(widget->lasttext);
+		widget->lastprop = widget->atoms[_CONTROL_GOTO];
+		widget->lasttext = gettextprop(widget, widget->atoms[_CONTROL_GOTO]);
 		break;
 	default:
 		return WIDGET_NONE;
 	}
-	endevent(wid);
+	endevent(widget);
 	return WIDGET_INTERNAL;
 }
 
 static WidgetEvent
-checklastprop(Widget *wid, char **text)
+checklastprop(Widget *widget, char **text)
 {
 	Atom prop;
 	char *str;
 
-	if (wid->lastprop != None) {
-		prop = wid->lastprop;
-		str = wid->lasttext;
-		wid->lastprop = None;
-		wid->lasttext = NULL;
-		if (prop == wid->atoms[_CONTROL_GOTO]) {
+	if (widget->lastprop != None) {
+		prop = widget->lastprop;
+		str = widget->lasttext;
+		widget->lastprop = None;
+		widget->lasttext = NULL;
+		if (prop == widget->atoms[_CONTROL_GOTO]) {
 			*text = str;
 			return WIDGET_GOTO;
 		} else {
@@ -2123,19 +2123,19 @@ checklastprop(Widget *wid, char **text)
  */
 
 static WidgetEvent
-scrollmode(Widget *wid, int x, int y)
+scrollmode(Widget *widget, int x, int y)
 {
 	XEvent ev;
 	int grabpos, pos, left;
 
-	wid->state = STATE_SCROLLING;
-	grabpos = wid->handlew / 2;             /* we grab the handle in its middle */
-	drawscroller(wid, gethandlepos(wid));
-	XMoveWindow(wid->dpy, wid->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
-	XMapRaised(wid->dpy, wid->scroller);
+	widget->state = STATE_SCROLLING;
+	grabpos = widget->handlew / 2;             /* we grab the handle in its middle */
+	drawscroller(widget, gethandlepos(widget));
+	XMoveWindow(widget->display, widget->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
+	XMapRaised(widget->display, widget->scroller);
 	left = FALSE;
-	while (!XNextEvent(wid->dpy, &ev)) {
-		switch (processevent(wid, &ev)) {
+	while (!XNextEvent(widget->display, &ev)) {
+		switch (processevent(widget, &ev)) {
 		case WIDGET_CLOSE:
 			return WIDGET_CLOSE;
 		case WIDGET_NONE:
@@ -2145,9 +2145,9 @@ scrollmode(Widget *wid, int x, int y)
 		}
 		switch (ev.type) {
 		case MotionNotify:
-			if (ev.xmotion.window == wid->scroller && (ev.xmotion.state & Button1Mask)) {
-				scrollerset(wid, ev.xmotion.y - grabpos);
-			} else if (ev.xmotion.window == wid->win &&
+			if (ev.xmotion.window == widget->scroller && (ev.xmotion.state & Button1Mask)) {
+				scrollerset(widget, ev.xmotion.y - grabpos);
+			} else if (ev.xmotion.window == widget->window &&
 			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
 				left = TRUE;
 			}
@@ -2159,15 +2159,15 @@ scrollmode(Widget *wid, int x, int y)
 		case ButtonPress:
 			if (ev.xbutton.button != Button1)
 				goto done;
-			if (ev.xbutton.window == wid->win)
+			if (ev.xbutton.window == widget->window)
 				goto done;
-			if (ev.xbutton.window == wid->scroller) {
+			if (ev.xbutton.window == widget->scroller) {
 				left = TRUE;
-				pos = gethandlepos(wid);
-				if (ev.xmotion.y < pos || ev.xmotion.y > pos + wid->handlew) {
+				pos = gethandlepos(widget);
+				if (ev.xmotion.y < pos || ev.xmotion.y > pos + widget->handlew) {
 					/* grab handle in the middle */
-					grabpos = wid->handlew / 2;
-					scrollerset(wid, ev.xmotion.y - grabpos);
+					grabpos = widget->handlew / 2;
+					scrollerset(widget, ev.xmotion.y - grabpos);
 				} else {
 					/* grab handle in position under pointer */
 					grabpos = ev.xmotion.y - pos;
@@ -2175,28 +2175,28 @@ scrollmode(Widget *wid, int x, int y)
 			}
 			break;
 		}
-		endevent(wid);
+		endevent(widget);
 	}
 done:
-	wid->state = STATE_NORMAL;
-	XUnmapWindow(wid->dpy, wid->scroller);
+	widget->state = STATE_NORMAL;
+	XUnmapWindow(widget->display, widget->scroller);
 	return WIDGET_NONE;
 }
 
 static WidgetEvent
-selmode(Widget *wid, Time lasttime, int shift, int clickx, int clicky)
+selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 {
 	XEvent ev;
 	int rectrow, rectydiff, ownsel;
 
-	wid->state = STATE_SELECTING;
-	rectrow = wid->row;
-	rectydiff = wid->ydiff;
+	widget->state = STATE_SELECTING;
+	rectrow = widget->row;
+	rectydiff = widget->ydiff;
 	ownsel = FALSE;
 	if (!shift)
-		unselectitems(wid);
-	while (!XNextEvent(wid->dpy, &ev)) {
-		switch (processevent(wid, &ev)) {
+		unselectitems(widget);
+	while (!XNextEvent(widget->display, &ev)) {
+		switch (processevent(widget, &ev)) {
 		case WIDGET_CLOSE:
 			return WIDGET_CLOSE;
 		case WIDGET_NONE:
@@ -2211,71 +2211,71 @@ selmode(Widget *wid, Time lasttime, int shift, int clickx, int clicky)
 		case MotionNotify:
 			if (ev.xmotion.time - lasttime < MOTION_TIME)
 				break;
-			rectdraw(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
-			if (rectselect(wid, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y))
+			rectdraw(widget, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
+			if (rectselect(widget, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y))
 				ownsel = TRUE;
-			commitdraw(wid);
+			commitdraw(widget);
 			lasttime = ev.xmotion.time;
 			break;
 		}
-		endevent(wid);
+		endevent(widget);
 	}
 done:
-	wid->state = STATE_NORMAL;
-	rectdraw(wid, 0, 0, 0, 0, 0, 0);
-	commitrectsel(wid);
-	commitdraw(wid);
+	widget->state = STATE_NORMAL;
+	rectdraw(widget, 0, 0, 0, 0, 0, 0);
+	commitrectsel(widget);
+	commitdraw(widget);
 	if (ownsel)
-		ownprimary(wid, ev.xbutton.time);
+		ownprimary(widget, ev.xbutton.time);
 	return WIDGET_NONE;
 }
 
 static WidgetEvent
-dragmode(Widget *wid, Time lasttime, int clicki, int *selitems, int *nitems)
+dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 {
 	struct Selection *sel;
 	Window dragwin;
 	unsigned int mask;
 	int state, i, x, y;
 
-	if (wid->sel == NULL)
+	if (widget->sel == NULL)
 		return WIDGET_NONE;
-	disowndnd(wid);
-	if ((wid->dragctx = malloc(sizeof(*wid->dragctx))) == NULL) {
+	disowndnd(widget);
+	if ((widget->dragctx = malloc(sizeof(*widget->dragctx))) == NULL) {
 		warn("malloc");
 		return WIDGET_NONE;
 	}
-	dragwin = createdragwin(wid, clicki);
+	dragwin = createdragwin(widget, clicki);
 	i = 0;
-	for (sel = wid->sel; sel != NULL; sel = sel->next)
-		i += snprintf(wid->dndbuf + i, wid->uribufsiz - i, "file://%s\r\n", wid->items[sel->index][ITEM_PATH]);
+	for (sel = widget->sel; sel != NULL; sel = sel->next)
+		i += snprintf(widget->dndbuf + i, widget->uribufsiz - i, "file://%s\r\n", widget->items[sel->index][ITEM_PATH]);
 	ctrlsel_filltarget(
-		wid->atoms[TEXT_URI_LIST],
-		wid->atoms[TEXT_URI_LIST],
-		8, (unsigned char *)wid->dndbuf, i,
-		&wid->dragtarget
+		widget->atoms[TEXT_URI_LIST],
+		widget->atoms[TEXT_URI_LIST],
+		8, (unsigned char *)widget->dndbuf, i,
+		&widget->dragtarget
 	);
 	state = ctrlsel_dndown(
-		wid->dpy,
-		wid->win,
+		widget->display,
+		widget->window,
 		dragwin,
 		lasttime,
-		&wid->dragtarget,
+		&widget->dragtarget,
 		1,
-		wid->dragctx
+		widget->dragctx
 	);
 	if (dragwin != None)
-		XDestroyWindow(wid->dpy, dragwin);
+		XDestroyWindow(widget->display, dragwin);
 	if (state != CTRLSEL_DROPOTHER)
-		FREE(wid->dragctx);
+		FREE(widget->dragctx);
 	if (state == CTRLSEL_ERROR) {
 		warnx("could not perform drag-and-drop");
 	} else if (state == CTRLSEL_DROPSELF) {
-		querypointer(wid, wid->win, &x, &y, &mask);
-		clicki = getpointerclick(wid, x, y);
+		querypointer(widget, widget->window, &x, &y, &mask);
+		clicki = getpointerclick(widget, x, y);
 		if (clicki < 1)
 			return WIDGET_NONE;
-		*nitems = fillselitems(wid, selitems, clicki);
+		*nitems = fillselitems(widget, selitems, clicki);
 		if (FLAG(mask, ControlMask|ShiftMask))
 			return WIDGET_DROPLINK;
 		if (FLAG(mask, ShiftMask))
@@ -2288,7 +2288,7 @@ dragmode(Widget *wid, Time lasttime, int clicki, int *selitems, int *nitems)
 }
 
 static WidgetEvent
-mainmode(Widget *wid, int *selitems, int *nitems, char **text)
+mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 {
 	XEvent ev;
 	Time lasttime = 0;
@@ -2298,20 +2298,20 @@ mainmode(Widget *wid, int *selitems, int *nitems, char **text)
 	int state;
 	int x, y;
 
-	while (!XNextEvent(wid->dpy, &ev)) {
-		switch (ctrlsel_dndreceive(&wid->dropctx, &ev)) {
+	while (!XNextEvent(widget->display, &ev)) {
+		switch (ctrlsel_dndreceive(&widget->dropctx, &ev)) {
 		case CTRLSEL_RECEIVED:
-			if (wid->droptarget.buffer == NULL)
+			if (widget->droptarget.buffer == NULL)
 				return WIDGET_INTERNAL;
-			*text = (char *)wid->droptarget.buffer;
+			*text = (char *)widget->droptarget.buffer;
 			*nitems = 1;
-			querypointer(wid, wid->win, &x, &y, NULL);
-			selitems[0] = getpointerclick(wid, x, y);
-			if (wid->droptarget.action == CTRLSEL_COPY)
+			querypointer(widget, widget->window, &x, &y, NULL);
+			selitems[0] = getpointerclick(widget, x, y);
+			if (widget->droptarget.action == CTRLSEL_COPY)
 				return WIDGET_DROPCOPY;
-			if (wid->droptarget.action == CTRLSEL_MOVE)
+			if (widget->droptarget.action == CTRLSEL_MOVE)
 				return WIDGET_DROPMOVE;
-			if (wid->droptarget.action == CTRLSEL_LINK)
+			if (widget->droptarget.action == CTRLSEL_LINK)
 				return WIDGET_DROPLINK;
 			return WIDGET_DROPASK;
 		case CTRLSEL_INTERNAL:
@@ -2319,7 +2319,7 @@ mainmode(Widget *wid, int *selitems, int *nitems, char **text)
 		default:
 			break;
 		}
-		switch ((state = processevent(wid, &ev))) {
+		switch ((state = processevent(widget, &ev))) {
 		case WIDGET_CLOSE:
 		case WIDGET_REFRESH:
 			return state;
@@ -2328,40 +2328,40 @@ mainmode(Widget *wid, int *selitems, int *nitems, char **text)
 		default:
 			continue;
 		}
-		if ((state = checklastprop(wid, text)) != WIDGET_NONE)
+		if ((state = checklastprop(widget, text)) != WIDGET_NONE)
 			return state;
 		switch (ev.type) {
 		case KeyPress:
-			state = keypress(wid, &ev.xkey, selitems, nitems, text);
+			state = keypress(widget, &ev.xkey, selitems, nitems, text);
 			if (state != WIDGET_NONE)
 				return state;
 			break;
 		case ButtonPress:
 			clickx = ev.xbutton.x;
 			clicky = ev.xbutton.y;
-			if (ev.xbutton.window != wid->win)
+			if (ev.xbutton.window != widget->window)
 				break;
 			if (ev.xbutton.button == Button1) {
-				clicki = mouse1click(wid, &ev.xbutton);
+				clicki = mouse1click(widget, &ev.xbutton);
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
-				if (scroll(wid, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
-					drawitems(wid);
-				commitdraw(wid);
+				if (scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
+					drawitems(widget);
+				commitdraw(widget);
 			} else if (ev.xbutton.button == Button2) {
-				state = scrollmode(wid, ev.xmotion.x, ev.xmotion.y);
+				state = scrollmode(widget, ev.xmotion.x, ev.xmotion.y);
 				if (state != WIDGET_NONE)
 					return state;
 			} else if (ev.xbutton.button == Button3) {
-				mouse3click(wid, ev.xbutton.x, ev.xbutton.y);
-				*nitems = fillselitems(wid, selitems, -1);
-				commitdraw(wid);
-				XUngrabPointer(wid->dpy, ev.xbutton.time);
-				XFlush(wid->dpy);
+				mouse3click(widget, ev.xbutton.x, ev.xbutton.y);
+				*nitems = fillselitems(widget, selitems, -1);
+				commitdraw(widget);
+				XUngrabPointer(widget->display, ev.xbutton.time);
+				XFlush(widget->display);
 				return WIDGET_CONTEXT;
 			}
 			break;
 		case ButtonRelease:
-			if (ev.xbutton.window != wid->win)
+			if (ev.xbutton.window != widget->window)
 				break;
 			if (ev.xbutton.button == BUTTON8)
 				return WIDGET_PREV;
@@ -2375,10 +2375,10 @@ mainmode(Widget *wid, int *selitems, int *nitems, char **text)
 				lasttime = ev.xbutton.time;
 				break;
 			}
-			*nitems = fillselitems(wid, selitems, wid->highlight);
+			*nitems = fillselitems(widget, selitems, widget->highlight);
 			return WIDGET_OPEN;
 		case MotionNotify:
-			if (ev.xmotion.window != wid->win)
+			if (ev.xmotion.window != widget->window)
 				break;
 			if (ev.xmotion.state != Button1Mask &&
 			    ev.xmotion.state != (Button1Mask|ShiftMask) &&
@@ -2387,9 +2387,9 @@ mainmode(Widget *wid, int *selitems, int *nitems, char **text)
 			if (diff(ev.xmotion.x, clickx) * diff(ev.xmotion.y, clicky) < DRAG_SQUARE)
 				break;
 			if (clicki == -1) {
-				state = selmode(wid, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
+				state = selmode(widget, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
 			} else if (clicki > 0) {
-				state = dragmode(wid, ev.xmotion.time, clicki, selitems, nitems);
+				state = dragmode(widget, ev.xmotion.time, clicki, selitems, nitems);
 			}
 			if (state != WIDGET_NONE)
 				return state;
@@ -2397,7 +2397,7 @@ mainmode(Widget *wid, int *selitems, int *nitems, char **text)
 		default:
 			break;
 		}
-		endevent(wid);
+		endevent(widget);
 	}
 	return WIDGET_CLOSE;
 }
@@ -2411,11 +2411,11 @@ mainmode(Widget *wid, int *selitems, int *nitems, char **text)
 Widget *
 initwidget(const char *class, const char *name, const char *geom, int argc, char *argv[])
 {
-	Widget *wid;
+	Widget *widget;
 	int success;
 	char *progname, *s;
 
-	wid = NULL;
+	widget = NULL;
 	progname = "";
 	if (argc > 0 && argv[0] != NULL) {
 		progname = argv[0];
@@ -2425,16 +2425,16 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	}
 	if (name == NULL)
 		name = progname;
-	if ((wid = malloc(sizeof(*wid))) == NULL) {
+	if ((widget = malloc(sizeof(*widget))) == NULL) {
 		warn("malloc");
 		return NULL;
 	}
-	*wid = (struct Widget){
+	*widget = (struct Widget){
 		.progname = progname,
-		.dpy = NULL,
+		.display = NULL,
 		.start = FALSE,
 		.redraw = FALSE,
-		.win = None,
+		.window = None,
 		.scroller = None,
 		.lock = PTHREAD_MUTEX_INITIALIZER,
 		.draw = NULL,
@@ -2473,239 +2473,239 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		warnx("could not set locale");
 		goto error;
 	}
-	if ((wid->dpy = XOpenDisplay(NULL)) == NULL) {
+	if ((widget->display = XOpenDisplay(NULL)) == NULL) {
 		warnx("could not connect to X server");
 		goto error;
 	}
-	xinitvisual(wid);
-	XInternAtoms(wid->dpy, atomnames, ATOM_LAST, False, wid->atoms);
-	if (fcntl(XConnectionNumber(wid->dpy), F_SETFD, FD_CLOEXEC) == -1) {
+	xinitvisual(widget);
+	XInternAtoms(widget->display, atomnames, ATOM_LAST, False, widget->atoms);
+	if (fcntl(XConnectionNumber(widget->display), F_SETFD, FD_CLOEXEC) == -1) {
 		warn("fcntl");
 		goto error;
 	}
-	if (inittheme(wid, class, name) == -1) {
+	if (inittheme(widget, class, name) == -1) {
 		warnx("could not set theme");
 		goto error;
 	}
-	if (createwin(wid, class, name, geom, argc, argv, winicon_data, winicon_size) == -1) {
+	if (createwin(widget, class, name, geom, argc, argv, winicon_data, winicon_size) == -1) {
 		warnx("could not create window");
 		goto error;
 	}
-	if ((wid->gc = XCreateGC(wid->dpy, wid->win, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
+	if ((widget->gc = XCreateGC(widget->display, widget->window, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
 		warnx("could not create graphics context");
 		goto error;
 	}
-	wid->scroller = XCreateWindow(
-		wid->dpy, wid->win,
+	widget->scroller = XCreateWindow(
+		widget->display, widget->window,
 		0, 0, SCROLLER_SIZE, SCROLLER_SIZE, 1,
-		wid->depth, InputOutput, wid->visual,
+		widget->depth, InputOutput, widget->visual,
 		CWBackPixel | CWBorderPixel | CWEventMask | CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
-			.colormap = wid->colormap,
+			.colormap = widget->colormap,
 			.background_pixel = 0,
-			.border_pixel = wid->colors[SELECT_NOT][COLOR_FG].pixel,
+			.border_pixel = widget->colors[SELECT_NOT][COLOR_FG].pixel,
 			.event_mask = ButtonPressMask | PointerMotionMask,
 		}
 	);
-	if (wid->scroller == None) {
+	if (widget->scroller == None) {
 		warnx("could not create window");
 		goto error;
 	}
-	if ((wid->stipple = XCreatePixmap(wid->dpy, wid->win, STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None) {
+	if ((widget->stipple = XCreatePixmap(widget->display, widget->window, STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None) {
 		warnx("could not create pixmap");
 		goto error;
 	}
-	if ((wid->stipgc = XCreateGC(wid->dpy, wid->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
+	if ((widget->stipgc = XCreateGC(widget->display, widget->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
 		warnx("could not create graphics context");
 		goto error;
 	}
 	ctrlsel_filltarget(
-		wid->atoms[TEXT_URI_LIST],
-		wid->atoms[TEXT_URI_LIST],
+		widget->atoms[TEXT_URI_LIST],
+		widget->atoms[TEXT_URI_LIST],
 		0, NULL, 0,
-		&wid->droptarget
+		&widget->droptarget
 	);
 	success = ctrlsel_dndwatch(
-		wid->dpy,
-		wid->win,
+		widget->display,
+		widget->window,
 		CTRLSEL_COPY | CTRLSEL_MOVE | CTRLSEL_LINK | CTRLSEL_ASK,
-		&wid->droptarget,
+		&widget->droptarget,
 		1,
-		&wid->dropctx
+		&widget->dropctx
 	);
 	if (!success) {
-		ctrlsel_dndclose(&wid->dropctx);
+		ctrlsel_dndclose(&widget->dropctx);
 		goto error;
 	}
-	XSetForeground(wid->dpy, wid->stipgc, 0);
-	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
-	XSetForeground(wid->dpy, wid->stipgc, 1);
-	XFillRectangle(wid->dpy, wid->stipple, wid->stipgc, 0, 0, 1, 1);
-	XSetStipple(wid->dpy, wid->gc, wid->stipple);
-	wid->busycursor = XCreateFontCursor(wid->dpy, XC_watch);
-	return wid;
+	XSetForeground(widget->display, widget->stipgc, 0);
+	XFillRectangle(widget->display, widget->stipple, widget->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
+	XSetForeground(widget->display, widget->stipgc, 1);
+	XFillRectangle(widget->display, widget->stipple, widget->stipgc, 0, 0, 1, 1);
+	XSetStipple(widget->display, widget->gc, widget->stipple);
+	widget->busycursor = XCreateFontCursor(widget->display, XC_watch);
+	return widget;
 error:
-	if (wid->stipple != None)
-		XFreePixmap(wid->dpy, wid->stipple);
-	if (wid->scroller != None)
-		XDestroyWindow(wid->dpy, wid->scroller);
-	if (wid->win != None)
-		XDestroyWindow(wid->dpy, wid->win);
-	if (wid->dpy != NULL)
-		XCloseDisplay(wid->dpy);
-	FREE(wid);
+	if (widget->stipple != None)
+		XFreePixmap(widget->display, widget->stipple);
+	if (widget->scroller != None)
+		XDestroyWindow(widget->display, widget->scroller);
+	if (widget->window != None)
+		XDestroyWindow(widget->display, widget->window);
+	if (widget->display != NULL)
+		XCloseDisplay(widget->display);
+	FREE(widget);
 	return NULL;
 }
 
 int
-setwidget(Widget *wid, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
+setwidget(Widget *widget, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
 {
 	size_t i;
 
-	XUndefineCursor(wid->dpy, wid->win);
-	cleanwidget(wid);
-	wid->items = items;
-	wid->nitems = nitems;
-	wid->itemicons = itemicons;
+	XUndefineCursor(widget->display, widget->window);
+	cleanwidget(widget);
+	widget->items = items;
+	widget->nitems = nitems;
+	widget->itemicons = itemicons;
 	if (scrl == NULL) {
-		wid->ydiff = 0;
-		wid->row = 0;
+		widget->ydiff = 0;
+		widget->row = 0;
 	} else {
-		wid->ydiff = scrl->ydiff;
-		wid->row = scrl->row;
+		widget->ydiff = scrl->ydiff;
+		widget->row = scrl->row;
 	}
-	wid->title = title;
-	wid->highlight = -1;
-	(void)calcsize(wid, -1, -1);
-	if (scrl != NULL && wid->row >= wid->nscreens) {
-		wid->ydiff = 0;
-		setrow(wid, wid->nscreens);
+	widget->title = title;
+	widget->highlight = -1;
+	(void)calcsize(widget, -1, -1);
+	if (scrl != NULL && widget->row >= widget->nscreens) {
+		widget->ydiff = 0;
+		setrow(widget, widget->nscreens);
 	}
-	if ((wid->issel = calloc(wid->nitems, sizeof(*wid->issel))) == NULL) {
+	if ((widget->issel = calloc(widget->nitems, sizeof(*widget->issel))) == NULL) {
 		warn("calloc");
 		goto error;
 	}
-	if ((wid->linelen = calloc(wid->nitems, sizeof(*wid->linelen))) == NULL) {
+	if ((widget->linelen = calloc(widget->nitems, sizeof(*widget->linelen))) == NULL) {
 		warn("calloc");
 		goto error;
 	}
-	if ((wid->nlines = calloc(wid->nitems, sizeof(*wid->nlines))) == NULL) {
+	if ((widget->nlines = calloc(widget->nitems, sizeof(*widget->nlines))) == NULL) {
 		warn("calloc");
 		goto error;
 	}
-	if ((wid->thumbs = malloc(nitems * sizeof(*wid->thumbs))) == NULL) {
+	if ((widget->thumbs = malloc(nitems * sizeof(*widget->thumbs))) == NULL) {
 		warn("malloc");
 		goto error;
 	}
-	wid->selbufsiz = 0;
+	widget->selbufsiz = 0;
 	for (i = 0; i < nitems; i++) {
-		wid->thumbs[i] = NULL;
-		wid->selbufsiz += strlen(items[i][ITEM_PATH]) + 1; /* +1 for '\n' */
+		widget->thumbs[i] = NULL;
+		widget->selbufsiz += strlen(items[i][ITEM_PATH]) + 1; /* +1 for '\n' */
 	}
-	if ((wid->selbuf = malloc(wid->selbufsiz)) == NULL) {
+	if ((widget->selbuf = malloc(widget->selbufsiz)) == NULL) {
 		warn("malloc");
 		goto error;
 	}
-	wid->uribufsiz = wid->selbufsiz + (nitems * 8);         /* 8 for "file://\r" */
-	if ((wid->uribuf = malloc(wid->uribufsiz)) == NULL) {
+	widget->uribufsiz = widget->selbufsiz + (nitems * 8);         /* 8 for "file://\r" */
+	if ((widget->uribuf = malloc(widget->uribufsiz)) == NULL) {
 		warn("malloc");
 		goto error;
 	}
-	if ((wid->dndbuf = malloc(wid->uribufsiz)) == NULL) {
+	if ((widget->dndbuf = malloc(widget->uribufsiz)) == NULL) {
 		warn("malloc");
 		goto error;
 	}
-	wid->thumbhead = NULL;
-	settitle(wid);
-	drawitems(wid);
-	commitdraw(wid);
+	widget->thumbhead = NULL;
+	settitle(widget);
+	drawitems(widget);
+	commitdraw(widget);
 	return RETURN_SUCCESS;
 error:
-	cleanwidget(wid);
+	cleanwidget(widget);
 	return RETURN_FAILURE;
 }
 
 void
-mapwidget(Widget *wid)
+mapwidget(Widget *widget)
 {
-	XMapWindow(wid->dpy, wid->win);
+	XMapWindow(widget->display, widget->window);
 }
 
 WidgetEvent
-pollwidget(Widget *wid, int *selitems, int *nitems, Scroll *scrl, char **text)
+pollwidget(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **text)
 {
 	XEvent ev;
 	int retval;
 
 	*text = NULL;
-	wid->droptarget.buffer = NULL;
-	while (wid->start && XPending(wid->dpy) > 0) {
-		(void)XNextEvent(wid->dpy, &ev);
-		if (processevent(wid, &ev) == WIDGET_CLOSE) {
-			endevent(wid);
+	widget->droptarget.buffer = NULL;
+	while (widget->start && XPending(widget->display) > 0) {
+		(void)XNextEvent(widget->display, &ev);
+		if (processevent(widget, &ev) == WIDGET_CLOSE) {
+			endevent(widget);
 			return WIDGET_CLOSE;
 		}
 	}
-	wid->start = TRUE;
-	if ((retval = checklastprop(wid, text)) == WIDGET_NONE)
-		retval = mainmode(wid, selitems, nitems, text);
-	endevent(wid);
-	scrl->ydiff = wid->ydiff;
-	scrl->row = wid->row;
+	widget->start = TRUE;
+	if ((retval = checklastprop(widget, text)) == WIDGET_NONE)
+		retval = mainmode(widget, selitems, nitems, text);
+	endevent(widget);
+	scrl->ydiff = widget->ydiff;
+	scrl->row = widget->row;
 	return retval;
 }
 
 void
-closewidget(Widget *wid)
+closewidget(Widget *widget)
 {
 	int i, j;
 
-	ctrlsel_dndclose(&wid->dropctx);
-	cleanwidget(wid);
-	for (i = 0; i < wid->nicons; i++) {
-		if (wid->icons[i].pix != None) {
-			XFreePixmap(wid->dpy, wid->icons[i].pix);
+	ctrlsel_dndclose(&widget->dropctx);
+	cleanwidget(widget);
+	for (i = 0; i < widget->nicons; i++) {
+		if (widget->icons[i].pix != None) {
+			XFreePixmap(widget->display, widget->icons[i].pix);
 		}
-		if (wid->icons[i].mask != None) {
-			XFreePixmap(wid->dpy, wid->icons[i].mask);
+		if (widget->icons[i].mask != None) {
+			XFreePixmap(widget->display, widget->icons[i].mask);
 		}
 	}
-	FREE(wid->icons);
-	if (wid->draw != NULL)
-		XftDrawDestroy(wid->draw);
-	if (wid->pix != None)
-		XFreePixmap(wid->dpy, wid->pix);
-	if (wid->rectbord != None)
-		XFreePixmap(wid->dpy, wid->rectbord);
-	if (wid->namepix != None)
-		XFreePixmap(wid->dpy, wid->namepix);
-	if (wid->stipple != None)
-		XFreePixmap(wid->dpy, wid->stipple);
+	FREE(widget->icons);
+	if (widget->draw != NULL)
+		XftDrawDestroy(widget->draw);
+	if (widget->pix != None)
+		XFreePixmap(widget->display, widget->pix);
+	if (widget->rectbord != None)
+		XFreePixmap(widget->display, widget->rectbord);
+	if (widget->namepix != None)
+		XFreePixmap(widget->display, widget->namepix);
+	if (widget->stipple != None)
+		XFreePixmap(widget->display, widget->stipple);
 	for (i = 0; i < SELECT_LAST; i++)
 		for (j = 0; j < COLOR_LAST; j++)
-			XftColorFree(wid->dpy, wid->visual, wid->colormap, &wid->colors[i][j]);
-	XftFontClose(wid->dpy, wid->font);
-	XDestroyWindow(wid->dpy, wid->scroller);
-	XDestroyWindow(wid->dpy, wid->win);
-	XFreeGC(wid->dpy, wid->stipgc);
-	XFreeGC(wid->dpy, wid->gc);
-	XCloseDisplay(wid->dpy);
-	FREE(wid);
+			XftColorFree(widget->display, widget->visual, widget->colormap, &widget->colors[i][j]);
+	XftFontClose(widget->display, widget->font);
+	XDestroyWindow(widget->display, widget->scroller);
+	XDestroyWindow(widget->display, widget->window);
+	XFreeGC(widget->display, widget->stipgc);
+	XFreeGC(widget->display, widget->gc);
+	XCloseDisplay(widget->display);
+	FREE(widget);
 }
 
 int
-widopenicons(Widget *wid, char **xpms[], int nxpms)
+widopenicons(Widget *widget, char **xpms[], int nxpms)
 {
 	int retval, i;
 
-	wid->nicons = nxpms;
-	if ((wid->icons = calloc(wid->nicons, sizeof(*wid->icons))) == NULL) {
+	widget->nicons = nxpms;
+	if ((widget->icons = calloc(widget->nicons, sizeof(*widget->icons))) == NULL) {
 		warn("calloc");
 		return RETURN_FAILURE;
 	}
 	retval = RETURN_SUCCESS;
-	for (i = 0; i < wid->nicons; i++) {
-		if (pixmapfromdata(wid, xpms[i], &wid->icons[i].pix, &wid->icons[i].mask) == RETURN_FAILURE) {
+	for (i = 0; i < widget->nicons; i++) {
+		if (pixmapfromdata(widget, xpms[i], &widget->icons[i].pix, &widget->icons[i].mask) == RETURN_FAILURE) {
 			warnx("could not open %d-th default icon pixmap", i);
 			retval = RETURN_FAILURE;
 		}
@@ -2714,7 +2714,7 @@ widopenicons(Widget *wid, char **xpms[], int nxpms)
 }
 
 void
-setthumbnail(Widget *wid, char *path, int item)
+setthumbnail(Widget *widget, char *path, int item)
 {
 	FILE *fp;
 	size_t size, i;
@@ -2722,10 +2722,10 @@ setthumbnail(Widget *wid, char *path, int item)
 	char buf[DATA_DEPTH];
 	unsigned char *data;
 
-	if (item < 0 || item >= wid->nitems || wid->thumbs == NULL)
+	if (item < 0 || item >= widget->nitems || widget->thumbs == NULL)
 		return;
 	data = NULL;
-	wid->thumbs[item] = NULL;
+	widget->thumbs[item] = NULL;
 	if ((fp = fopen(path, "rb")) == NULL) {
 		warn("%s", path);
 		goto error;
@@ -2761,53 +2761,53 @@ setthumbnail(Widget *wid, char *path, int item)
 	}
 	fclose(fp);
 	fp = NULL;
-	if ((wid->thumbs[item] = malloc(sizeof(*wid->thumbs[item]))) == NULL) {
+	if ((widget->thumbs[item] = malloc(sizeof(*widget->thumbs[item]))) == NULL) {
 		warn("malloc");
 		goto error;
 	}
-	*wid->thumbs[item] = (struct Thumb){
+	*widget->thumbs[item] = (struct Thumb){
 		.w = w,
 		.h = h,
 		.img = NULL,
-		.next = wid->thumbhead,
+		.next = widget->thumbhead,
 	};
-	wid->thumbs[item]->img = XCreateImage(
-		wid->dpy,
-		wid->visual,
-		wid->depth,
+	widget->thumbs[item]->img = XCreateImage(
+		widget->display,
+		widget->visual,
+		widget->depth,
 		ZPixmap,
 		0, (char *)data,
 		w, h,
 		DATA_DEPTH * BYTE,
 		0
 	);
-	if (wid->thumbs[item]->img == NULL) {
+	if (widget->thumbs[item]->img == NULL) {
 		warnx("%s: could not allocate XImage", path);
 		goto error;
 	}
-	XInitImage(wid->thumbs[item]->img);
-	wid->thumbhead = wid->thumbs[item];
-	if (item >= wid->row * wid->ncols && item < wid->row * wid->ncols + wid->nrows * wid->ncols) {
-		drawitem(wid, item);
-		commitdraw(wid);
+	XInitImage(widget->thumbs[item]->img);
+	widget->thumbhead = widget->thumbs[item];
+	if (item >= widget->row * widget->ncols && item < widget->row * widget->ncols + widget->nrows * widget->ncols) {
+		drawitem(widget, item);
+		commitdraw(widget);
 	}
 	return;
 error:
 	if (fp != NULL)
 		fclose(fp);
 	FREE(data);
-	FREE(wid->thumbs[item]);
+	FREE(widget->thumbs[item]);
 }
 
 void
-widget_busy(Widget *wid)
+widget_busy(Widget *widget)
 {
-	XDefineCursor(wid->dpy, wid->win, wid->busycursor);
-	XFlush(wid->dpy);
+	XDefineCursor(widget->display, widget->window, widget->busycursor);
+	XFlush(widget->display);
 }
 
 unsigned long
-widgetwinid(Widget *wid)
+widgetwinid(Widget *widget)
 {
-	return (unsigned long)wid->win;
+	return (unsigned long)widget->window;
 }
