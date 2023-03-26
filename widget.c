@@ -25,6 +25,21 @@
 #include "widget.h"
 #include "winicon.data"         /* window icon, for the window manager */
 
+#define ATOMS                           \
+	X(TEXT_URI_LIST)                \
+	X(UTF8_STRING)                  \
+	X(WM_PROTOCOLS)                 \
+	X(WM_DELETE_WINDOW)             \
+	X(_NET_WM_ICON)                 \
+	X(_NET_WM_NAME)                 \
+	X(_NET_WM_PID)                  \
+	X(_NET_WM_WINDOW_TYPE)          \
+	X(_NET_WM_WINDOW_TYPE_DND)      \
+	X(_NET_WM_WINDOW_TYPE_NORMAL)   \
+	X(_NET_WM_WINDOW_OPACITY)       \
+	X(_CONTROL_CWD)                 \
+	X(_CONTROL_GOTO)
+
 #define NCLIENTMSG_DATA 5               /* number of members on a the .data.l[] array of a XClientMessageEvent */
 
 /* free and set to null */
@@ -146,42 +161,11 @@ enum {
 	COLOR_LAST,
 };
 
-enum {
-	/* selection targets */
-	TEXT_URI_LIST,
-	UTF8_STRING,
-	COMPOUND_TEXT,
-	DELETE,
-	INCR,
-	MULTIPLE,
-	TARGETS,
-	TEXT,
-	TIMESTAMP,
-
-	/* selection properties */
-	ATOM_PAIR,
-
-	/* window protocols */
-	WM_PROTOCOLS,
-	WM_DELETE_WINDOW,
-
-	/* window properties */
-	_NET_WM_ICON,
-	_NET_WM_NAME,
-	_NET_WM_PID,
-	_NET_WM_WINDOW_TYPE,
-	_NET_WM_WINDOW_TYPE_DND,
-	_NET_WM_WINDOW_TYPE_NORMAL,
-	_NET_WM_WINDOW_OPACITY,
-
-	/* widget control properties */
-	_CONTROL_CWD,
-	_CONTROL_GOTO,
-
-	/* others */
-	_NULL,
-
-	ATOM_LAST,
+enum Atoms {
+#define X(atom) atom,
+	ATOMS
+	NATOMS
+#undef  X
 };
 
 struct Icon {
@@ -206,7 +190,7 @@ struct Widget {
 
 	/* X11 stuff */
 	Display *display;
-	Atom atoms[ATOM_LAST];
+	Atom atoms[NATOMS];
 	GC stipgc, gc;
 	Cursor busycursor;
 	Window window;
@@ -365,31 +349,6 @@ struct Widget {
 		STATE_SCROLLING,
 		STATE_DRAGGING,
 	} state;
-};
-
-static char *atomnames[ATOM_LAST] = {
-	[TEXT_URI_LIST]              = "text/uri-list",
-	[ATOM_PAIR]                  = "ATOM_PAIR",
-	[COMPOUND_TEXT]              = "COMPOUND_TEXT",
-	[UTF8_STRING]                = "UTF8_STRING",
-	[WM_PROTOCOLS]               = "WM_PROTOCOLS",
-	[WM_DELETE_WINDOW]           = "WM_DELETE_WINDOW",
-	[DELETE]                     = "DELETE",
-	[INCR]                       = "INCR",
-	[MULTIPLE]                   = "MULTIPLE",
-	[TARGETS]                    = "TARGETS",
-	[TEXT]                       = "TEXT",
-	[TIMESTAMP]                  = "TIMESTAMP",
-	[_NET_WM_ICON]               = "_NET_WM_ICON",
-	[_NET_WM_NAME]               = "_NET_WM_NAME",
-	[_NET_WM_PID]                = "_NET_WM_PID",
-	[_NET_WM_WINDOW_TYPE]        = "_NET_WM_WINDOW_TYPE",
-	[_NET_WM_WINDOW_TYPE_DND]    = "_NET_WM_WINDOW_TYPE_DND",
-	[_NET_WM_WINDOW_TYPE_NORMAL] = "_NET_WM_WINDOW_TYPE_NORMAL",
-	[_NET_WM_WINDOW_OPACITY]     = "_NET_WM_WINDOW_OPACITY",
-	[_CONTROL_CWD]               = "_CONTROL_CWD",
-	[_CONTROL_GOTO]              = "_CONTROL_GOTO",
-	[_NULL]                      = "NULL",
 };
 
 static int
@@ -2414,6 +2373,11 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	Widget *widget;
 	int success;
 	char *progname, *s;
+	static char *atomnames[] = {
+#define X(atom) [atom] = #atom,
+		ATOMS
+#undef  X
+	};
 
 	widget = NULL;
 	progname = "";
@@ -2478,7 +2442,7 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		goto error;
 	}
 	xinitvisual(widget);
-	XInternAtoms(widget->display, atomnames, ATOM_LAST, False, widget->atoms);
+	XInternAtoms(widget->display, atomnames, NATOMS, False, widget->atoms);
 	if (fcntl(XConnectionNumber(widget->display), F_SETFD, FD_CLOEXEC) == -1) {
 		warn("fcntl");
 		goto error;
