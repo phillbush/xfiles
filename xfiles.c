@@ -27,11 +27,9 @@
 #define MENU             "menu"
 
 #define APPCLASS         "XFiles"
-#define WINDOWID         "WINDOWID"
 #define URI_PREFIX       "file://"
 #define INCRSIZE         512
 #define NCMDARGS         3
-#define WINDOWID_BUFSIZE 16
 #define DEF_OPENER       "xdg-open"
 #define THUMBNAILDIR     "XFILES_THUMBNAILDIR"
 #define CONTEXTCMD       "xfilesctl"
@@ -866,7 +864,6 @@ main(int argc, char *argv[])
 	char *path = NULL;
 	char *home = NULL;
 	char **saveargv;
-	char winid[WINDOWID_BUFSIZE];
 	char *text;
 	WidgetEvent event;
 
@@ -925,12 +922,6 @@ main(int argc, char *argv[])
 	initthumbnailer(&fm);
 	if ((fm.widget = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
-	(void)snprintf(winid, WINDOWID_BUFSIZE, "%lu", widgetwinid(fm.widget));
-	if (setenv(WINDOWID, winid, TRUE) == RETURN_FAILURE) {
-		warn("setenv");
-		exitval = EXIT_FAILURE;
-		goto error;
-	}
 	if (openicons(&fm) == RETURN_FAILURE)
 		goto error;
 	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)

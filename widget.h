@@ -47,8 +47,6 @@ Widget *initwidget(
 	char *argv[]
 );
 
-unsigned long widgetwinid(Widget *widget);
-
 int widopenicons(Widget *widget, char **xpms[], int nxpms);
 
 int setwidget(

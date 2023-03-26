@@ -361,6 +361,7 @@ createwin(Widget *widget, const char *class, const char *name, const char *geom,
 	int dx, dy;
 	int flags, sizehints;
 	pid_t pid;
+	char buf[16]; /* 16 digits in a 32-bit number + the final '\0' */
 
 	x = y = 0;
 	widget->w = DEF_WIDTH;
@@ -470,6 +471,9 @@ createwin(Widget *widget, const char *class, const char *name, const char *geom,
 		(unsigned char *)&pid,
 		1
 	);
+	(void)snprintf(buf, LEN(buf), "%lu", (unsigned long)widget->window);
+	if (setenv("WINDOWID", buf, TRUE) == RETURN_FAILURE)
+		warn("setenv");
 	return RETURN_SUCCESS;
 }
 
@@ -2768,10 +2772,4 @@ widget_busy(Widget *widget)
 {
 	XDefineCursor(widget->display, widget->window, widget->busycursor);
 	XFlush(widget->display);
-}
-
-unsigned long
-widgetwinid(Widget *widget)
-{
-	return (unsigned long)widget->window;
 }
