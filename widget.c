@@ -62,6 +62,10 @@
 /* opacity of drag-and-drop mini window */
 #define DND_OPACITY     0x7FFFFFFF
 
+/* opacity of rectangular selection */
+#define SEL_OPACITY     0xC000
+#define RECT_OPACITY    0x4000
+
 /* constants to check a .ppm file */
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
@@ -161,7 +165,17 @@ enum {
 	COLOR_LAST,
 };
 
-enum Atoms {
+enum Layer {
+	LAYER_CANVAS,
+	LAYER_BACKGROUND,
+	LAYER_ICONS,
+	LAYER_SELECTION,        // XXX: replace it with a repeating color picture
+	LAYER_SELALPHA,
+	LAYER_RECTALPHA,
+	LAYER_LAST,
+};
+
+enum Atom {
 #define X(atom) atom,
 	ATOMS
 	NATOMS
@@ -195,6 +209,7 @@ struct Widget {
 	Cursor busycursor;
 	Window window;
 	XftColor colors[SELECT_LAST][COLOR_LAST];
+	XRenderPictFormat *format;
 	XftFont *font;
 	Visual *visual;
 	Colormap colormap;
@@ -203,17 +218,13 @@ struct Widget {
 	Atom lastprop;
 	char *lasttext;
 
-	Pixmap pix;                     /* the pixmap of the icon grid */
+	struct {
+		Pixmap pix;
+		Picture pict;
+	} layers[LAYER_LAST];
+
 	Pixmap namepix;                 /* temporary pixmap for the labels */
 	Pixmap stipple;                 /* stipple for painting icons of selected items */
-	Pixmap rectbord;                /* rectangular selection border */
-
-	XftDraw *draw;                  /* used for drawing with alpha channel */
-
-	/*
-	 * Size of the rectbord pixmap.
-	 */
-	int rectw, recth;
 
 	/*
 	 * Lock used for synchronizing the thumbnail and the main threads.
@@ -351,11 +362,39 @@ struct Widget {
 	} state;
 };
 
+static void
+resetlayer(Widget *widget, enum Layer layer, int width, int height)
+{
+	if (widget->layers[layer].pix != None)
+		XFreePixmap(widget->display, widget->layers[layer].pix);
+	if (widget->layers[layer].pict != None)
+		XRenderFreePicture(widget->display, widget->layers[layer].pict);
+	widget->layers[layer].pix = XCreatePixmap(
+		widget->display,
+		widget->window,
+		width,
+		height,
+		widget->depth
+	);
+	widget->layers[layer].pict = XRenderCreatePicture(
+		widget->display,
+		widget->layers[layer].pix,
+		widget->format,
+		0,
+		NULL
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpClear,
+		widget->layers[layer].pict,
+		&(XRenderColor){ 0 },
+		0, 0, widget->w, widget->h
+	);
+}
+
 static int
 createwin(Widget *widget, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
 {
-	XftDraw *draw;
-	Pixmap bg;
 	unsigned int dw, dh;
 	int x, y;
 	int dx, dy;
@@ -412,20 +451,6 @@ createwin(Widget *widget, const char *class, const char *name, const char *geom,
 	);
 	if (widget->window == None)
 		return RETURN_FAILURE;
-	bg = XCreatePixmap(
-		widget->display,
-		widget->window,
-		THUMBSIZE,
-		THUMBSIZE,
-		widget->depth
-	);
-	if (bg == None)
-		return RETURN_FAILURE;
-	draw = XftDrawCreate(widget->display, bg, widget->visual, widget->colormap);
-	XftDrawRect(draw, &widget->colors[SELECT_NOT][COLOR_BG], 0, 0, THUMBSIZE, THUMBSIZE);
-	XftDrawDestroy(draw);
-	XSetWindowBackgroundPixmap(widget->display, widget->window, bg);
-	XFreePixmap(widget->display, bg);
 	widget->namepix = XCreatePixmap(
 		widget->display,
 		widget->window,
@@ -632,6 +657,7 @@ calcsize(Widget *widget, int w, int h)
 	ret = FALSE;
 	if (widget->w == w && widget->h == h)
 		return FALSE;
+	widget->redraw = TRUE;
 	etlock(&widget->lock);
 	ncols = widget->ncols;
 	nrows = widget->nrows;
@@ -652,23 +678,30 @@ calcsize(Widget *widget, int w, int h)
 	if (widget->handlew == HANDLE_MAX_SIZE && ALL_ROWS(widget) > WIN_ROWS(widget))
 		widget->handlew = HANDLE_MAX_SIZE - 1;
 	if (ncols != widget->ncols || nrows != widget->nrows) {
-		if (widget->pix != None)
-			XFreePixmap(widget->display, widget->pix);
-		if (widget->draw != None)
-			XftDrawDestroy(widget->draw);
 		widget->pixw = widget->ncols * widget->itemw;
 		widget->pixh = widget->nrows * widget->itemh;
-		widget->pix = XCreatePixmap(widget->display, widget->window, widget->pixw, widget->pixh, widget->depth);
-		widget->draw = XftDrawCreate(widget->display, widget->pix, widget->visual, widget->colormap);
+		resetlayer(widget, LAYER_ICONS, widget->pixw, widget->pixh);
+		resetlayer(widget, LAYER_SELALPHA, widget->pixw, widget->pixh);
 		ret = TRUE;
 	}
-	if (widget->w > widget->rectw || widget->h > widget->recth) {
-		widget->rectw = max(widget->rectw, widget->w);
-		widget->recth = max(widget->recth, widget->h);
-		if (widget->rectbord != None)
-			XFreePixmap(widget->display, widget->rectbord);
-		widget->rectbord = XCreatePixmap(widget->display, widget->window, widget->w, widget->h, CLIP_DEPTH);
-	}
+	resetlayer(widget, LAYER_SELECTION, widget->w, widget->h);
+	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
+	resetlayer(widget, LAYER_CANVAS, widget->w, widget->h);
+	resetlayer(widget, LAYER_BACKGROUND, widget->w, widget->h);
+	XRenderFillRectangle(   // XXX remove-me
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_SELECTION].pict,
+		&widget->colors[SELECT_YES][COLOR_BG].color,
+		0, 0, widget->w, widget->h
+	);
+	XRenderFillRectangle(   // XXX remove-me
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_BACKGROUND].pict,
+		&widget->colors[SELECT_NOT][COLOR_BG].color,
+		0, 0, widget->w, widget->h
+	);
 	etunlock(&widget->lock);
 	return ret;
 }
@@ -683,12 +716,15 @@ static void
 drawtext(Widget *widget, Drawable pix, XftColor *color, int x, const char *text, int len)
 {
 	XftDraw *draw;
-	int w;
 
-	w = textwidth(widget, text, len);
 	draw = XftDrawCreate(widget->display, pix, widget->visual, widget->colormap);
-	XftDrawRect(draw, &widget->colors[SELECT_NOT][COLOR_BG], 0, 0, LABELWIDTH, widget->fonth);
-	XftDrawRect(draw, &color[COLOR_BG], x, 0, w, widget->fonth);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpClear,
+		XftDrawPicture(draw),
+		&(XRenderColor){ 0 },
+		0, 0, LABELWIDTH, widget->fonth
+	);
 	XftDrawStringUtf8(draw, &color[COLOR_FG], widget->font, x, widget->font->ascent, (const FcChar8 *)text, len);
 	XftDrawDestroy(draw);
 }
@@ -704,9 +740,8 @@ setrow(Widget *widget, int row)
 static void
 drawicon(Widget *widget, int index, int x, int y)
 {
-	XGCValues val;
 	Pixmap pix, mask;
-	int icon;
+	int icon, xorigin;
 
 	icon = widget->itemicons[index];
 	pix = widget->icons[icon].pix;
@@ -715,7 +750,7 @@ drawicon(Widget *widget, int index, int x, int y)
 		/* draw thumbnail */
 		XPutImage(
 			widget->display,
-			widget->pix,
+			widget->layers[LAYER_ICONS].pix,
 			widget->gc,
 			widget->thumbs[index]->img,
 			0, 0,
@@ -724,49 +759,34 @@ drawicon(Widget *widget, int index, int x, int y)
 			widget->thumbs[index]->w,
 			widget->thumbs[index]->h
 		);
-		if (widget->issel[index]) {
-			XSetFillStyle(widget->display, widget->gc, FillStippled);
-			XSetForeground(widget->display, widget->gc, widget->colors[SELECT_YES][COLOR_BG].pixel);
-			XFillRectangle(
-				widget->display,
-				widget->pix,
-				widget->gc,
-				x + (widget->itemw - widget->thumbs[index]->w) / 2,
-				y + (THUMBSIZE - widget->thumbs[index]->h) / 2,
-				widget->thumbs[index]->w,
-				widget->thumbs[index]->h
-			);
-			XSetFillStyle(widget->display, widget->gc, FillSolid);
-		}
 	} else {
 		/* draw icon */
-		val.clip_x_origin = x + (widget->itemw - THUMBSIZE) / 2;
-		val.clip_y_origin = y;
-		val.clip_mask = mask;
-		XChangeGC(widget->display, widget->gc, GCClipXOrigin | GCClipYOrigin | GCClipMask, &val);
+		xorigin = x + (widget->itemw - THUMBSIZE) / 2;
+		XChangeGC(
+			widget->display,
+			widget->gc,
+			GCClipXOrigin | GCClipYOrigin | GCClipMask,
+			&(XGCValues){
+				.clip_x_origin = xorigin,
+				.clip_y_origin = y,
+				.clip_mask = mask,
+			}
+		);
 		XCopyArea(
 			widget->display,
-			pix, widget->pix,
+			pix, widget->layers[LAYER_ICONS].pix,
 			widget->gc,
 			0, 0,
 			THUMBSIZE, THUMBSIZE,
-			val.clip_x_origin,
+			xorigin,
 			y
 		);
-		if (widget->issel[index]) {
-			XSetFillStyle(widget->display, widget->gc, FillStippled);
-			XSetForeground(widget->display, widget->gc, widget->colors[SELECT_YES][COLOR_BG].pixel);
-			XFillRectangle(
-				widget->display,
-				widget->pix,
-				widget->gc,
-				val.clip_x_origin, y,
-				THUMBSIZE, THUMBSIZE
-			);
-			XSetFillStyle(widget->display, widget->gc, FillSolid);
-		}
-		val.clip_mask = None;
-		XChangeGC(widget->display, widget->gc, GCClipMask, &val);
+		XChangeGC(
+			widget->display,
+			widget->gc,
+			GCClipMask,
+			&(XGCValues){ .clip_mask = None }
+		);
 	}
 }
 
@@ -830,7 +850,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 		widget->linelen[index] = max(widget->linelen[index], textw);
 		XCopyArea(
 			widget->display,
-			widget->namepix, widget->pix,
+			widget->namepix, widget->layers[LAYER_ICONS].pix,
 			widget->gc,
 			0, 0,
 			LABELWIDTH, widget->fonth,
@@ -841,7 +861,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 		XSetForeground(widget->display, widget->gc, color[COLOR_FG].pixel);
 		XDrawRectangle(
 			widget->display,
-			widget->pix,
+			widget->layers[LAYER_ICONS].pix,
 			widget->gc,
 			x + widget->itemw / 2 - maxw / 2 - 1,
 			y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1,
@@ -864,7 +884,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 		);
 		XCopyArea(
 			widget->display,
-			widget->namepix, widget->pix,
+			widget->namepix, widget->layers[LAYER_ICONS].pix,
 			widget->gc,
 			0, 0,
 			widget->ellipsisw, widget->fonth,
@@ -880,12 +900,23 @@ drawlabel(Widget *widget, int index, int x, int y)
 		);
 		XCopyArea(
 			widget->display,
-			widget->namepix, widget->pix,
+			widget->namepix, widget->layers[LAYER_ICONS].pix,
 			widget->gc,
 			0, 0,
 			extensionw, widget->fonth,
 			textx + textw - extensionw,
 			y + widget->itemh - (NLINES + 1 - widget->nlines[index] + 0.5) * widget->fonth
+		);
+	}
+	if (widget->issel[index]) {
+		XRenderFillRectangle(
+			widget->display,
+			PictOpAtopReverse,
+			widget->layers[LAYER_ICONS].pict,
+			&color[COLOR_BG].color,
+			x + widget->itemw / 2 - maxw / 2 - 1,
+			y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1,
+			maxw + 1, i * widget->fonth + 1
 		);
 	}
 }
@@ -919,9 +950,38 @@ drawitem(Widget *widget, int index)
 	y = (i / widget->ncols) % widget->nrows;
 	x *= widget->itemw;
 	y *= widget->itemh;
-	XftDrawRect(widget->draw, &widget->colors[SELECT_NOT][COLOR_BG], x, y, widget->itemw, widget->itemh);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpClear,
+		widget->layers[LAYER_ICONS].pict,
+		&(XRenderColor){ 0 },
+		x, y,
+		widget->itemw, widget->itemh
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpClear,
+		widget->layers[LAYER_SELALPHA].pict,
+		&(XRenderColor){ 0 },
+		x, y,
+		widget->itemw, widget->itemh
+	);
 	drawicon(widget, index, x, y);
 	drawlabel(widget, index, x, y);
+	XRenderFillRectangle(
+		widget->display,
+		widget->issel[index] ? PictOpSrc : PictOpClear,
+		widget->layers[LAYER_SELALPHA].pict,
+		&(XRenderColor){
+			.red   = 0xFFFF,
+			.green = 0xFFFF,
+			.blue  = 0xFFFF,
+			.alpha = SEL_OPACITY,
+		},
+		x, y,
+		widget->itemw,
+		widget->itemh - (NLINES + 1) * widget->fonth
+	);
 done:
 	etunlock(&widget->lock);
 	widget->redraw = TRUE;
@@ -932,7 +992,20 @@ drawitems(Widget *widget)
 {
 	int i, n;
 
-	XftDrawRect(widget->draw, &widget->colors[SELECT_NOT][COLOR_BG], 0, 0, widget->w, widget->nrows * widget->itemh);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpClear,
+		widget->layers[LAYER_ICONS].pict,
+		&(XRenderColor){ 0 },
+		0, 0, widget->pixw, widget->pixh
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpClear,
+		widget->layers[LAYER_SELALPHA].pict,
+		&(XRenderColor){ 0 },
+		0, 0, widget->pixw, widget->pixh
+	);
 	n = lastvisible(widget);
 	for (i = widget->row * widget->ncols; i <= n; i++) {
 		drawitem(widget, i);
@@ -943,39 +1016,71 @@ static void
 commitdraw(Widget *widget)
 {
 	etlock(&widget->lock);
-	XClearWindow(widget->display, widget->window);
-	XCopyArea(
+	XRenderFillRectangle(
 		widget->display,
-		widget->pix, widget->window,
-		widget->gc,
+		PictOpClear,
+		widget->layers[LAYER_CANVAS].pict,
+		&(XRenderColor){ 0 },
+		0, 0, widget->w, widget->h
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_BACKGROUND].pict,
+		&widget->colors[SELECT_NOT][COLOR_BG].color,
+		0, 0, widget->w, widget->h
+	);
+	XRenderComposite(
+		widget->display,
+		PictOpOver,
+		widget->layers[LAYER_ICONS].pict,
+		None,
+		widget->layers[LAYER_CANVAS].pict,
 		0, widget->ydiff - MARGIN,
-		widget->pixw, widget->pixh,
-		widget->x0, 0
+		0, 0,
+		widget->x0, 0,
+		widget->pixw, widget->pixh
 	);
-	if (widget->state != STATE_SELECTING)
-		goto done;
-	XChangeGC(
+	XRenderComposite(
 		widget->display,
-		widget->gc,
-		GCClipXOrigin | GCClipYOrigin | GCClipMask,
-		&(XGCValues) {
-			.clip_x_origin = 0,
-			.clip_y_origin = 0,
-			.clip_mask = widget->rectbord,
-		}
+		PictOpAtop,
+		widget->layers[LAYER_SELECTION].pict,
+		widget->layers[LAYER_SELALPHA].pict,
+		widget->layers[LAYER_CANVAS].pict,
+		0, 0,
+		0, widget->ydiff - MARGIN,
+		widget->x0, 0,
+		widget->pixw, widget->pixh
 	);
-	XSetForeground(widget->display, widget->gc, widget->colors[SELECT_NOT][COLOR_FG].pixel);
-	XFillRectangle(widget->display, widget->window, widget->gc, 0, 0, widget->w, widget->h);
-	XChangeGC(
+	XRenderComposite(
 		widget->display,
-		widget->gc,
-		GCClipMask,
-		&(XGCValues) {
-			.clip_mask = None,
-		}
+		PictOpOver,
+		widget->layers[LAYER_SELECTION].pict,
+		widget->layers[LAYER_RECTALPHA].pict,
+		widget->layers[LAYER_CANVAS].pict,
+		0, 0,
+		0, 0,
+		0, 0,
+		widget->w, widget->h
 	);
+	XRenderComposite(
+		widget->display,
+		PictOpOver,
+		widget->layers[LAYER_CANVAS].pict,
+		None,
+		widget->layers[LAYER_BACKGROUND].pict,
+		0, 0,
+		0, 0,
+		0, 0,
+		widget->w, widget->h
+	);
+	XSetWindowBackgroundPixmap(
+		widget->display,
+		widget->window,
+		widget->layers[LAYER_BACKGROUND].pix
+	);
+	XClearWindow(widget->display, widget->window);
 	XFlush(widget->display);
-done:
 	etunlock(&widget->lock);
 }
 
@@ -1408,13 +1513,12 @@ rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 {
 	int w, h;
 
-	XSetForeground(widget->display, widget->stipgc, 0);
-	XFillRectangle(
+	XRenderFillRectangle(
 		widget->display,
-		widget->rectbord,
-		widget->stipgc,
-		0, 0,
-		widget->w, widget->h
+		PictOpClear,
+		widget->layers[LAYER_RECTALPHA].pict,
+		&(XRenderColor){ 0 },
+		0, 0, widget->w, widget->h
 	);
 	if (widget->state != STATE_SELECTING)
 		return;
@@ -1426,14 +1530,34 @@ rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 	y0 += ydiff - widget->ydiff;
 	w = (x0 > x) ? x0 - x : x - x0;
 	h = (y0 > y) ? y0 - y : y - y0;
-	XSetForeground(widget->display, widget->stipgc, 1);
-	XDrawRectangle(
+	x = min(x0, x);
+	y = min(y0, y);
+	XRenderFillRectangle(
 		widget->display,
-		widget->rectbord,
-		widget->stipgc,
-		min(x0, x),
-		min(y0, y),
-		w, h
+		PictOpSrc,
+		widget->layers[LAYER_RECTALPHA].pict,
+		&(XRenderColor){
+			.red   = 0xFFFF,
+			.green = 0xFFFF,
+			.blue  = 0xFFFF,
+			.alpha = 0xFFFF,
+		},
+		x, y, w, h
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_RECTALPHA].pict,
+		&(XRenderColor){
+			.red   = 0xFFFF,
+			.green = 0xFFFF,
+			.blue  = 0xFFFF,
+			.alpha = RECT_OPACITY,
+		},
+		x + 1,
+		y + 1,
+		max(w - 2, 0),
+		max(h - 2, 0)
 	);
 }
 
@@ -1783,31 +1907,29 @@ done:
 static void
 xinitvisual(Widget *widget)
 {
-	XVisualInfo tpl = {
-		.screen = SCREEN(widget->display),
-		.depth = 32,
-		.class = TrueColor
-	};
-	XVisualInfo *infos;
-	XRenderPictFormat *fmt;
-	long masks = VisualScreenMask | VisualDepthMask | VisualClassMask;
-	int nitems;
-	int i;
+	XVisualInfo vinfo;
+	Colormap colormap;
+	int success;
 
-	widget->visual = NULL;
-	if ((infos = XGetVisualInfo(widget->display, masks, &tpl, &nitems)) != NULL) {
-		for (i = 0; i < nitems; i++) {
-			fmt = XRenderFindVisualFormat(widget->display, infos[i].visual);
-			if (fmt->type == PictTypeDirect && fmt->direct.alphaMask) {
-				widget->depth = infos[i].depth;
-				widget->visual = infos[i].visual;
-				widget->colormap = XCreateColormap(widget->display, ROOT(widget->display), widget->visual, AllocNone);
-				break;
-			}
-		}
-		XFree(infos);
-	}
-	if (widget->visual == NULL) {
+
+	success = XMatchVisualInfo(
+		widget->display,
+		SCREEN(widget->display),
+		32,
+		TrueColor,
+		&vinfo
+	);
+	colormap = success ? XCreateColormap(
+		widget->display,
+		ROOT(widget->display),
+		vinfo.visual,
+		AllocNone
+	) : None;
+	if (success && colormap != None) {
+		widget->depth = vinfo.depth;
+		widget->visual = vinfo.visual;
+		widget->colormap = colormap;
+	} else {
 		widget->depth = DefaultDepth(widget->display, SCREEN(widget->display));
 		widget->visual = DefaultVisual(widget->display, SCREEN(widget->display));
 		widget->colormap = DefaultColormap(widget->display, SCREEN(widget->display));
@@ -2025,10 +2147,6 @@ processevent(Widget *widget, XEvent *ev)
 		    (Atom)ev->xclient.data.l[0] == widget->atoms[WM_DELETE_WINDOW])
 			return WIDGET_CLOSE;
 		return WIDGET_NONE;
-	case Expose:
-		if (ev->xexpose.count == 0)
-			commitdraw(widget);
-		break;
 	case ConfigureNotify:
 		if (calcsize(widget, ev->xconfigure.width, ev->xconfigure.height)) {
 			if (widget->row >= widget->nscreens)
@@ -2405,7 +2523,6 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.window = None,
 		.scroller = None,
 		.lock = PTHREAD_MUTEX_INITIALIZER,
-		.draw = NULL,
 		.thumbs = NULL,
 		.thumbhead = NULL,
 		.linelen = NULL,
@@ -2418,10 +2535,6 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		.rectsel = NULL,
 		.issel = NULL,
 		.seltime = 0,
-		.pix = None,
-		.rectbord = None,
-		.rectw = 0,
-		.recth = 0,
 		.state = STATE_NORMAL,
 		.namepix = None,
 		.stipple = None,
@@ -2446,6 +2559,14 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 		goto error;
 	}
 	xinitvisual(widget);
+	widget->format = XRenderFindVisualFormat(
+		widget->display,
+		widget->visual
+	);
+	if (widget->format == NULL) {
+		warnx("could not find XRender visual format");
+		goto error;
+	}
 	XInternAtoms(widget->display, atomnames, NATOMS, False, widget->atoms);
 	if (fcntl(XConnectionNumber(widget->display), F_SETFD, FD_CLOEXEC) == -1) {
 		warn("fcntl");
@@ -2628,6 +2749,8 @@ closewidget(Widget *widget)
 {
 	int i, j;
 
+	if (widget == NULL)
+		return;
 	ctrlsel_dndclose(&widget->dropctx);
 	cleanwidget(widget);
 	for (i = 0; i < widget->nicons; i++) {
@@ -2638,13 +2761,21 @@ closewidget(Widget *widget)
 			XFreePixmap(widget->display, widget->icons[i].mask);
 		}
 	}
+	for (i = 0; i < LAYER_LAST; i++) {
+		if (widget->layers[i].pict != None) {
+			XRenderFreePicture(
+				widget->display,
+				widget->layers[i].pict
+			);
+		}
+		if (widget->layers[i].pix != None) {
+			XFreePixmap(
+				widget->display,
+				widget->layers[i].pix
+			);
+		}
+	}
 	FREE(widget->icons);
-	if (widget->draw != NULL)
-		XftDrawDestroy(widget->draw);
-	if (widget->pix != None)
-		XFreePixmap(widget->display, widget->pix);
-	if (widget->rectbord != None)
-		XFreePixmap(widget->display, widget->rectbord);
 	if (widget->namepix != None)
 		XFreePixmap(widget->display, widget->namepix);
 	if (widget->stipple != None)
