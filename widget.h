@@ -39,10 +39,9 @@ enum {
 
 typedef struct Widget Widget;
 
-Widget *initwidget(
+Widget *widget_create(
 	const char *class,
 	const char *name,
-	const char *geom,
 	int argc,
 	char *argv[]
 );
@@ -64,6 +63,6 @@ WidgetEvent pollwidget(Widget *widget, int *selitems, int *nselitems, Scroll *sc
 
 void setthumbnail(Widget *widget, char *path, int index);
 
-void closewidget(Widget *widget);
+void widget_free(Widget *widget);
 
 void widget_busy(Widget *widget);

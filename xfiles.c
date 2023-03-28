@@ -27,6 +27,7 @@
 #define MENU             "menu"
 
 #define APPCLASS         "XFiles"
+#define APPNAME          "xfiles"
 #define URI_PREFIX       "file://"
 #define INCRSIZE         512
 #define NCMDARGS         3
@@ -119,7 +120,7 @@ extern size_t nicons;
 static void
 usage(void)
 {
-	(void)fprintf(stderr, "usage: xfiles [-a] [-c cmd] [-g geometry] [-n name] [path]\n");
+	(void)fprintf(stderr, "usage: xfiles [-a] [path]\n");
 	exit(1);
 }
 
@@ -859,8 +860,7 @@ main(int argc, char *argv[])
 	int ch, nitems;
 	int saveargc, force_refresh;
 	int exitval = EXIT_SUCCESS;
-	char *geom = NULL;
-	char *name = NULL;
+	char *name = APPNAME;
 	char *path = NULL;
 	char *home = NULL;
 	char **saveargv;
@@ -870,6 +870,13 @@ main(int argc, char *argv[])
 	saveargv = argv;
 	saveargc = argc;
 	home = getenv("HOME");
+	if (argv[0] != NULL && argv[0][0] != '\0') {
+		if ((name = strchr(argv[0], '/')) != NULL) {
+			name++;
+		} else {
+			name = argv[0];
+		}
+	}
 	fm = (struct FM){
 		.capacity = 0,
 		.nentries = 0,
@@ -897,16 +904,10 @@ main(int argc, char *argv[])
 	fm.ngrps = getgroups(NGROUPS_MAX, fm.grps);
 	if ((fm.opener = getenv("OPENER")) == NULL)
 		fm.opener = DEF_OPENER;
-	while ((ch = getopt(argc, argv, "ag:n:")) != -1) {
+	while ((ch = getopt(argc, argv, "a")) != -1) {
 		switch (ch) {
 		case 'a':
 			hide = 0;
-			break;
-		case 'g':
-			geom = optarg;
-			break;
-		case 'n':
-			name = optarg;
 			break;
 		default:
 			usage();
@@ -920,7 +921,7 @@ main(int argc, char *argv[])
 	else if (argc == 1)
 		path = *argv;
 	initthumbnailer(&fm);
-	if ((fm.widget = initwidget(APPCLASS, name, geom, saveargc, saveargv)) == NULL)
+	if ((fm.widget = widget_create(APPCLASS, name, saveargc, saveargv)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
 	if (openicons(&fm) == RETURN_FAILURE)
 		goto error;
@@ -1036,6 +1037,6 @@ error:
 	free(fm.foundicons);
 	free(fm.selitems);
 	free(fm.thumbnaildir);
-	closewidget(fm.widget);
+	widget_free(fm.widget);
 	return exitval;
 }

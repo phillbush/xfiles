@@ -40,18 +40,29 @@
 	X(_CONTROL_CWD)                 \
 	X(_CONTROL_GOTO)
 
-#define NCLIENTMSG_DATA 5               /* number of members on a the .data.l[] array of a XClientMessageEvent */
+#define RESOURCES                                             \
+	/*            CLASS               NAME             */ \
+	X(GEOMETRY,  "Geometry",         "geometry")          \
+	X(FACE_NAME, "FaceName",         "faceName")          \
+	X(NORMAL_BG, "Background",       "background")        \
+	X(NORMAL_FG, "Foreground",       "foreground")        \
+	X(SELECT_BG, "ActiveBackground", "activeBackground")  \
+	X(SELECT_FG, "ActiveForeground", "activeForeground")  \
+	X(OPACITY,   "Opacity",          "opacity")
 
-/* free and set to null */
+#define EVENT_MASK      (StructureNotifyMask | ExposureMask | KeyPressMask |\
+                         PointerMotionMask | ButtonReleaseMask | ButtonPressMask |\
+                         PropertyChangeMask)
+#define WINDOW_MASK     (CWBackPixel | CWEventMask | CWColormap | CWBorderPixel)
+
+#define DEF_COLOR_BG    (XRenderColor){ .red = 0x0000, .green = 0x0000, .blue = 0x0000, .alpha = 0xFFFF }
+#define DEF_COLOR_FG    (XRenderColor){ .red = 0xFFFF, .green = 0xFFFF, .blue = 0xFFFF, .alpha = 0xFFFF }
+#define DEF_COLOR_SELBG (XRenderColor){ .red = 0x3400, .green = 0x6500, .blue = 0xA400, .alpha = 0xFFFF }
+#define DEF_COLOR_SELFG (XRenderColor){ .red = 0xFFFF, .green = 0xFFFF, .blue = 0xFFFF, .alpha = 0xFFFF }
+#define DEF_SIZE        (XRectangle){ .x = 0, .y = 0, .width = 600 , .height = 460 }
+#define DEF_OPACITY     0xFFFF
+
 #define FREE(x)         do{free(x); x = NULL;}while(0)
-
-/* default theme configuration */
-#define DEF_FONT        "monospace:size=9"
-#define DEF_BG          "#0A0A0A"
-#define DEF_FG          "#FFFFFF"
-#define DEF_SELBG       "#121212"
-#define DEF_SELFG       "#707880"
-#define DEF_OPACITY     1.0
 
 /* ellipsis has two dots rather than three; the third comes from the extension */
 #define ELLIPSIS        ".."
@@ -70,10 +81,8 @@
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
 
-#define SCREEN(d)       (DefaultScreen((d)))
 #define WIDTH(d)        (DisplayWidth((d), DefaultScreen((d))))
 #define HEIGHT(d)       (DisplayHeight((d), DefaultScreen((d))))
-#define ROOT(d)         (DefaultRootWindow((d)))
 #define FLAG(f, b)      (((f) & (b)) == (b))
 #define ATOI(c)         (((c) >= '0' && (c) <= '9') ? (c) - '0' : -1)
 
@@ -123,7 +132,6 @@ enum {
 	MIN_HEIGHT      = (THUMBSIZE * 3),      /* minimum window height */
 	DEF_WIDTH       = 600,                  /* default window width */
 	DEF_HEIGHT      = 460,                  /* default window height */
-	STIPPLE_SIZE    = 2,                    /* size of stipple pattern */
 	MARGIN          = 16,                   /* top margin above first row */
 
 	/* constants for parsing .ppm files */
@@ -143,7 +151,7 @@ enum {
 	SCROLL_STEP     = 32,                   /* pixels per scroll */
 	SCROLLER_SIZE   = 32,                   /* size of the scroller */
 	SCROLLER_MIN    = 16,                   /* min lines to scroll for the scroller to change */
-	HANDLE_MAX_SIZE = (SCROLLER_SIZE - 2),  /* max size of the scroller handle */
+	HANDLE_MAX_SIZE = (SCROLLER_SIZE - 4),  /* max size of the scroller handle */
 };
 
 enum {
@@ -169,9 +177,9 @@ enum Layer {
 	LAYER_CANVAS,
 	LAYER_BACKGROUND,
 	LAYER_ICONS,
-	LAYER_SELECTION,        // XXX: replace it with a repeating color picture
-	LAYER_SELALPHA,
-	LAYER_RECTALPHA,
+	LAYER_SELALPHA,         // XXX: replace it with 8-bit depth
+	LAYER_RECTALPHA,        // XXX: replace it with 8-bit depth
+	LAYER_SCROLLER,
 	LAYER_LAST,
 };
 
@@ -179,6 +187,13 @@ enum Atom {
 #define X(atom) atom,
 	ATOMS
 	NATOMS
+#undef  X
+};
+
+enum Resource {
+#define X(res, class, name) res,
+	RESOURCES
+	NRESOURCES
 #undef  X
 };
 
@@ -198,22 +213,32 @@ struct Selection {
 };
 
 struct Widget {
-	char *progname;
 	int start;
 	int redraw;
 
 	/* X11 stuff */
 	Display *display;
 	Atom atoms[NATOMS];
-	GC stipgc, gc;
+	GC gc;
 	Cursor busycursor;
-	Window window;
-	XftColor colors[SELECT_LAST][COLOR_LAST];
-	XRenderPictFormat *format;
+	Window window, root;
+	struct {
+		XRenderColor chans;
+		Pixmap pix;
+		Picture pict;
+	} colors[SELECT_LAST][COLOR_LAST];
+	XRenderPictFormat *format, *alpha_format;
 	XftFont *font;
 	Visual *visual;
 	Colormap colormap;
+	int screen;
 	unsigned int depth;
+	unsigned short opacity;
+
+	struct {
+		XrmClass class;
+		XrmName name;
+	} application, resources[NRESOURCES];
 
 	Atom lastprop;
 	char *lasttext;
@@ -224,7 +249,6 @@ struct Widget {
 	} layers[LAYER_LAST];
 
 	Pixmap namepix;                 /* temporary pixmap for the labels */
-	Pixmap stipple;                 /* stipple for painting icons of selected items */
 
 	/*
 	 * Lock used for synchronizing the thumbnail and the main threads.
@@ -354,7 +378,7 @@ struct Widget {
 	 * state at beginning and reset it to STATE_NORMAL at the end
 	 * of the function.
 	 */
-	enum {
+	enum {  // XXX: remove state enums
 		STATE_NORMAL,
 		STATE_SELECTING,
 		STATE_SCROLLING,
@@ -365,6 +389,8 @@ struct Widget {
 static void
 resetlayer(Widget *widget, enum Layer layer, int width, int height)
 {
+	Bool isalpha = (layer == LAYER_SELALPHA || layer == LAYER_RECTALPHA);
+
 	if (widget->layers[layer].pix != None)
 		XFreePixmap(widget->display, widget->layers[layer].pix);
 	if (widget->layers[layer].pict != None)
@@ -374,12 +400,12 @@ resetlayer(Widget *widget, enum Layer layer, int width, int height)
 		widget->window,
 		width,
 		height,
-		widget->depth
+		isalpha ? 8 : widget->depth
 	);
 	widget->layers[layer].pict = XRenderCreatePicture(
 		widget->display,
 		widget->layers[layer].pix,
-		widget->format,
+		isalpha ? widget->alpha_format : widget->format,
 		0,
 		NULL
 	);
@@ -393,156 +419,6 @@ resetlayer(Widget *widget, enum Layer layer, int width, int height)
 }
 
 static int
-createwin(Widget *widget, const char *class, const char *name, const char *geom, int argc, char *argv[], unsigned long *icon, size_t iconsize)
-{
-	unsigned int dw, dh;
-	int x, y;
-	int dx, dy;
-	int flags, sizehints;
-	pid_t pid;
-	char buf[16]; /* 16 digits in a 32-bit number + the final '\0' */
-
-	x = y = 0;
-	widget->w = DEF_WIDTH;
-	widget->h = DEF_HEIGHT;
-	sizehints = 0;
-	pid = getpid();
-	if (geom != NULL) {
-		flags = XParseGeometry(geom, &dx, &dy, &dw, &dh);
-		dw = max(MIN_WIDTH, dw);
-		dh = max(MIN_HEIGHT, dh);
-		if (FLAG(flags, WidthValue)) {
-			widget->w = dw;
-			sizehints |= USSize;
-		}
-		if (FLAG(flags, HeightValue)) {
-			widget->h = dh;
-			sizehints |= USSize;
-		}
-		if (FLAG(flags, XValue | XNegative)) {
-			x = WIDTH(widget->display) - widget->w - (dx > 0 ? dx : 0);
-			sizehints |= USPosition;
-		} else if (FLAG(flags, XValue)) {
-			x = dx;
-			sizehints |= USPosition;
-		}
-		if (FLAG(flags, YValue | YNegative)) {
-			y = HEIGHT(widget->display) - widget->h - (dy > 0 ? dy : 0);
-			sizehints |= USPosition;
-		} else if (FLAG(flags, XValue)) {
-			y = dy;
-			sizehints |= USPosition;
-		}
-	}
-	widget->window = XCreateWindow(
-		widget->display, ROOT(widget->display),
-		x, y, widget->w, widget->h, 0,
-		widget->depth, InputOutput, widget->visual,
-		CWBackPixel | CWEventMask | CWColormap | CWBorderPixel,
-		&(XSetWindowAttributes){
-			.border_pixel = 0,
-			.colormap = widget->colormap,
-			.background_pixel = 0,
-			.event_mask = StructureNotifyMask | ExposureMask
-			            | KeyPressMask | PointerMotionMask
-			            | ButtonReleaseMask | ButtonPressMask
-			            | PropertyChangeMask,
-		}
-	);
-	if (widget->window == None)
-		return RETURN_FAILURE;
-	widget->namepix = XCreatePixmap(
-		widget->display,
-		widget->window,
-		LABELWIDTH,
-		widget->fonth,
-		widget->depth
-	);
-	if (widget->namepix == None)
-		return RETURN_FAILURE;
-	XmbSetWMProperties(
-		widget->display, widget->window,
-		class, class,
-		argv, argc,
-		&(XSizeHints){ .flags = sizehints, },
-		NULL,
-		&(XClassHint){ .res_class = (char *)class, .res_name = (char *)name, }
-	);
-	XSetWMProtocols(widget->display, widget->window, &widget->atoms[WM_DELETE_WINDOW], 1);
-	XChangeProperty(
-		widget->display, widget->window,
-		widget->atoms[_NET_WM_NAME],
-		widget->atoms[UTF8_STRING], 8, PropModeReplace,
-		(unsigned char *)class,
-		strlen(class) + 1
-	);
-	XChangeProperty(
-		widget->display, widget->window,
-		widget->atoms[_NET_WM_WINDOW_TYPE],
-		XA_ATOM, 32, PropModeReplace,
-		(unsigned char *)&widget->atoms[_NET_WM_WINDOW_TYPE_NORMAL],
-		1
-	);
-	XChangeProperty(
-		widget->display, widget->window,
-		widget->atoms[_NET_WM_ICON],
-		XA_CARDINAL, 32, PropModeReplace,
-		(unsigned char *)icon, iconsize
-	);
-	XChangeProperty(
-		widget->display, widget->window,
-		widget->atoms[_NET_WM_PID],
-		XA_CARDINAL, 32, PropModeReplace,
-		(unsigned char *)&pid,
-		1
-	);
-	(void)snprintf(buf, LEN(buf), "%lu", (unsigned long)widget->window);
-	if (setenv("WINDOWID", buf, TRUE) == RETURN_FAILURE)
-		warn("setenv");
-	return RETURN_SUCCESS;
-}
-
-static int
-ealloccolor(Widget *widget, const char *s, XftColor *color, unsigned short alpha)
-{
-	XColor screen, exact;
-
-	if (!XAllocNamedColor(widget->display, widget->colormap, s, &screen, &exact))
-		return RETURN_FAILURE;
-	color->pixel = screen.pixel;
-	color->color.red = exact.red;
-	color->color.green = exact.green;
-	color->color.blue = exact.blue;
-	color->color.alpha = alpha;
-	return RETURN_SUCCESS;
-}
-
-static int
-eallocfont(Display *display, const char *s, XftFont **font)
-{
-	if ((*font = XftFontOpenXlfd(display, DefaultScreen(display), s)) == NULL)
-		if ((*font = XftFontOpenName(display, DefaultScreen(display), s)) == NULL)
-			return RETURN_FAILURE;
-	return RETURN_SUCCESS;
-}
-
-static char *
-getresource(XrmDatabase xdb, const char *class, const char *name, const char *resource)
-{
-	XrmValue xval;
-	char *type;
-	char classbuf[RES_BUFSIZE], namebuf[RES_BUFSIZE];
-
-	if (xdb == NULL)
-		return NULL;
-	(void)snprintf(classbuf, RES_BUFSIZE, "%s.%s", class, resource);
-	(void)snprintf(namebuf, RES_BUFSIZE, "%s.%s", name, resource);
-	if (XrmGetResource(xdb, namebuf, classbuf, &type, &xval) == True)
-		return xval.addr;
-	return NULL;
-}
-
-static int
 textwidth(Widget *widget, const char *text, int len)
 {
 	XGlyphInfo box;
@@ -551,101 +427,126 @@ textwidth(Widget *widget, const char *text, int len)
 	return box.width;
 }
 
-static int
-inittheme(Widget *widget, const char *class, const char *name)
+static void
+setfont(Widget *widget, const char *facename)
 {
-	XrmDatabase xdb;
-	int i, j, goterror;;
-	char *xrm, *s, *endp;
-	char *resources[SELECT_LAST][COLOR_LAST] = {
-		[SELECT_NOT][COLOR_BG] = "background",
-		[SELECT_NOT][COLOR_FG] = "foreground",
-		[SELECT_YES][COLOR_BG] = "selbackground",
-		[SELECT_YES][COLOR_FG] = "selforeground",
-	};
-	char *defvalue[SELECT_LAST][COLOR_LAST] = {
-		[SELECT_NOT][COLOR_BG] = DEF_BG,
-		[SELECT_NOT][COLOR_FG] = DEF_FG,
-		[SELECT_YES][COLOR_BG] = DEF_SELBG,
-		[SELECT_YES][COLOR_FG] = DEF_SELFG,
-	};
-	int colorerror[SELECT_LAST][COLOR_LAST] = { { FALSE, FALSE }, { FALSE, FALSE } };
-	int fonterror = FALSE;
-	unsigned short alpha;
-	double opacity;
-
-	xdb = NULL;
-	goterror = FALSE;
-	if ((xrm = XResourceManagerString(widget->display)) != NULL)
-		xdb = XrmGetStringDatabase(xrm);
-	alpha = DEF_OPACITY * 0xFFFF;
-	if ((s = getresource(xdb, class, name, "opacity")) != NULL) {
-		opacity = strtod(s, &endp);
-		if (endp == s || *endp != '\0' || opacity < 0.0 || opacity > 1.0)
-			opacity = DEF_OPACITY;
-		alpha = opacity * 0xFFFF;
+	if (facename == NULL)
+		facename = "";
+	widget->font = XftFontOpenXlfd(
+		widget->display,
+		widget->screen,
+		facename
+	);
+	if (widget->font == NULL) {
+		widget->font = XftFontOpenName(
+			widget->display,
+			widget->screen,
+			facename
+		);
 	}
-	for (i = 0; i < SELECT_LAST; i++) {
-		for (j = 0; j < COLOR_LAST; j++) {
-			s = getresource(xdb, class, name, resources[i][j]);
-			if (s == NULL) {
-				/* could not found resource; use default value */
-				s = defvalue[i][j];
-			} else if (ealloccolor(widget, s, &widget->colors[i][j], alpha) == RETURN_FAILURE) {
-				/* resource found, but allocation failed; use default value */
-				warnx("\"%s\": could not load color (falling back to \"%s\")", s, defvalue[i][j]);
-				s = defvalue[i][j];
-			} else {
-				/* resource found and successfully allocated */
-				continue;
-			}
-			if (ealloccolor(widget, s, &widget->colors[i][j], alpha) == RETURN_FAILURE) {
-				warnx("\"%s\": could not load color", s);
-				colorerror[i][j] = TRUE;
-				goterror = TRUE;
-			}
-			alpha = 0xFFFF;
-		}
+	if (widget->font == NULL) {
+		warnx("%s: unknown face name", facename);
+		return;
 	}
-	s = getresource(xdb, class, name, "faceName");
-	if (s == NULL) {
-		/* could not found resource; use default value */
-		s = DEF_FONT;
-	} else if (eallocfont(widget->display, s, &widget->font) == RETURN_FAILURE) {
-		/* resource found, but allocation failed; use default value */
-		warnx("\"%s\": could not open font (falling back to \"%s\")", s, DEF_FONT);
-		s = DEF_FONT;
-	} else {
-		goto done;
-	}
-	if (eallocfont(widget->display, s, &widget->font) == RETURN_FAILURE) {
-		warnx("\"%s\": could not open font", s);
-		fonterror = TRUE;
-		goterror = TRUE;
-	}
-done:
-	if (goterror)
-		goto error;
 	widget->fonth = widget->font->height;
-	widget->itemw = ITEM_WIDTH;
 	widget->itemh = THUMBSIZE + (NLINES + 1) * widget->fonth;
 	widget->ellipsisw = textwidth(widget, ELLIPSIS, strlen(ELLIPSIS));
-	if (xdb != NULL)
-		XrmDestroyDatabase(xdb);
-	return RETURN_SUCCESS;
-error:
-	for (i = 0; i < SELECT_LAST; i++) {
-		for (j = 0; j < COLOR_LAST; j++) {
-			if (colorerror[i][j])
-				continue;
-			XftColorFree(widget->display, widget->visual, widget->colormap, &widget->colors[i][j]);
+	if (widget->namepix != None)
+		XFreePixmap(widget->display, widget->namepix);
+	widget->namepix = XCreatePixmap(
+		widget->display,
+		widget->window,
+		LABELWIDTH,
+		widget->fonth,
+		widget->depth
+	);
+}
+
+static void
+setcolor(Widget *widget, int scheme, int colornum, const char *colorname)
+{
+	XColor color;
+
+	if (scheme >= SELECT_LAST || colornum >= COLOR_LAST || colorname == NULL)
+		return;
+	if (!XParseColor(widget->display, widget->colormap, colorname, &color)) {
+		warnx("%s: unknown color name", colorname);
+		return;
+	}
+	widget->colors[scheme][colornum].chans = (XRenderColor){
+		.red   = FLAG(color.flags, DoRed)   ? color.red   : 0x0000,
+		.green = FLAG(color.flags, DoGreen) ? color.green : 0x0000,
+		.blue  = FLAG(color.flags, DoBlue)  ? color.blue  : 0x0000,
+		.alpha = 0xFFFF,
+	};
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		widget->colors[scheme][colornum].pict,
+		&widget->colors[scheme][colornum].chans,
+		0, 0, 1, 1
+	);
+}
+
+static char *
+getresource(XrmDatabase xdb, XrmClass appclass, XrmName appname, XrmClass resclass, XrmName resname)
+{
+	XrmQuark name[] = { appname, resname, NULLQUARK };
+	XrmQuark class[] = { appclass, resclass, NULLQUARK };
+	XrmRepresentation tmp;
+	XrmValue xval;
+
+	if (XrmQGetResource(xdb, name, class, &tmp, &xval))
+		return xval.addr;
+	return NULL;
+}
+
+static void
+loadresources(Widget *widget)
+{
+	XrmDatabase xdb;
+	char *str, *value;
+	enum Resource resource;
+
+	if ((str = XResourceManagerString(widget->display)) == NULL)
+		return;
+	if ((xdb = XrmGetStringDatabase(str)) == NULL)
+		return;
+	for (resource = 0; resource < NRESOURCES; resource++) {
+		if (resource == GEOMETRY)
+			continue; /* geometry is fetched at initialization */
+		value = getresource(
+			xdb,
+			widget->application.class,
+			widget->application.name,
+			widget->resources[resource].class,
+			widget->resources[resource].name
+		);
+		if (value == NULL)
+			continue;
+		switch (resource) {
+		case FACE_NAME:
+			setfont(widget, value);
+			break;
+		case NORMAL_BG:
+			setcolor(widget, SELECT_NOT, COLOR_BG, value);
+			break;
+		case NORMAL_FG:
+			setcolor(widget, SELECT_NOT, COLOR_FG, value);
+			break;
+		case SELECT_BG:
+			setcolor(widget, SELECT_YES, COLOR_BG, value);
+			break;
+		case SELECT_FG:
+			setcolor(widget, SELECT_YES, COLOR_FG, value);
+			break;
+		case OPACITY:
+			break;
+		default:
+			break;
 		}
 	}
-	if (!fonterror)
-		XftFontClose(widget->display, widget->font);
-	if (xdb != NULL)
-		XrmDestroyDatabase(xdb);
-	return RETURN_FAILURE;
+	XrmDestroyDatabase(xdb);
 }
 
 static int
@@ -684,22 +585,14 @@ calcsize(Widget *widget, int w, int h)
 		resetlayer(widget, LAYER_SELALPHA, widget->pixw, widget->pixh);
 		ret = TRUE;
 	}
-	resetlayer(widget, LAYER_SELECTION, widget->w, widget->h);
 	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
 	resetlayer(widget, LAYER_CANVAS, widget->w, widget->h);
 	resetlayer(widget, LAYER_BACKGROUND, widget->w, widget->h);
 	XRenderFillRectangle(   // XXX remove-me
 		widget->display,
 		PictOpSrc,
-		widget->layers[LAYER_SELECTION].pict,
-		&widget->colors[SELECT_YES][COLOR_BG].color,
-		0, 0, widget->w, widget->h
-	);
-	XRenderFillRectangle(   // XXX remove-me
-		widget->display,
-		PictOpSrc,
 		widget->layers[LAYER_BACKGROUND].pict,
-		&widget->colors[SELECT_NOT][COLOR_BG].color,
+		&widget->colors[SELECT_NOT][COLOR_BG].chans,
 		0, 0, widget->w, widget->h
 	);
 	etunlock(&widget->lock);
@@ -725,7 +618,7 @@ drawtext(Widget *widget, Drawable pix, XftColor *color, int x, const char *text,
 		&(XRenderColor){ 0 },
 		0, 0, LABELWIDTH, widget->fonth
 	);
-	XftDrawStringUtf8(draw, &color[COLOR_FG], widget->font, x, widget->font->ascent, (const FcChar8 *)text, len);
+	XftDrawStringUtf8(draw, color, widget->font, x, widget->font->ascent, (const FcChar8 *)text, len);
 	XftDrawDestroy(draw);
 }
 
@@ -793,14 +686,18 @@ drawicon(Widget *widget, int index, int x, int y)
 static void
 drawlabel(Widget *widget, int index, int x, int y)
 {
-	XftColor *color;
-	int i;
+	XftColor color;
+	int i, sel;
 	int textx, maxw;
 	int textw, w, textlen, len;
 	int extensionw, extensionlen;
 	char *text, *extension;
 
-	color = widget->colors[(widget->issel != NULL && widget->issel[index]) ? SELECT_YES : SELECT_NOT];
+	if (widget->issel != NULL && widget->issel[index])
+		sel = SELECT_YES;
+	else
+		sel = SELECT_NOT;
+	color.color = widget->colors[sel][COLOR_FG].chans;
 	text = widget->items[index][ITEM_NAME];
 	widget->nlines[index] = 1;
 	textx = x + widget->itemw / 2 - LABELWIDTH / 2;
@@ -842,7 +739,8 @@ drawlabel(Widget *widget, int index, int x, int y)
 		maxw = max(textw, maxw);
 		drawtext(
 			widget,
-			widget->namepix, color,
+			widget->namepix,
+			&color,
 			max(LABELWIDTH / 2 - textw / 2, 0),
 			text, textlen
 		);
@@ -857,17 +755,17 @@ drawlabel(Widget *widget, int index, int x, int y)
 			textx, y + widget->itemh - (NLINES - i + 0.5) * widget->fonth
 		);
 	}
-	if (index == widget->highlight) {
-		XSetForeground(widget->display, widget->gc, color[COLOR_FG].pixel);
-		XDrawRectangle(
-			widget->display,
-			widget->layers[LAYER_ICONS].pix,
-			widget->gc,
-			x + widget->itemw / 2 - maxw / 2 - 1,
-			y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1,
-			maxw + 1, i * widget->fonth + 1
-		);
-	}
+	//if (index == widget->highlight) {
+	//	XSetForeground(widget->display, widget->gc, color[COLOR_FG].pixel);
+	//	XDrawRectangle(
+	//		widget->display,
+	//		widget->layers[LAYER_ICONS].pix,
+	//		widget->gc,
+	//		x + widget->itemw / 2 - maxw / 2 - 1,
+	//		y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1,
+	//		maxw + 1, i * widget->fonth + 1
+	//	);
+	//}
 	if (textw >= LABELWIDTH &&
 	    (extension = strrchr(text, '.')) != NULL &&
 	    extension[1] != '\0') {
@@ -878,7 +776,8 @@ drawlabel(Widget *widget, int index, int x, int y)
 		/* draw ellipsis */
 		drawtext(
 			widget,
-			widget->namepix, color,
+			widget->namepix,
+			&color,
 			0,
 			ELLIPSIS, strlen(ELLIPSIS)
 		);
@@ -895,7 +794,8 @@ drawlabel(Widget *widget, int index, int x, int y)
 		/* draw extension */
 		drawtext(
 			widget,
-			widget->namepix, color,
+			widget->namepix,
+			&color,
 			0, extension, extensionlen
 		);
 		XCopyArea(
@@ -913,7 +813,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 			widget->display,
 			PictOpAtopReverse,
 			widget->layers[LAYER_ICONS].pict,
-			&color[COLOR_BG].color,
+			&widget->colors[sel][COLOR_BG].chans,
 			x + widget->itemw / 2 - maxw / 2 - 1,
 			y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1,
 			maxw + 1, i * widget->fonth + 1
@@ -1027,7 +927,7 @@ commitdraw(Widget *widget)
 		widget->display,
 		PictOpSrc,
 		widget->layers[LAYER_BACKGROUND].pict,
-		&widget->colors[SELECT_NOT][COLOR_BG].color,
+		&widget->colors[SELECT_NOT][COLOR_BG].chans,
 		0, 0, widget->w, widget->h
 	);
 	XRenderComposite(
@@ -1044,7 +944,7 @@ commitdraw(Widget *widget)
 	XRenderComposite(
 		widget->display,
 		PictOpAtop,
-		widget->layers[LAYER_SELECTION].pict,
+		widget->colors[SELECT_YES][COLOR_BG].pict,
 		widget->layers[LAYER_SELALPHA].pict,
 		widget->layers[LAYER_CANVAS].pict,
 		0, 0,
@@ -1055,7 +955,7 @@ commitdraw(Widget *widget)
 	XRenderComposite(
 		widget->display,
 		PictOpOver,
-		widget->layers[LAYER_SELECTION].pict,
+		widget->colors[SELECT_YES][COLOR_BG].pict,
 		widget->layers[LAYER_RECTALPHA].pict,
 		widget->layers[LAYER_CANVAS].pict,
 		0, 0,
@@ -1156,21 +1056,39 @@ gethandlepos(Widget *widget)
 static void
 drawscroller(Widget *widget, int y)
 {
-	XftDraw *draw;
-	XftColor color;
-	Pixmap pix;
-
-	if ((pix = XCreatePixmap(widget->display, widget->scroller, SCROLLER_SIZE, SCROLLER_SIZE, widget->depth)) == None)
-		return;
-	draw = XftDrawCreate(widget->display, pix, widget->visual, widget->colormap);
-	color = widget->colors[SELECT_NOT][COLOR_BG];
-	color.color.alpha = 0xFFFF;
-	XftDrawRect(draw, &color, 0, 0, SCROLLER_SIZE, SCROLLER_SIZE);
-	XftDrawRect(draw, &widget->colors[SELECT_NOT][COLOR_FG], 1, y + 1, HANDLE_MAX_SIZE, widget->handlew);
-	XSetWindowBackgroundPixmap(widget->display, widget->scroller, pix);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_SCROLLER].pict,
+		&widget->colors[SELECT_NOT][COLOR_FG].chans,
+		0, 0,
+		SCROLLER_SIZE,
+		SCROLLER_SIZE
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_SCROLLER].pict,
+		&widget->colors[SELECT_NOT][COLOR_BG].chans,
+		1, 1,
+		SCROLLER_SIZE - 2,
+		SCROLLER_SIZE - 2
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_SCROLLER].pict,
+		&widget->colors[SELECT_NOT][COLOR_FG].chans,
+		2, y + 2,
+		HANDLE_MAX_SIZE,
+		widget->handlew
+	);
+	XSetWindowBackgroundPixmap(
+		widget->display,
+		widget->scroller,
+		widget->layers[LAYER_SCROLLER].pix
+	);
 	XClearWindow(widget->display, widget->scroller);
-	XFreePixmap(widget->display, pix);
-	XftDrawDestroy(draw);
 }
 
 static int
@@ -1793,7 +1711,7 @@ createdragwin(Widget *widget, int index)
 
 	if (index <= 0)
 		return None;
-	if (!querypointer(widget, ROOT(widget->display), &xroot, &yroot, NULL))
+	if (!querypointer(widget, widget->root, &xroot, &yroot, NULL))
 		return None;
 	w = h = THUMBSIZE;
 	if (widget->thumbs[index] != NULL) {
@@ -1801,14 +1719,15 @@ createdragwin(Widget *widget, int index)
 		h = widget->thumbs[index]->h;
 	}
 	win = XCreateWindow(
-		widget->display, ROOT(widget->display),
+		widget->display,
+		widget->root,
 		xroot, yroot, w, h, 0,
 		widget->depth, InputOutput, widget->visual,
 		CWBackPixel | CWOverrideRedirect| CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
+			.background_pixel = 0,
 			.border_pixel = 0,
 			.colormap = widget->colormap,
-			.background_pixel = widget->colors[SELECT_NOT][COLOR_BG].pixel,
 			.override_redirect = True
 		}
 	);
@@ -1902,38 +1821,6 @@ gettextprop(Widget *widget, Atom prop)
 done:
 	XFree(p);
 	return text;
-}
-
-static void
-xinitvisual(Widget *widget)
-{
-	XVisualInfo vinfo;
-	Colormap colormap;
-	int success;
-
-
-	success = XMatchVisualInfo(
-		widget->display,
-		SCREEN(widget->display),
-		32,
-		TrueColor,
-		&vinfo
-	);
-	colormap = success ? XCreateColormap(
-		widget->display,
-		ROOT(widget->display),
-		vinfo.visual,
-		AllocNone
-	) : None;
-	if (success && colormap != None) {
-		widget->depth = vinfo.depth;
-		widget->visual = vinfo.visual;
-		widget->colormap = colormap;
-	} else {
-		widget->depth = DefaultDepth(widget->display, SCREEN(widget->display));
-		widget->visual = DefaultVisual(widget->display, SCREEN(widget->display));
-		widget->colormap = DefaultColormap(widget->display, SCREEN(widget->display));
-	}
 }
 
 /*
@@ -2191,6 +2078,59 @@ checklastprop(Widget *widget, char **text)
 		}
 	}
 	return WIDGET_NONE;
+}
+
+static int
+getgeometry(Widget *widget, XRectangle *rect)
+{
+	unsigned int width, height;
+	int x, y, flags, retval;
+	XrmDatabase xdb;
+	char *str, *geometry;
+
+	*rect = DEF_SIZE;
+	retval = 0;
+	if ((str = XResourceManagerString(widget->display)) == NULL)
+		return 0;
+	if ((xdb = XrmGetStringDatabase(str)) == NULL)
+		return 0;
+	geometry = getresource(
+		xdb,
+		widget->application.class,
+		widget->application.name,
+		widget->resources[GEOMETRY].class,
+		widget->resources[GEOMETRY].name
+	);
+	if (geometry == NULL)
+		goto done;
+	flags = XParseGeometry(geometry, &x, &y, &width, &height);
+	if (FLAG(flags, WidthValue) && width > THUMBSIZE) {
+		rect->width = width;
+		retval |= USSize;
+	}
+	if (FLAG(flags, HeightValue) && height > THUMBSIZE) {
+		rect->height = height;
+		retval |= USSize;
+	}
+	if (FLAG(flags, XValue)) {
+		if (FLAG(flags, XNegative)) {
+			x += DisplayWidth(widget->display, widget->screen);
+			x -= rect->width;
+		}
+		rect->x = x;
+		retval |= USPosition;
+	}
+	if (FLAG(flags, YValue)) {
+		if (FLAG(flags, YNegative)) {
+			y += DisplayHeight(widget->display, widget->screen);
+			y -= rect->height;
+		}
+		rect->y = y;
+		retval |= USPosition;
+	}
+done:
+	XrmDestroyDatabase(xdb);
+	return retval;
 }
 
 /*
@@ -2484,130 +2424,321 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 }
 
 /*
- * Check widget.h for description on the interface of the following
- * public functions.  Some of them rely on the existence of objects
- * in the given addresses, during Widget's lifetime.
+ * Widget initializers
  */
 
-Widget *
-initwidget(const char *class, const char *name, const char *geom, int argc, char *argv[])
+static int
+initxconn(Widget *widget, const char *class, const char *name, int argc, char *argv[])
 {
-	Widget *widget;
-	int success;
-	char *progname, *s;
 	static char *atomnames[] = {
 #define X(atom) [atom] = #atom,
 		ATOMS
 #undef  X
 	};
 
-	widget = NULL;
-	progname = "";
-	if (argc > 0 && argv[0] != NULL) {
-		progname = argv[0];
-		if ((s = strrchr(argv[0], '/')) != NULL) {
-			progname = s + 1;
-		}
-	}
-	if (name == NULL)
-		name = progname;
-	if ((widget = malloc(sizeof(*widget))) == NULL) {
-		warn("malloc");
-		return NULL;
-	}
-	*widget = (struct Widget){
-		.progname = progname,
-		.display = NULL,
-		.start = FALSE,
-		.redraw = FALSE,
-		.window = None,
-		.scroller = None,
-		.lock = PTHREAD_MUTEX_INITIALIZER,
-		.thumbs = NULL,
-		.thumbhead = NULL,
-		.linelen = NULL,
-		.nlines = NULL,
-		.icons = NULL,
-		.highlight = -1,
-		.title = "",
-		.class = class,
-		.sel = NULL,
-		.rectsel = NULL,
-		.issel = NULL,
-		.seltime = 0,
-		.state = STATE_NORMAL,
-		.namepix = None,
-		.stipple = None,
-		.lastprop = None,
-		.lasttext = NULL,
-		.selctx = NULL,
-		.dragctx = NULL,
-		.uribuf = NULL,
-		.dndbuf = NULL,
-		.selbuf = NULL,
-	};
+	(void)class;
+	(void)name;
+	(void)argc;
+	(void)argv;
 	if (!XInitThreads()) {
-		warnx("XInitThreads");
-		goto error;
+		warnx("could not initialize support for threads");
+		return RETURN_FAILURE;
 	}
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale()) {
 		warnx("could not set locale");
-		goto error;
 	}
 	if ((widget->display = XOpenDisplay(NULL)) == NULL) {
 		warnx("could not connect to X server");
-		goto error;
+		return RETURN_FAILURE;
 	}
-	xinitvisual(widget);
+	if (fcntl(XConnectionNumber(widget->display),
+	          F_SETFD, FD_CLOEXEC) == RETURN_FAILURE) {
+		warnx("could not set connection to X server to close on exec");
+		return RETURN_FAILURE;
+	}
+	if (!XInternAtoms(widget->display, atomnames,
+	                  NATOMS, False, widget->atoms)) {
+		warnx("could not intern X atoms");
+		return RETURN_FAILURE;
+	}
+	widget->screen = DefaultScreen(widget->display);
+	widget->root = RootWindow(widget->display, widget->screen);
+	return RETURN_SUCCESS;
+}
+
+static int
+initvisual(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+{
+	XVisualInfo vinfo;
+	Colormap colormap;
+	int success;
+
+	(void)class;
+	(void)name;
+	(void)argc;
+	(void)argv;
+	success = XMatchVisualInfo(
+		widget->display,
+		widget->screen,
+		32,             /* preferred depth */
+		TrueColor,
+		&vinfo
+	);
+	colormap = success ? XCreateColormap(
+		widget->display,
+		widget->root,
+		vinfo.visual,
+		AllocNone
+	) : None;
+	if (success && colormap != None) {
+		widget->colormap = colormap;
+		widget->visual = vinfo.visual;
+		widget->depth = vinfo.depth;
+	} else {
+		widget->colormap = DefaultColormap(
+			widget->display,
+			widget->screen
+		);
+		widget->visual = DefaultVisual(
+			widget->display,
+			widget->screen
+		);
+		widget->depth = DefaultDepth(
+			widget->display,
+			widget->screen
+		);
+	}
 	widget->format = XRenderFindVisualFormat(
 		widget->display,
 		widget->visual
 	);
-	if (widget->format == NULL) {
-		warnx("could not find XRender visual format");
+	if (widget->format == NULL)
 		goto error;
-	}
-	XInternAtoms(widget->display, atomnames, NATOMS, False, widget->atoms);
-	if (fcntl(XConnectionNumber(widget->display), F_SETFD, FD_CLOEXEC) == -1) {
-		warn("fcntl");
+	widget->alpha_format = XRenderFindStandardFormat(
+		widget->display,
+		PictStandardA8
+	);
+	if (widget->alpha_format == NULL)
 		goto error;
-	}
-	if (inittheme(widget, class, name) == -1) {
-		warnx("could not set theme");
-		goto error;
-	}
-	if (createwin(widget, class, name, geom, argc, argv, winicon_data, winicon_size) == -1) {
+	return RETURN_SUCCESS;
+error:
+	warnx("could not find XRender visual format");
+	return RETURN_FAILURE;
+}
+
+static int
+initwindow(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+{
+	XRectangle geometry;
+	pid_t pid = getpid();
+	int sizehints;
+	char buf[16]; /* 16: enough for digits in 32-bit number + final '\0' */
+
+	sizehints = getgeometry(widget, &geometry);
+	widget->w = geometry.width,
+	widget->h = geometry.height,
+	widget->window = XCreateWindow(
+		widget->display,
+		widget->root,
+		geometry.x,
+		geometry.y,
+		geometry.width,
+		geometry.height,
+		0,
+		widget->depth,
+		InputOutput,
+		widget->visual,
+		WINDOW_MASK,
+		&(XSetWindowAttributes){
+			.border_pixel = 0,
+			.background_pixel = 0,
+			.colormap = widget->colormap,
+			.event_mask = EVENT_MASK,
+		}
+	);
+	if (widget->window == None) {
 		warnx("could not create window");
-		goto error;
-	}
-	if ((widget->gc = XCreateGC(widget->display, widget->window, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
-		warnx("could not create graphics context");
-		goto error;
+		return RETURN_FAILURE;
 	}
 	widget->scroller = XCreateWindow(
-		widget->display, widget->window,
-		0, 0, SCROLLER_SIZE, SCROLLER_SIZE, 1,
-		widget->depth, InputOutput, widget->visual,
-		CWBackPixel | CWBorderPixel | CWEventMask | CWColormap | CWBorderPixel,
+		widget->display,
+		widget->window,
+		0, 0,
+		SCROLLER_SIZE,
+		SCROLLER_SIZE,
+		0,
+		widget->depth,
+		InputOutput,
+		widget->visual,
+		WINDOW_MASK,
 		&(XSetWindowAttributes){
-			.colormap = widget->colormap,
+			.border_pixel = 0,
 			.background_pixel = 0,
-			.border_pixel = widget->colors[SELECT_NOT][COLOR_FG].pixel,
+			.colormap = widget->colormap,
 			.event_mask = ButtonPressMask | PointerMotionMask,
 		}
 	);
 	if (widget->scroller == None) {
 		warnx("could not create window");
-		goto error;
+		return RETURN_FAILURE;
 	}
-	if ((widget->stipple = XCreatePixmap(widget->display, widget->window, STIPPLE_SIZE, STIPPLE_SIZE, CLIP_DEPTH)) == None) {
-		warnx("could not create pixmap");
-		goto error;
-	}
-	if ((widget->stipgc = XCreateGC(widget->display, widget->stipple, GCLineStyle, &(XGCValues){.line_style = LineOnOffDash})) == None) {
+	widget->gc = XCreateGC(widget->display, widget->window, 0, NULL);
+	if (widget->gc == NULL) {
 		warnx("could not create graphics context");
-		goto error;
+		return RETURN_FAILURE;
 	}
+	(void)XSetWMProtocols(
+		widget->display,
+		widget->window,
+		&widget->atoms[WM_DELETE_WINDOW],
+		1
+	);
+	(void)XmbSetWMProperties(
+		widget->display,
+		widget->window,
+		class,
+		class,
+		argv,
+		argc,
+		&(XSizeHints){ .flags = sizehints },
+		NULL,
+		&(XClassHint){
+			.res_class = (char *)class,
+			.res_name = (char *)name,
+		}
+	);
+	(void)XChangeProperty(
+		widget->display,
+		widget->window,
+		widget->atoms[_NET_WM_NAME],
+		widget->atoms[UTF8_STRING],
+		8,
+		PropModeReplace,
+		(unsigned char *)class,
+		strlen(class) + 1       /* +1 for '\0' */
+	);
+	(void)XChangeProperty(
+		widget->display,
+		widget->window,
+		widget->atoms[_NET_WM_WINDOW_TYPE],
+		XA_ATOM,
+		32,
+		PropModeReplace,
+		(unsigned char *)&widget->atoms[_NET_WM_WINDOW_TYPE_NORMAL],
+		1
+	);
+	(void)XChangeProperty(
+		widget->display,
+		widget->window,
+		widget->atoms[_NET_WM_ICON],
+		XA_CARDINAL,
+		32,
+		PropModeReplace,
+		(unsigned char *)winicon_data,
+		winicon_size
+	);
+	(void)XChangeProperty(
+		widget->display,
+		widget->window,
+		widget->atoms[_NET_WM_PID],
+		XA_CARDINAL,
+		32,
+		PropModeReplace,
+		(unsigned char *)&pid,
+		1
+	);
+	(void)snprintf(buf, LEN(buf), "%lu", (unsigned long)widget->window);
+	if (setenv("WINDOWID", buf, TRUE) == RETURN_FAILURE)
+		warn("setenv");
+	return RETURN_SUCCESS;
+}
+
+static int
+initpictures(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+{
+	int i, j;
+
+	(void)class;
+	(void)name;
+	(void)argc;
+	(void)argv;
+	resetlayer(widget, LAYER_SCROLLER, SCROLLER_SIZE, SCROLLER_SIZE);
+	for (i = 0; i < SELECT_LAST; i++) {
+		for (j = 0; j < COLOR_LAST; j++) {
+			widget->colors[i][j].pix = XCreatePixmap(
+				widget->display,
+				widget->window,
+				1, 1,
+				widget->depth
+			);
+			if (widget->colors[i][j].pix == None) {
+				goto error;
+			}
+			widget->colors[i][j].pict = XRenderCreatePicture(
+				widget->display,
+				widget->colors[i][j].pix,
+				widget->format,
+				CPRepeat,
+				&(XRenderPictureAttributes){
+					.repeat = RepeatNormal,
+				}
+			);
+			if (widget->colors[i][j].pict == None) {
+				goto error;
+			}
+			XRenderFillRectangle(
+				widget->display,
+				PictOpSrc,
+				widget->colors[i][j].pict,
+				&widget->colors[i][j].chans,
+				0, 0, 1, 1
+			);
+		}
+	}
+	return RETURN_SUCCESS;
+error:
+	warnx("could not create XRender picture");
+	return RETURN_FAILURE;
+}
+
+static int
+initresources(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+{
+	static struct {
+		const char *class, *name;
+	} resourceids[] = {
+#define X(res, s1, s2) [res] = { .class = s1, .name = s2, },
+		RESOURCES
+#undef  X
+	};
+	int i;
+
+	(void)argc;
+	(void)argv;
+	XrmInitialize();
+	widget->application.class = XrmPermStringToQuark(class);
+	widget->application.name = XrmPermStringToQuark(name);
+	for (i = 0; i < NRESOURCES; i++) {
+		widget->resources[i].class = XrmPermStringToQuark(resourceids[i].class);
+		widget->resources[i].name = XrmPermStringToQuark(resourceids[i].name);
+	}
+	loadresources(widget);
+	if (widget->font == NULL)
+		setfont(widget, NULL);
+	if (widget->font == NULL)
+		return RETURN_FAILURE;
+	return RETURN_SUCCESS;
+}
+
+static int
+initselection(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+{
+	int success;
+
+	(void)class;
+	(void)name;
+	(void)argc;
+	(void)argv;
 	ctrlsel_filltarget(
 		widget->atoms[TEXT_URI_LIST],
 		widget->atoms[TEXT_URI_LIST],
@@ -2624,26 +2755,148 @@ initwidget(const char *class, const char *name, const char *geom, int argc, char
 	);
 	if (!success) {
 		ctrlsel_dndclose(&widget->dropctx);
-		goto error;
+		warnx("could not watch drag-and-drop selection");
+		return RETURN_FAILURE;
 	}
-	XSetForeground(widget->display, widget->stipgc, 0);
-	XFillRectangle(widget->display, widget->stipple, widget->stipgc, 0, 0, STIPPLE_SIZE, STIPPLE_SIZE);
-	XSetForeground(widget->display, widget->stipgc, 1);
-	XFillRectangle(widget->display, widget->stipple, widget->stipgc, 0, 0, 1, 1);
-	XSetStipple(widget->display, widget->gc, widget->stipple);
+	return RETURN_SUCCESS;
+}
+
+static int
+initmisc(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+{
+	/*
+	 * No need to check for errors here.
+	 *
+	 * - If cursor loading function returns None, ignore;
+	 *   XDefineCursor(3) just uses the default cursor when passed
+	 *   None.
+	 *
+	 * - If selecting PropertyNotify on root window fail, ignore;
+	 *   we should not be able to reload theme on the fly, but it
+	 *   is not important for the widget to work correctly.
+	 */
+	(void)class;
+	(void)name;
+	(void)argc;
+	(void)argv;
 	widget->busycursor = XCreateFontCursor(widget->display, XC_watch);
-	return widget;
-error:
-	if (widget->stipple != None)
-		XFreePixmap(widget->display, widget->stipple);
+	(void)XSelectInput(widget->display, widget->root, PropertyChangeMask);
+	return RETURN_SUCCESS;
+}
+
+/*
+ * Check widget.h for description on the interface of the following
+ * public functions.  Some of them rely on the existence of objects
+ * in the given addresses, during Widget's lifetime.
+ */
+
+void
+widget_free(Widget *widget)
+{
+	int i, j;
+
+	if (widget == NULL)
+		return;
+	cleanwidget(widget);
+	//if (widget->dropctx != NULL)
+	//	ctrlsel_dndclose(&widget->dropctx);
+	for (i = 0; i < widget->nicons; i++) {
+		if (widget->icons[i].pix != None) {
+			XFreePixmap(widget->display, widget->icons[i].pix);
+		}
+		if (widget->icons[i].mask != None) {
+			XFreePixmap(widget->display, widget->icons[i].mask);
+		}
+	}
+	for (i = 0; i < SELECT_LAST; i++) {
+		for (j = 0; j < COLOR_LAST; j++) {
+			if (widget->colors[i][j].pict != None) {
+				XRenderFreePicture(
+					widget->display,
+					widget->colors[i][j].pict
+				);
+			}
+			if (widget->colors[i][j].pix != None) {
+				XFreePixmap(
+					widget->display,
+					widget->colors[i][j].pix
+				);
+			}
+		}
+	}
+	for (i = 0; i < LAYER_LAST; i++) {
+		if (widget->layers[i].pict != None) {
+			XRenderFreePicture(
+				widget->display,
+				widget->layers[i].pict
+			);
+		}
+		if (widget->layers[i].pix != None) {
+			XFreePixmap(
+				widget->display,
+				widget->layers[i].pix
+			);
+		}
+	}
+	FREE(widget->icons);
+	if (widget->busycursor != None)
+		XFreeCursor(widget->display, widget->busycursor);
+	if (widget->font != NULL)
+		XftFontClose(widget->display, widget->font);
+	if (widget->namepix != None)
+		XFreePixmap(widget->display, widget->namepix);
 	if (widget->scroller != None)
 		XDestroyWindow(widget->display, widget->scroller);
 	if (widget->window != None)
 		XDestroyWindow(widget->display, widget->window);
+	if (widget->colormap != None)
+		XFreeColormap(widget->display, widget->colormap);
+	if (widget->gc != NULL)
+		XFreeGC(widget->display, widget->gc);
 	if (widget->display != NULL)
 		XCloseDisplay(widget->display);
 	FREE(widget);
-	return NULL;
+}
+
+Widget *
+widget_create(const char *class, const char *name, int argc, char *argv[])
+{
+	Widget *widget;
+	size_t i;
+	int (*initsteps[])(Widget *, const char *, const char *, int, char **) = {
+		initxconn,
+		initvisual,
+		initwindow,
+		initpictures,
+		initresources,
+		initselection,
+		initmisc,
+	};
+
+	if ((widget = malloc(sizeof(*widget))) == NULL) {
+		warn("malloc");
+		return NULL;
+	}
+	*widget = (Widget){
+		.colors[SELECT_NOT][COLOR_BG].chans = DEF_COLOR_BG,
+		.colors[SELECT_NOT][COLOR_FG].chans = DEF_COLOR_FG,
+		.colors[SELECT_YES][COLOR_BG].chans = DEF_COLOR_SELBG,
+		.colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG,
+		.opacity = DEF_OPACITY,
+		.lock = PTHREAD_MUTEX_INITIALIZER,
+		.state = STATE_NORMAL,
+		.class = class,
+		.highlight = -1,
+		.itemw = ITEM_WIDTH,
+	};
+	for (i = 0; i < LEN(initsteps); i++) {
+		if ((*initsteps[i])(widget, class, name, argc, argv)
+		    == RETURN_FAILURE) {
+			widget_free(widget);
+			return NULL;
+		}
+	}
+	return widget;
 }
 
 int
@@ -2742,54 +2995,6 @@ pollwidget(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **text
 	scrl->ydiff = widget->ydiff;
 	scrl->row = widget->row;
 	return retval;
-}
-
-void
-closewidget(Widget *widget)
-{
-	int i, j;
-
-	if (widget == NULL)
-		return;
-	ctrlsel_dndclose(&widget->dropctx);
-	cleanwidget(widget);
-	for (i = 0; i < widget->nicons; i++) {
-		if (widget->icons[i].pix != None) {
-			XFreePixmap(widget->display, widget->icons[i].pix);
-		}
-		if (widget->icons[i].mask != None) {
-			XFreePixmap(widget->display, widget->icons[i].mask);
-		}
-	}
-	for (i = 0; i < LAYER_LAST; i++) {
-		if (widget->layers[i].pict != None) {
-			XRenderFreePicture(
-				widget->display,
-				widget->layers[i].pict
-			);
-		}
-		if (widget->layers[i].pix != None) {
-			XFreePixmap(
-				widget->display,
-				widget->layers[i].pix
-			);
-		}
-	}
-	FREE(widget->icons);
-	if (widget->namepix != None)
-		XFreePixmap(widget->display, widget->namepix);
-	if (widget->stipple != None)
-		XFreePixmap(widget->display, widget->stipple);
-	for (i = 0; i < SELECT_LAST; i++)
-		for (j = 0; j < COLOR_LAST; j++)
-			XftColorFree(widget->display, widget->visual, widget->colormap, &widget->colors[i][j]);
-	XftFontClose(widget->display, widget->font);
-	XDestroyWindow(widget->display, widget->scroller);
-	XDestroyWindow(widget->display, widget->window);
-	XFreeGC(widget->display, widget->stipgc);
-	XFreeGC(widget->display, widget->gc);
-	XCloseDisplay(widget->display);
-	FREE(widget);
 }
 
 int
