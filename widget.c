@@ -25,20 +25,20 @@
 #include "widget.h"
 #include "winicon.data"         /* window icon, for the window manager */
 
-#define ATOMS                           \
-	X(TEXT_URI_LIST)                \
-	X(UTF8_STRING)                  \
-	X(WM_PROTOCOLS)                 \
-	X(WM_DELETE_WINDOW)             \
-	X(_NET_WM_ICON)                 \
-	X(_NET_WM_NAME)                 \
-	X(_NET_WM_PID)                  \
-	X(_NET_WM_WINDOW_TYPE)          \
-	X(_NET_WM_WINDOW_TYPE_DND)      \
-	X(_NET_WM_WINDOW_TYPE_NORMAL)   \
-	X(_NET_WM_WINDOW_OPACITY)       \
-	X(_CONTROL_CWD)                 \
-	X(_CONTROL_GOTO)
+#define ATOMS                                   \
+	X(TEXT_URI_LIST, "text/uri-list")       \
+	X(UTF8_STRING, NULL)                    \
+	X(WM_PROTOCOLS, NULL)                   \
+	X(WM_DELETE_WINDOW, NULL)               \
+	X(_NET_WM_ICON, NULL)                   \
+	X(_NET_WM_NAME, NULL)                   \
+	X(_NET_WM_PID, NULL)                    \
+	X(_NET_WM_WINDOW_TYPE, NULL)            \
+	X(_NET_WM_WINDOW_TYPE_DND, NULL)        \
+	X(_NET_WM_WINDOW_TYPE_NORMAL, NULL)     \
+	X(_NET_WM_WINDOW_OPACITY, NULL)         \
+	X(_CONTROL_CWD, NULL)                   \
+	X(_CONTROL_GOTO, NULL)
 
 #define RESOURCES                                             \
 	/*            CLASS               NAME             */ \
@@ -50,9 +50,8 @@
 	X(SELECT_FG, "ActiveForeground", "activeForeground")  \
 	X(OPACITY,   "Opacity",          "opacity")
 
-#define EVENT_MASK      (StructureNotifyMask | ExposureMask | KeyPressMask |\
-                         PointerMotionMask | ButtonReleaseMask | ButtonPressMask |\
-                         PropertyChangeMask)
+#define EVENT_MASK      (StructureNotifyMask | PropertyChangeMask | KeyPressMask |\
+                         PointerMotionMask | ButtonReleaseMask | ButtonPressMask)
 #define WINDOW_MASK     (CWBackPixel | CWEventMask | CWColormap | CWBorderPixel)
 
 #define DEF_COLOR_BG    (XRenderColor){ .red = 0x0000, .green = 0x0000, .blue = 0x0000, .alpha = 0xFFFF }
@@ -184,7 +183,7 @@ enum Layer {
 };
 
 enum Atom {
-#define X(atom) atom,
+#define X(atom, name) atom,
 	ATOMS
 	NATOMS
 #undef  X
@@ -2454,7 +2453,7 @@ static int
 initxconn(Widget *widget, const char *class, const char *name, int argc, char *argv[])
 {
 	static char *atomnames[] = {
-#define X(atom) [atom] = #atom,
+#define X(atom, name) [atom] = name ? name : #atom,
 		ATOMS
 #undef  X
 	};
