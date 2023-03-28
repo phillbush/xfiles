@@ -430,24 +430,29 @@ textwidth(Widget *widget, const char *text, int len)
 static void
 setfont(Widget *widget, const char *facename)
 {
+	XftFont *font;
+
 	if (facename == NULL)
 		facename = "";
-	widget->font = XftFontOpenXlfd(
+	font = XftFontOpenXlfd(
 		widget->display,
 		widget->screen,
 		facename
 	);
-	if (widget->font == NULL) {
-		widget->font = XftFontOpenName(
+	if (font == NULL) {
+		font = XftFontOpenName(
 			widget->display,
 			widget->screen,
 			facename
 		);
 	}
-	if (widget->font == NULL) {
+	if (font == NULL) {
 		warnx("%s: unknown face name", facename);
 		return;
 	}
+	if (widget->font != NULL)
+		XftFontClose(widget->display, widget->font);
+	widget->font = font;
 	widget->fonth = widget->font->height;
 	widget->itemh = THUMBSIZE + (NLINES + 1) * widget->fonth;
 	widget->ellipsisw = textwidth(widget, ELLIPSIS, strlen(ELLIPSIS));
@@ -518,13 +523,13 @@ getresource(XrmDatabase xdb, XrmClass appclass, XrmName appname, XrmClass rescla
 }
 
 static void
-loadresources(Widget *widget)
+loadresources(Widget *widget, const char *str)
 {
 	XrmDatabase xdb;
-	char *str, *value;
+	char *value;
 	enum Resource resource;
 
-	if ((str = XResourceManagerString(widget->display)) == NULL)
+	if (str == NULL)
 		return;
 	if ((xdb = XrmGetStringDatabase(str)) == NULL)
 		return;
@@ -1805,7 +1810,7 @@ createdragwin(Widget *widget, int index)
 }
 
 static char *
-gettextprop(Widget *widget, Atom prop)
+gettextprop(Widget *widget, Window window, Atom prop)
 {
 	char *text;
 	unsigned char *p;
@@ -1817,7 +1822,7 @@ gettextprop(Widget *widget, Atom prop)
 	text = NULL;
 	status = XGetWindowProperty(
 		widget->display,
-		widget->window,
+		window,
 		prop,
 		0L,
 		0x1FFFFFFF,
@@ -1840,9 +1845,61 @@ done:
 	return text;
 }
 
+static int
+getgeometry(Widget *widget, XRectangle *rect)
+{
+	unsigned int width, height;
+	int x, y, flags, retval;
+	XrmDatabase xdb;
+	char *str, *geometry;
+
+	*rect = DEF_SIZE;
+	retval = 0;
+	if ((str = XResourceManagerString(widget->display)) == NULL)
+		return 0;
+	if ((xdb = XrmGetStringDatabase(str)) == NULL)
+		return 0;
+	geometry = getresource(
+		xdb,
+		widget->application.class,
+		widget->application.name,
+		widget->resources[GEOMETRY].class,
+		widget->resources[GEOMETRY].name
+	);
+	if (geometry == NULL)
+		goto done;
+	flags = XParseGeometry(geometry, &x, &y, &width, &height);
+	if (FLAG(flags, WidthValue) && width > THUMBSIZE) {
+		rect->width = width;
+		retval |= USSize;
+	}
+	if (FLAG(flags, HeightValue) && height > THUMBSIZE) {
+		rect->height = height;
+		retval |= USSize;
+	}
+	if (FLAG(flags, XValue)) {
+		if (FLAG(flags, XNegative)) {
+			x += DisplayWidth(widget->display, widget->screen);
+			x -= rect->width;
+		}
+		rect->x = x;
+		retval |= USPosition;
+	}
+	if (FLAG(flags, YValue)) {
+		if (FLAG(flags, YNegative)) {
+			y += DisplayHeight(widget->display, widget->screen);
+			y -= rect->height;
+		}
+		rect->y = y;
+		retval |= USPosition;
+	}
+done:
+	XrmDestroyDatabase(xdb);
+	return retval;
+}
+
 /*
- * The following routines check an event, and process then if needed.
- * They return WIDGET_NONE if the event is not processed.
+ * event filters
  */
 
 static WidgetEvent
@@ -2009,6 +2066,8 @@ draw:
 static WidgetEvent
 processevent(Widget *widget, XEvent *ev)
 {
+	char *str;
+
 	if (widget->selctx != NULL) {
 		switch (ctrlsel_send(widget->selctx, ev)) {
 		case CTRLSEL_LOST:
@@ -2059,15 +2118,31 @@ processevent(Widget *widget, XEvent *ev)
 		}
 		break;
 	case PropertyNotify:
-		if (ev->xproperty.window != widget->window)
-			break;
 		if (ev->xproperty.state != PropertyNewValue)
-			break;
-		if (ev->xproperty.atom != widget->atoms[_CONTROL_GOTO])
-			break;
-		FREE(widget->lasttext);
-		widget->lastprop = widget->atoms[_CONTROL_GOTO];
-		widget->lasttext = gettextprop(widget, widget->atoms[_CONTROL_GOTO]);
+			return WIDGET_NONE;
+		if (ev->xproperty.window == widget->root &&
+		    ev->xproperty.atom == XA_RESOURCE_MANAGER) {
+			str = gettextprop(
+				widget,
+				widget->root,
+				XA_RESOURCE_MANAGER
+			);
+			if (str == NULL)
+				return WIDGET_NONE;
+			loadresources(widget, str);
+			FREE(str);
+			drawitems(widget);
+			widget->redraw = TRUE;
+		} else if (ev->xproperty.window == widget->window &&
+		           ev->xproperty.atom == widget->atoms[_CONTROL_GOTO]) {
+			FREE(widget->lasttext);
+			widget->lastprop = widget->atoms[_CONTROL_GOTO];
+			widget->lasttext = gettextprop(
+				widget,
+				widget->window,
+				widget->atoms[_CONTROL_GOTO]
+			);
+		}
 		break;
 	default:
 		return WIDGET_NONE;
@@ -2097,67 +2172,8 @@ checklastprop(Widget *widget, char **text)
 	return WIDGET_NONE;
 }
 
-static int
-getgeometry(Widget *widget, XRectangle *rect)
-{
-	unsigned int width, height;
-	int x, y, flags, retval;
-	XrmDatabase xdb;
-	char *str, *geometry;
-
-	*rect = DEF_SIZE;
-	retval = 0;
-	if ((str = XResourceManagerString(widget->display)) == NULL)
-		return 0;
-	if ((xdb = XrmGetStringDatabase(str)) == NULL)
-		return 0;
-	geometry = getresource(
-		xdb,
-		widget->application.class,
-		widget->application.name,
-		widget->resources[GEOMETRY].class,
-		widget->resources[GEOMETRY].name
-	);
-	if (geometry == NULL)
-		goto done;
-	flags = XParseGeometry(geometry, &x, &y, &width, &height);
-	if (FLAG(flags, WidthValue) && width > THUMBSIZE) {
-		rect->width = width;
-		retval |= USSize;
-	}
-	if (FLAG(flags, HeightValue) && height > THUMBSIZE) {
-		rect->height = height;
-		retval |= USSize;
-	}
-	if (FLAG(flags, XValue)) {
-		if (FLAG(flags, XNegative)) {
-			x += DisplayWidth(widget->display, widget->screen);
-			x -= rect->width;
-		}
-		rect->x = x;
-		retval |= USPosition;
-	}
-	if (FLAG(flags, YValue)) {
-		if (FLAG(flags, YNegative)) {
-			y += DisplayHeight(widget->display, widget->screen);
-			y -= rect->height;
-		}
-		rect->y = y;
-		retval |= USPosition;
-	}
-done:
-	XrmDestroyDatabase(xdb);
-	return retval;
-}
-
 /*
- * The following are the event loops we use.
- *
- * mainmode() is the main event loop; while the others are modes that
- * the widget can get in before returning to main mode.
- *
- * All event loops call processevent to handle events that are common
- * to all modes.
+ * event loops
  */
 
 static WidgetEvent
@@ -2441,7 +2457,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 }
 
 /*
- * Widget initializers
+ * widget initializers
  */
 
 static int
@@ -2739,7 +2755,7 @@ initresources(Widget *widget, const char *class, const char *name, int argc, cha
 		widget->resources[i].class = XrmPermStringToQuark(resourceids[i].class);
 		widget->resources[i].name = XrmPermStringToQuark(resourceids[i].name);
 	}
-	loadresources(widget);
+	loadresources(widget, XResourceManagerString(widget->display));
 	if (widget->font == NULL)
 		setfont(widget, NULL);
 	if (widget->font == NULL)
@@ -2802,9 +2818,7 @@ initmisc(Widget *widget, const char *class, const char *name, int argc, char *ar
 }
 
 /*
- * Check widget.h for description on the interface of the following
- * public functions.  Some of them rely on the existence of objects
- * in the given addresses, during Widget's lifetime.
+ * public routines
  */
 
 void
