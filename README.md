@@ -14,7 +14,9 @@ XFiles depends on a few environment variables to be usable:
 * `OPENER`: Program to be called to open files.  Defaults to `xdg-open`.
 * `XFILES_THUMBNAILDIR`: Path to directory where thumbnails must be cached.
 
-XFiles can be customized by setting the following X resources:
+XFiles can be customized by setting the following X resources, either
+before invoking XFiles, or while it is running (XFiles updates its theme
+after a updating the X resources database with xrdb).
 
 * `XFiles.faceName`:      Font for drawing text.
 * `XFiles.opacity`:       Background opacity (from 0.0 to 1.0).
