@@ -364,24 +364,6 @@ struct Widget {
 	 */
 	Window scroller;                /* the scroller popup window */
 	int handlew;                    /* size of scroller handle */
-
-	/*
-	 * We can be either in the main loop (see pollwidget), in the
-	 * rectangular selection sub-loop (see rectmotion), or in the
-	 * scroller widget sub-loop (see scrollmotion).  Some routines
-	 * depend on the loop we're in, so we mark its current state
-	 * with this enum.
-	 *
-	 * NOTE: whenever implementing a new sub-loop, always set its
-	 * state at beginning and reset it to STATE_NORMAL at the end
-	 * of the function.
-	 */
-	enum {  // XXX: remove state enums
-		STATE_NORMAL,
-		STATE_SELECTING,
-		STATE_SCROLLING,
-		STATE_DRAGGING,
-	} state;
 };
 
 static void
@@ -1143,7 +1125,7 @@ scroll(Widget *widget, int y)
 	}
 	setrow(widget, newrow);
 	newhand = gethandlepos(widget);
-	if (widget->state == STATE_SCROLLING && prevhand != newhand) {
+	if (prevhand != newhand) {
 		drawscroller(widget, newhand);
 	}
 	if (prevrow != newrow) {
@@ -1442,10 +1424,8 @@ mouse3click(Widget *widget, int x, int y)
 }
 
 static void
-rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
+rectclear(Widget *widget)
 {
-	int w, h;
-
 	XRenderFillRectangle(
 		widget->display,
 		PictOpClear,
@@ -1453,8 +1433,14 @@ rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 		&(XRenderColor){ 0 },
 		0, 0, widget->w, widget->h
 	);
-	if (widget->state != STATE_SELECTING)
-		return;
+}
+
+static void
+rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
+{
+	int w, h;
+
+	rectclear(widget);
 	if (row < widget->row) {
 		y0 -= min(widget->row - row, widget->nrows) * widget->itemh;
 	} else if (row > widget->row) {
@@ -2175,7 +2161,6 @@ scrollmode(Widget *widget, int x, int y)
 	XEvent ev;
 	int grabpos, pos, left;
 
-	widget->state = STATE_SCROLLING;
 	grabpos = widget->handlew / 2;             /* we grab the handle in its middle */
 	drawscroller(widget, gethandlepos(widget));
 	XMoveWindow(widget->display, widget->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
@@ -2225,7 +2210,6 @@ scrollmode(Widget *widget, int x, int y)
 		endevent(widget);
 	}
 done:
-	widget->state = STATE_NORMAL;
 	XUnmapWindow(widget->display, widget->scroller);
 	return WIDGET_NONE;
 }
@@ -2236,7 +2220,6 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 	XEvent ev;
 	int rectrow, rectydiff, ownsel;
 
-	widget->state = STATE_SELECTING;
 	rectrow = widget->row;
 	rectydiff = widget->ydiff;
 	ownsel = FALSE;
@@ -2268,8 +2251,7 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 		endevent(widget);
 	}
 done:
-	widget->state = STATE_NORMAL;
-	rectdraw(widget, 0, 0, 0, 0, 0, 0);
+	rectclear(widget);
 	commitrectsel(widget);
 	commitdraw(widget);
 	if (ownsel)
@@ -2900,7 +2882,6 @@ widget_create(const char *class, const char *name, int argc, char *argv[])
 		.colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG,
 		.opacity = DEF_OPACITY,
 		.lock = PTHREAD_MUTEX_INITIALIZER,
-		.state = STATE_NORMAL,
 		.class = class,
 		.highlight = -1,
 		.itemw = ITEM_WIDTH,
