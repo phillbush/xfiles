@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <err.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <locale.h>
 #include <poll.h>
@@ -2170,7 +2171,9 @@ nextevent(Widget *widget, XEvent *ev, int timeout)
 		}
 		switch (poll(&pfd, 1, timeout)) {
 		case -1:
-			continue;
+			if (errno == EINTR)
+				continue;
+			goto done;
 		case 0:
 			return FALSE;
 		default:
