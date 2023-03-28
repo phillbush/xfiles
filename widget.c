@@ -488,6 +488,22 @@ setcolor(Widget *widget, int scheme, int colornum, const char *colorname)
 	);
 }
 
+static void
+setopacity(Widget *widget, const char *value)
+{
+	char *endp;
+	double d;
+
+	if (value == NULL)
+		return;
+	d = strtod(value, &endp);
+	if (endp == value || *endp != '\0' || d < 0.0 || d > 1.0) {
+		warnx("%s: invalid opacity value", value);
+		return;
+	}
+	widget->opacity = d * 0xFFFF;
+}
+
 static char *
 getresource(XrmDatabase xdb, XrmClass appclass, XrmName appname, XrmClass resclass, XrmName resname)
 {
@@ -541,6 +557,7 @@ loadresources(Widget *widget)
 			setcolor(widget, SELECT_YES, COLOR_FG, value);
 			break;
 		case OPACITY:
+			setopacity(widget, value);
 			break;
 		default:
 			break;
@@ -908,6 +925,13 @@ drawitems(Widget *widget)
 static void
 commitdraw(Widget *widget)
 {
+	XRenderColor color = {
+		.red   = widget->colors[SELECT_NOT][COLOR_BG].chans.red,
+		.green = widget->colors[SELECT_NOT][COLOR_BG].chans.green,
+		.blue  = widget->colors[SELECT_NOT][COLOR_BG].chans.blue,
+		.alpha = widget->opacity,
+	};
+
 	etlock(&widget->lock);
 	XRenderFillRectangle(
 		widget->display,
@@ -920,7 +944,7 @@ commitdraw(Widget *widget)
 		widget->display,
 		PictOpSrc,
 		widget->layers[LAYER_BACKGROUND].pict,
-		&widget->colors[SELECT_NOT][COLOR_BG].chans,
+		&color,
 		0, 0, widget->w, widget->h
 	);
 	XRenderComposite(
