@@ -15,7 +15,7 @@
 .Nm ctrlsel_dndown ,
 .Nm ctrlsel_dndsend ,
 .Nm ctrlsel_dnddisown
-.Nd X11 selection ownership and requesting helper functions
+.Nd X11 selection ownership and request helper functions
 .Sh SYNOPSIS
 .In "X11/Xlib.h"
 .In "control/ctrlsel.h"
@@ -28,7 +28,7 @@
 .Fa "unsigned long size"
 .Fa "struct CtrlSelTarget *target_fill"
 .Fc
-.Ft int
+.Ft "CtrlSelContext *"
 .Fo "ctrlsel_request"
 .Fa "Display *display"
 .Fa "Window window"
@@ -36,18 +36,17 @@
 .Fa "Time time"
 .Fa "struct CtrlSelTarget targets[]"
 .Fa "unsigned long ntargets"
-.Fa "struct CtrlSelContext *context"
 .Fc
 .Ft int
 .Fo "ctrlsel_receive"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext *context"
 .Fa "XEvent *event"
 .Fc
 .Ft void
 .Fo "ctrlsel_cancel"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext *context"
 .Fc
-.Ft int
+.Ft "CtrlSelContext *"
 .Fo "ctrlsel_setowner"
 .Fa "Display *display"
 .Fa "Window window"
@@ -56,34 +55,32 @@
 .Fa "int ismanager"
 .Fa "struct CtrlSelTarget targets[]"
 .Fa "unsigned long ntargets"
-.Fa "struct CtrlSelContext *context"
 .Fc
 .Ft int
 .Fo "ctrlsel_send"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext *context"
 .Fa "XEvent *event"
 .Fc
 .Ft void
 .Fo "ctrlsel_disown"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext *context"
 .Fc
-.Ft int
+.Ft "CtrlSelContext *"
 .Fo "ctrlsel_dndwatch"
 .Fa "Display *display"
 .Fa "Window window"
 .Fa "unsigned int actions"
 .Fa "struct CtrlSelTarget targets[]"
 .Fa "unsigned long ntargets"
-.Fa "struct CtrlSelContext *context"
 .Fc
 .Ft int
 .Fo "ctrlsel_dndreceive"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext *"
 .Fa "XEvent *event"
 .Fc
 .Ft void
 .Fo "ctrlsel_dndclose"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext *context"
 .Fc
 .Ft int
 .Fo "ctrlsel_dndown"
@@ -93,16 +90,16 @@
 .Fa "Time time"
 .Fa "struct CtrlSelTarget targets[]"
 .Fa "unsigned long ntargets"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext **context_ret"
 .Fc
 .Ft int
 .Fo "ctrlsel_dndsend"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext *context"
 .Fa "XEvent *event"
 .Fc
 .Ft void
 .Fo "ctrlsel_dnddisown"
-.Fa "struct CtrlSelContext *context"
+.Fa "CtrlSelContext *context"
 .Fc
 .Sh ARGUMENTS
 .Bl -tag -width Ds
@@ -128,10 +125,12 @@ argument is for a selection to be requested,
 then any value (such as
 .Ic "NULL" )
 can be given, for the selection content is yet to be requested.
-.It Fa "context"
+.It Fa context
 Specifies the pointer to a
-.Ft "struct CtrlSelContext"
+.Ft CtrlSelContext
 structure containing the context of the selection request or ownership.
+.It Fa context_ret
+Returns the context for the drag-and-drop operation.
 .It Fa "display"
 Specifies the connection to the X server.
 .It Fa "event"
@@ -242,7 +241,7 @@ the given
 .Fa "selection" .
 .El
 .Sh DESCRIPTION
-These functions and related data structures provide management of ownership and requesting of X11 selections, including for drag-and-drop operations.
+These functions and related data structures provide management of ownership and request of X11 selections, including for drag-and-drop operations.
 In addition to the
 .Fn "ctrlsel_filltarget"
 function (used to set up
@@ -266,8 +265,8 @@ and
 functions must only be called after
 .Fn "ctrlsel_request"
 with the
-.Fa "context"
-filled by it.
+.Fa context
+returned by it.
 .It
 The
 .Fn "ctrlsel_setowner" ,
@@ -284,8 +283,8 @@ and
 functions must only be called after
 .Fn "ctrlsel_setowner"
 with the
-.Fa "context"
-filled by it.
+.Fa context
+returned by it.
 .It
 The
 .Fn "ctrlsel_dndwatch" ,
@@ -302,8 +301,8 @@ and
 functions must only be called after
 .Fn "ctrlsel_dndwatch"
 with the
-.Fa "context"
-filled by it.
+.Fa context
+returned by it.
 .It
 The
 .Fn "ctrlsel_dndown" ,
@@ -320,8 +319,8 @@ and
 functions must only be called after
 .Fn "ctrlsel_dndown"
 with the
-.Fa "context"
-filled by it.
+.Fa context
+returned by it.
 .El
 .Pp
 The
@@ -339,7 +338,7 @@ member, which is derived from the other ones.
 .Pp
 The
 .Fn "ctrlsel_request"
-function requests for the
+function asks the
 .Xr Xserver 1
 represented by
 .Fa "display"
@@ -347,26 +346,26 @@ to convert the
 .Fa "selection"
 into all the
 .Fa "targets"
-in name of the
+for the
 .Fa "window" .
-This function also fills
-.Fa "context"
-with data to be passed to the
+It returns a pointer to a
+.Ft CtrlSelContext
+to be passed to the
 .Fn "ctrlsel_receive"
 and
 .Fn "ctrlsel_cancel"
 functions (therefore, those functions must have access to the
 .Fa "targets"
 argument).
-It returns nonzero on success, and zero on error.
+It returns NULL on error.
 .Pp
 The
 .Fn "ctrlsel_receive"
 function filters the X event pointed to by
 .Fa "event" ,
 checks whether it is related to the
-.Fa "context"
-previously filled in by
+.Fa context
+returned by
 .Fn "ctrlsel_request" ,
 and receives part or all of the content of the requested selection into the requested targets.
 One of the following enum constants is returned:
@@ -413,7 +412,7 @@ The
 function cancels the selection conversion represented by the
 .Fa "context" ,
 terminates any incremental transference in progress,
-and frees any allocated buffer.
+and frees the context itself and any allocated buffer.
 .Pp
 The
 .Fn "ctrlsel_setowner"
@@ -423,7 +422,7 @@ represented to by
 .Fa "display"
 to own the
 .Fa "selection"
-in name of the given
+for the
 .Fa "window" ,
 so it can provide the contents of all
 .Fa "targets" .
@@ -432,25 +431,24 @@ If the
 is a manager selection, the
 .Fa "ismanager"
 argument must be set to nonzero.
-This function also fills
-.Fa "context"
-with data to be passed to the
+It returns a pointer to a
+.Ft CtrlSelContext
+to be passed to the
 .Fn "ctrlsel_send"
 and
 .Fn "ctrlsel_disown"
-functions.
-(therefore, those functions must have access to the
+functions (therefore, those functions must have access to the
 .Fa "targets"
 argument).
-It returns nonzero on success, and zero on error.
+It returns NULL on error.
 .Pp
 The
 .Fn "ctrlsel_send"
 function filters the X event pointed to by
 .Fa "event" ,
 checks whether it is related to the
-.Fa "context"
-previously filled in by
+.Fa context
+returned by
 .Fn "ctrlsel_setowner" ,
 and sends the converted selection to any requestor client.
 One of the following enum constants is returned:
@@ -470,12 +468,12 @@ The
 .Fn "ctrlsel_disown"
 function cancels the selection ownership represented by the
 .Fa "context" ,
-and terminates any incremental transference in progress.
+terminates any incremental transference in progress, and frees the context itself.
 This function does not free any buffer.
 .Pp
 The
 .Fn "ctrlsel_dndwatch"
-function initiates the watch of dropped content on the given
+function begins watching dropped content on
 .Fa "window"
 in the
 .Xr Xserver 1
@@ -485,9 +483,9 @@ The content must be on the specified
 .Fa "targets"
 and must be dropped by the specified
 .Fa "actions" .
-This function also fills
-.Fa context
-with data to be passed to the
+It returns a pointer to a
+.Ft CtrlSelContext
+to be passed to the
 .Fn "ctrlsel_dndreceive"
 and
 .Fn "ctrlsel_dndclose"
@@ -495,8 +493,8 @@ functions
 (therefore, those functions must have access to the
 .Fa "targets"
 argumnent).
+It returns NULL on error.
 This function should be called once, at program initialization.
-It returns nonzero on success, and zero on error.
 .Pp
 The
 .Fn "ctrlsel_dndreceive"
@@ -504,7 +502,7 @@ function filters the X event pointed to by
 .Fa "event" ,
 checks whether it is related to the
 .Fa context
-previously filled in by
+returned by
 .Fn ctrlsel_dndwatch ,
 and receives part or all of the dropped content.
 One of the following enum constants is returned:
@@ -549,7 +547,7 @@ The
 function cancels the watch for drops represented by
 .Fa context ,
 terminates any incremental transference in progress,
-and frees any allocated buffer.
+and frees the context itself and any allocated buffer.
 .Pp
 The
 .Fn ctrlsel_dndown
@@ -557,19 +555,21 @@ function asks the
 .Xr Xserver 1
 represented to by
 .Fa display
-to own the drag-and-drop selection in name of the given
+to own the drag-and-drop selection for
 .Fa window ,
 so it can provide the contents of
 .Fa targets .
 This function blocks until the user drops the dragged content (by releasing a mouse button),
 or cancels the drag-and-drop operation (by pressing ESC).
-If a
+If the given
 .Fa miniature
 window is not
 .Ic None ,
 the window is mapped, raised and moved around to follow the user's mouse pointer.
-This function also fills
-.Fa context
+It saves into
+.Fa context_ret
+a pointer to
+.Ft CtrlSelContext
 with data to be passed to the
 .Fn ctrlsel_dndsend
 and
@@ -601,7 +601,7 @@ filters the X event pointed to by
 .Fa event ,
 checks whether it is related to the
 .Fa context
-previously filled by
+returned by
 .Fn ctrlsel_dndown ,
 and sends the dropped content to the window it was dropped on.
 One of the following enum constants is returned:
@@ -623,7 +623,8 @@ The caller should not further process the event.
 The
 .Fn ctrlsel_dnddisown
 function cancels the transference of the dropped content represented by the
-.Fa context .
+.Fa context ,
+and frees the context itself.
 This function does not free any buffer.
 .Sh STRUCTURES
 The
@@ -732,20 +733,6 @@ The size in bytes of
 The buffer containing the selection content converted into
 .Fa "target" .
 .El
-.Pp
-The contents of the
-.Ft "struct CtrlSelContext"
-structure contains basically the values provided to the
-.Fn "ctrlsel_request"
-and
-.Fn "ctrlsel_setowner"
-functions (that is, the
-.Fa "display" ,
-.Fa "targets" ,
-.Fa "selection" ,
-etc).
-Its definition can be read by the programmer in the header file,
-but it is not relevant for this manual.
 .Sh RETURN VALUES
 Upon error,
 the
@@ -769,7 +756,7 @@ If the request is not triggered by an event, the value
 .Ic "CurrentTime"
 must be given instead.
 .Bd -literal -offset indent
-struct CtrlSelContext context;
+CtrlSelContext *context;
 struct CtrlSelTarget targets[2];
 XEvent event;
 Display *display;
@@ -784,16 +771,17 @@ ctrlsel_filltarget(utf8, utf8, 0, NULL, 0, &targets[0]);
 ctrlsel_filltarget(html, html, 0, NULL, 0, &targets[1]);
 
 /* step 1: request selection contents */
-if (!ctrlsel_request(display, window, XA_PRIMARY,
-                     time, targets, 2, &context)) {
-	fprintf(stderr, "warning: could not request selection");
+context = ctrlsel_request(display, window, XA_PRIMARY,
+                          time, targets, 2);
+if (context == NULL) {
+	fprintf(stderr, "could not request selection");
 	return;
 }
 
 /* step 2: receive selection contents */
 for (;;) {
 	(void)XNextEvent(display, &event);
-	switch (ctrlsel_receive(&context, &event)) {
+	switch (ctrlsel_receive(context, &event)) {
 	case CTRLSEL_NONE:
 		/* call event handler */
 		break;
@@ -817,20 +805,25 @@ done:
 	       targets[1].buffer);
 	free(targets[0].buffer);
 	free(targets[1].buffer);
+
+/* step 4: free the selection context */
+ctrlsel_cancel(context);
+context = NULL;
 .Ed
 .Pp
 The following is an example of the implementation of a function asking for the ownership of the primary selection with two targets.
-The contents of the selection must be send to requestors in a loop,
+The contents of the selection must be sent to requestors in a loop,
 because other clients can request the selection asynchronously at any time.
 If the ownership is triggered by an event (for example, the user selected a text with the mouse), the variable
-.Fa "time"
+.Fa time
 must be the timestamp of the event that caused it (for example, in a
 .Xr XButtonEvent 3
 event).
 If the ownership is not triggered by an event, the value
-.Ic "CurrentTime" must be given instead.
+.Ic CurrentTime
+must be given instead.
 .Bd -literal -offset indent
-struct CtrlSelContext context;
+CtrlSelContext *context;
 struct CtrlSelTarget targets[2];
 XEvent event;
 Display *display;
@@ -848,8 +841,9 @@ ctrlsel_filltarget(utf8, utf8, 8, plain, strlen(plain), &targets[0]);
 ctrlsel_filltarget(html, html, 8, markd, strlen(markd), &targets[1]);
 
 /* step 1: ask for selection ownership */
-if (!ctrlsel_setowner(display, window, XA_PRIMARY,
-                     time, 0, targets, 2, &context)) {
+context = ctrlsel_setowner(display, window, XA_PRIMARY,
+                           time, 0, targets, 2);
+if (context == NULL) {
 	fprintf(stderr, "warning: could not own selection");
 	return;
 }
@@ -857,7 +851,7 @@ if (!ctrlsel_setowner(display, window, XA_PRIMARY,
 /* step 2: provide selection contents */
 for (;;) {
 	(void)XNextEvent(display, &event);
-	switch (ctrlsel_send(&context, &event)) {
+	switch (ctrlsel_send(context, &event)) {
 	case CTRLSEL_NONE:
 		/* call event handler */
 		break;
@@ -868,7 +862,9 @@ for (;;) {
 	}
 }
 
-/* step 3: free the contents (not needed here, tho) */
+/* step 3: free the contents */
+ctrlsel_disown(context);
+context = NULL;
 .Ed
 .Sh SEE ALSO
 .Xr X 1 ,

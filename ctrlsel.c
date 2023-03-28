@@ -30,7 +30,6 @@
 #define XDND_VERSION    5               /* XDND protocol version */
 #define NCLIENTMSG_DATA 5               /* number of members on a the .data.l[] array of a XClientMessageEvent */
 
-
 enum {
 	CONTENT_INCR,
 	CONTENT_ZERO,
@@ -94,9 +93,32 @@ struct Transfer {
 };
 
 struct PredArg {
-	struct CtrlSelContext *context;
+	CtrlSelContext *context;
 	Window window;
 	Atom message_type;
+};
+
+struct CtrlSelContext {
+	Display *display;
+	Window window;
+	Atom selection;
+	Time time;
+	unsigned long ntargets;
+	struct CtrlSelTarget *targets;
+
+	/*
+	 * Items below are used internally to keep track of any
+	 * incremental transference in progress.
+	 */
+	unsigned long selmaxsize;
+	unsigned long ndone;
+	void *transfers;
+
+	/*
+	 * Items below are used internally for drag-and-dropping.
+	 */
+	Window dndwindow;
+	unsigned int dndactions, dndresult;
 };
 
 static char *atomnames[XDND_ATOM_LAST] = {
@@ -295,7 +317,7 @@ getcontent(struct CtrlSelTarget *target, Display *display, Window window, Atom p
 }
 
 static void
-deltransfer(struct CtrlSelContext *context, struct Transfer *transfer)
+deltransfer(CtrlSelContext *context, struct Transfer *transfer)
 {
 	if (transfer->prev != NULL) {
 		transfer->prev->next = transfer->next;
@@ -308,7 +330,7 @@ deltransfer(struct CtrlSelContext *context, struct Transfer *transfer)
 }
 
 static void
-freetransferences(struct CtrlSelContext *context)
+freetransferences(CtrlSelContext *context)
 {
 	struct Transfer *transfer;
 
@@ -326,7 +348,7 @@ freetransferences(struct CtrlSelContext *context)
 }
 
 static void
-freebuffers(struct CtrlSelContext *context)
+freebuffers(CtrlSelContext *context)
 {
 	unsigned long i;
 
@@ -376,7 +398,7 @@ error:
 }
 
 static int
-newtransfer(struct CtrlSelContext *context, struct CtrlSelTarget *target, Window requestor, Atom property)
+newtransfer(CtrlSelContext *context, struct CtrlSelTarget *target, Window requestor, Atom property)
 {
 	struct Transfer *transfer;
 
@@ -398,7 +420,7 @@ newtransfer(struct CtrlSelContext *context, struct CtrlSelTarget *target, Window
 }
 
 static Bool
-convert(struct CtrlSelContext *context, Window requestor, Atom target, Atom property)
+convert(CtrlSelContext *context, Window requestor, Atom target, Atom property)
 {
 	Atom multiple, timestamp, targets, incr;
 	Atom *supported;
@@ -502,7 +524,7 @@ found:
 }
 
 static int
-request(struct CtrlSelContext *context)
+request(CtrlSelContext *context)
 {
 	Atom multiple, atom_pair;
 	Atom *pairs;
@@ -580,19 +602,22 @@ ctrlsel_filltarget(
 	};
 }
 
-int
+CtrlSelContext *
 ctrlsel_request(
 	Display *display,
 	Window window,
 	Atom selection,
 	Time time,
 	struct CtrlSelTarget targets[],
-	unsigned long ntargets,
-	struct CtrlSelContext *context
+	unsigned long ntargets
 ) {
+	CtrlSelContext *context;
+
 	if (!getservertime(display, &time))
-		return 0;
-	*context = (struct CtrlSelContext){
+		return NULL;
+	if ((context = malloc(sizeof(*context))) == NULL)
+		return NULL;
+	*context = (CtrlSelContext){
 		.display = display,
 		.window = window,
 		.selection = selection,
@@ -607,11 +632,14 @@ ctrlsel_request(
 		.dndresult = 0x00,
 	};
 	if (ntargets == 0)
-		return 1;
-	return request(context);
+		return context;
+	if (request(context))
+		return context;
+	free(context);
+	return NULL;
 }
 
-int
+CtrlSelContext *
 ctrlsel_setowner(
 	Display *display,
 	Window window,
@@ -619,15 +647,17 @@ ctrlsel_setowner(
 	Time time,
 	int ismanager,
 	struct CtrlSelTarget targets[],
-	unsigned long ntargets,
-	struct CtrlSelContext *context
+	unsigned long ntargets
 ) {
+	CtrlSelContext *context;
 	Window root;
 
 	root = DefaultRootWindow(display);
 	if (!getservertime(display, &time))
-		return 0;
-	*context = (struct CtrlSelContext){
+		return NULL;
+	if ((context = malloc(sizeof(*context))) == NULL)
+		return NULL;
+	*context = (CtrlSelContext){
 		.display = display,
 		.window = window,
 		.selection = selection,
@@ -642,10 +672,12 @@ ctrlsel_setowner(
 		.dndresult = 0x00,
 	};
 	(void)XSetSelectionOwner(display, selection, window, time);
-	if (XGetSelectionOwner(display, selection) != window)
-		return 0;
+	if (XGetSelectionOwner(display, selection) != window) {
+		free(context);
+		return NULL;
+	}
 	if (!ismanager)
-		return 1;
+		return context;
 
 	/*
 	 * According to ICCCM, a manager client (that is, a client
@@ -677,11 +709,11 @@ ctrlsel_setowner(
 			.data.l[4]    = 0,              /* manager-specific data */
 		}
 	);
-	return 1;
+	return context;
 }
 
 static int
-receiveinit(struct CtrlSelContext *context, XEvent *xev)
+receiveinit(CtrlSelContext *context, XEvent *xev)
 {
 	struct CtrlSelTarget *targetp;
 	XSelectionEvent *xselev;
@@ -761,7 +793,7 @@ receiveinit(struct CtrlSelContext *context, XEvent *xev)
 }
 
 static int
-receiveincr(struct CtrlSelContext *context, XEvent *xev)
+receiveincr(CtrlSelContext *context, XEvent *xev)
 {
 	struct Transfer *transfer;
 	XPropertyEvent *xpropev;
@@ -798,7 +830,7 @@ found:
 }
 
 int
-ctrlsel_receive(struct CtrlSelContext *context, XEvent *xev)
+ctrlsel_receive(CtrlSelContext *context, XEvent *xev)
 {
 	int status;
 
@@ -824,7 +856,7 @@ done:
 }
 
 static int
-sendinit(struct CtrlSelContext *context, XEvent *xev)
+sendinit(CtrlSelContext *context, XEvent *xev)
 {
 	XSelectionRequestEvent *xreqev;
 	XSelectionEvent xselev;
@@ -917,7 +949,7 @@ done:
 }
 
 static int
-sendlost(struct CtrlSelContext *context, XEvent *xev)
+sendlost(CtrlSelContext *context, XEvent *xev)
 {
 	XSelectionClearEvent *xclearev;
 
@@ -930,7 +962,7 @@ sendlost(struct CtrlSelContext *context, XEvent *xev)
 }
 
 static int
-senddestroy(struct CtrlSelContext *context, XEvent *xev)
+senddestroy(CtrlSelContext *context, XEvent *xev)
 {
 	struct Transfer *transfer;
 	XDestroyWindowEvent *xdestroyev;
@@ -943,7 +975,7 @@ senddestroy(struct CtrlSelContext *context, XEvent *xev)
 }
 
 static int
-sendincr(struct CtrlSelContext *context, XEvent *xev)
+sendincr(CtrlSelContext *context, XEvent *xev)
 {
 	struct Transfer *transfer;
 	XPropertyEvent *xpropev;
@@ -982,7 +1014,7 @@ found:
 }
 
 int
-ctrlsel_send(struct CtrlSelContext *context, XEvent *xev)
+ctrlsel_send(CtrlSelContext *context, XEvent *xev)
 {
 	int status;
 
@@ -1004,20 +1036,22 @@ ctrlsel_send(struct CtrlSelContext *context, XEvent *xev)
 }
 
 void
-ctrlsel_cancel(struct CtrlSelContext *context)
+ctrlsel_cancel(CtrlSelContext *context)
 {
 	if (context == NULL)
 		return;
 	freebuffers(context);
 	freetransferences(context);
+	free(context);
 }
 
 void
-ctrlsel_disown(struct CtrlSelContext *context)
+ctrlsel_disown(CtrlSelContext *context)
 {
 	if (context == NULL)
 		return;
 	freetransferences(context);
+	free(context);
 }
 
 static Bool
@@ -1189,25 +1223,27 @@ getdndwindowbelow(Display *display, Window root, Atom aware, Atom *version)
 	return None;
 }
 
-int
+CtrlSelContext *
 ctrlsel_dndwatch(
 	Display *display,
 	Window window,
 	unsigned int actions,
 	struct CtrlSelTarget targets[],
-	unsigned long ntargets,
-	struct CtrlSelContext *context
+	unsigned long ntargets
 ) {
+	CtrlSelContext *context;
 	Atom version = XDND_VERSION;    /* yes, version is an Atom */
 	Atom xdndaware, xdndselection;
 
 	xdndaware = XInternAtom(display, atomnames[XDND_AWARE], False);
 	if (xdndaware == None)
-		return 0;
+		return NULL;
 	xdndselection = XInternAtom(display, atomnames[XDND_SELECTION], False);
 	if (xdndselection == None)
-		return 0;
-	*context = (struct CtrlSelContext){
+		return NULL;
+	if ((context = malloc(sizeof(*context))) == NULL)
+		return NULL;
+	*context = (CtrlSelContext){
 		.display = display,
 		.window = window,
 		.selection = xdndselection,
@@ -1230,11 +1266,11 @@ ctrlsel_dndwatch(
 		(unsigned char *)&version,
 		1
 	);
-	return 1;
+	return context;
 }
 
 static void
-finishdrop(struct CtrlSelContext *context)
+finishdrop(CtrlSelContext *context)
 {
 	long d[NCLIENTMSG_DATA];
 	unsigned long i;
@@ -1254,7 +1290,7 @@ finishdrop(struct CtrlSelContext *context)
 }
 
 int
-ctrlsel_dndreceive(struct CtrlSelContext *context, XEvent *event)
+ctrlsel_dndreceive(CtrlSelContext *context, XEvent *event)
 {
 	Atom atoms[XDND_ATOM_LAST];
 	Atom action;
@@ -1334,23 +1370,24 @@ ctrlsel_dndreceive(struct CtrlSelContext *context, XEvent *event)
 }
 
 void
-ctrlsel_dndclose(struct CtrlSelContext *context)
+ctrlsel_dndclose(CtrlSelContext *context)
 {
 	if (context == NULL)
 		return;
 	finishdrop(context);
 	freebuffers(context);
 	freetransferences(context);
+	free(context);
 }
 
 void
-ctrlsel_dnddisown(struct CtrlSelContext *context)
+ctrlsel_dnddisown(CtrlSelContext *context)
 {
 	ctrlsel_disown(context);
 }
 
 int
-ctrlsel_dndsend(struct CtrlSelContext *context, XEvent *event)
+ctrlsel_dndsend(CtrlSelContext *context, XEvent *event)
 {
 	Atom finished;
 
@@ -1372,8 +1409,9 @@ ctrlsel_dndown(
 	Time time,
 	struct CtrlSelTarget targets[],
 	unsigned long ntargets,
-	struct CtrlSelContext *context
+	CtrlSelContext **context_ret
 ) {
+	CtrlSelContext *context;
 	struct PredArg arg;
 	XWindowAttributes wattr;
 	XEvent event;
@@ -1386,6 +1424,7 @@ ctrlsel_dndown(
 	int sendposition, retval, status, inside, accept;
 	int x, y, w, h;
 
+	*context_ret = NULL;
 	if (display == NULL || window == None)
 		return CTRLSEL_ERROR;
 	if (!XGetWindowAttributes(display, window, &wattr))
@@ -1396,17 +1435,16 @@ ctrlsel_dndown(
 		return CTRLSEL_ERROR;
 	if (!XInternAtoms(display, atomnames, XDND_ATOM_LAST, False, atoms))
 		return CTRLSEL_ERROR;
-	status = ctrlsel_setowner(
+	context = ctrlsel_setowner(
 		display,
 		window,
 		atoms[XDND_SELECTION],
 		time,
 		0,
 		targets,
-		ntargets,
-		context
+		ntargets
 	);
-	if (!status)
+	if (context == NULL)
 		return CTRLSEL_ERROR;
 	d[0] = window;
 	accept = TRUE;
@@ -1582,7 +1620,10 @@ done:
 	XUngrabPointer(display, CurrentTime);
 	XUngrabKeyboard(display, CurrentTime);
 	freecursors(display, cursors);
-	if (retval != CTRLSEL_DROPOTHER)
+	if (retval != CTRLSEL_DROPOTHER) {
 		ctrlsel_dnddisown(context);
+		context = NULL;
+	}
+	*context_ret = context;
 	return retval;
 }

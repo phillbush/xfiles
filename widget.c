@@ -285,8 +285,7 @@ struct Widget {
 	struct CtrlSelTarget targets[TARGET_LAST];
 	struct CtrlSelTarget dragtarget;
 	struct CtrlSelTarget droptarget;
-	struct CtrlSelContext *selctx, *dragctx;
-	struct CtrlSelContext dropctx;
+	CtrlSelContext *selctx, *dragctx, *dropctx;
 	struct Selection *sel;          /* list of selections */
 	struct Selection *rectsel;      /* list of selections by rectsel */
 	struct Selection **issel;       /* array of pointers to Selections */
@@ -1228,7 +1227,7 @@ disownprimary(Widget *widget)
 	if (widget->selctx == NULL)
 		return;
 	ctrlsel_disown(widget->selctx);
-	FREE(widget->selctx);
+	widget->selctx = NULL;
 }
 
 static void
@@ -1237,7 +1236,7 @@ disowndnd(Widget *widget)
 	if (widget->dragctx == NULL)
 		return;
 	ctrlsel_dnddisown(widget->dragctx);
-	FREE(widget->dragctx);
+	widget->dragctx = NULL;
 }
 
 static void
@@ -1245,15 +1244,10 @@ ownprimary(Widget *widget, Time time)
 {
 	struct Selection *sel;
 	size_t i, j;
-	int success;
 
 	if (widget->sel == NULL)
 		return;
 	disownprimary(widget);
-	if ((widget->selctx = malloc(sizeof(*widget->selctx))) == NULL) {
-		warn("malloc");
-		return;
-	}
 	i = j = 0;
 	for (sel = widget->sel; sel != NULL; sel = sel->next) {
 		if (sel->next != NULL)
@@ -1275,15 +1269,15 @@ ownprimary(Widget *widget, Time time)
 		8, (unsigned char *)widget->uribuf, j,
 		&widget->targets[TARGET_URI]
 	);
-	success = ctrlsel_setowner(
-		widget->display, widget->window,
-		XA_PRIMARY, time, 0,
-		widget->targets, TARGET_LAST,
-		widget->selctx
+	widget->selctx = ctrlsel_setowner(
+		widget->display,
+		widget->window,
+		XA_PRIMARY,
+		time,
+		0,
+		widget->targets,
+		TARGET_LAST
 	);
-	if (!success) {
-		FREE(widget->selctx);
-	}
 }
 
 static void
@@ -2083,7 +2077,7 @@ processevent(Widget *widget, XEvent *ev)
 	if (widget->dragctx != NULL) {
 		switch (ctrlsel_dndsend(widget->dragctx, ev)) {
 		case CTRLSEL_SENT:
-			disowndnd(widget);
+			widget->dragctx = NULL;
 			return WIDGET_REFRESH;
 		case CTRLSEL_LOST:
 			disowndnd(widget);
@@ -2094,7 +2088,7 @@ processevent(Widget *widget, XEvent *ev)
 			break;
 		}
 	}
-	switch (ctrlsel_dndreceive(&widget->dropctx, ev)) {
+	switch (ctrlsel_dndreceive(widget->dropctx, ev)) {
 	case CTRLSEL_RECEIVED:
 		FREE(widget->droptarget.buffer);
 		return WIDGET_INTERNAL;
@@ -2295,10 +2289,6 @@ dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 	if (widget->sel == NULL)
 		return WIDGET_NONE;
 	disowndnd(widget);
-	if ((widget->dragctx = malloc(sizeof(*widget->dragctx))) == NULL) {
-		warn("malloc");
-		return WIDGET_NONE;
-	}
 	dragwin = createdragwin(widget, clicki);
 	i = 0;
 	for (sel = widget->sel; sel != NULL; sel = sel->next)
@@ -2316,12 +2306,10 @@ dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 		lasttime,
 		&widget->dragtarget,
 		1,
-		widget->dragctx
+		&widget->dragctx
 	);
 	if (dragwin != None)
 		XDestroyWindow(widget->display, dragwin);
-	if (state != CTRLSEL_DROPOTHER)
-		FREE(widget->dragctx);
 	if (state == CTRLSEL_ERROR) {
 		warnx("could not perform drag-and-drop");
 	} else if (state == CTRLSEL_DROPSELF) {
@@ -2337,6 +2325,8 @@ dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 		if (FLAG(mask, ControlMask))
 			return WIDGET_DROPCOPY;
 		return WIDGET_DROPASK;
+	} else if (state == CTRLSEL_DROPOTHER) {
+		return WIDGET_INTERNAL;
 	}
 	return WIDGET_NONE;
 }
@@ -2353,7 +2343,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 	int x, y;
 
 	while (!XNextEvent(widget->display, &ev)) {
-		switch (ctrlsel_dndreceive(&widget->dropctx, &ev)) {
+		switch (ctrlsel_dndreceive(widget->dropctx, &ev)) {
 		case CTRLSEL_RECEIVED:
 			if (widget->droptarget.buffer == NULL)
 				return WIDGET_INTERNAL;
@@ -2766,8 +2756,6 @@ initresources(Widget *widget, const char *class, const char *name, int argc, cha
 static int
 initselection(Widget *widget, const char *class, const char *name, int argc, char *argv[])
 {
-	int success;
-
 	(void)class;
 	(void)name;
 	(void)argc;
@@ -2778,16 +2766,14 @@ initselection(Widget *widget, const char *class, const char *name, int argc, cha
 		0, NULL, 0,
 		&widget->droptarget
 	);
-	success = ctrlsel_dndwatch(
+	widget->dropctx = ctrlsel_dndwatch(
 		widget->display,
 		widget->window,
 		CTRLSEL_COPY | CTRLSEL_MOVE | CTRLSEL_LINK | CTRLSEL_ASK,
 		&widget->droptarget,
-		1,
-		&widget->dropctx
+		1
 	);
-	if (!success) {
-		ctrlsel_dndclose(&widget->dropctx);
+	if (widget->dropctx == NULL) {
 		warnx("could not watch drag-and-drop selection");
 		return RETURN_FAILURE;
 	}
@@ -2829,8 +2815,8 @@ widget_free(Widget *widget)
 	if (widget == NULL)
 		return;
 	cleanwidget(widget);
-	//if (widget->dropctx != NULL)
-	//	ctrlsel_dndclose(&widget->dropctx);
+	if (widget->dropctx != NULL)
+		ctrlsel_dndclose(widget->dropctx);
 	for (i = 0; i < widget->nicons; i++) {
 		if (widget->icons[i].pix != None) {
 			XFreePixmap(widget->display, widget->icons[i].pix);
