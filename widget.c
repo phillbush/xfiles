@@ -113,19 +113,12 @@ enum {
 	DATA_DEPTH      = 4,                    /* BGRA */
 
 	/* sizes of string buffers */
-	TITLE_BUFSIZE   = 1028,                 /* title buffer size */
-	STATUS_BUFSIZE  = 64,                   /* status buffer size */
-	RES_BUFSIZE     = 512,                  /* resource buffer size */
 	KSYM_BUFSIZE    = 64,                   /* key symbol name buffer size */
 
 	/* hardcoded object sizes in pixels */
 	/* there's no ITEM_HEIGHT for it is computed at runtime from font height */
 	THUMBSIZE       = 64,                   /* maximum thumbnail size */
 	ITEM_WIDTH      = (THUMBSIZE * 2),      /* width of an item (icon + margins) */
-	MIN_WIDTH       = ITEM_WIDTH,           /* minimum window width */
-	MIN_HEIGHT      = (THUMBSIZE * 3),      /* minimum window height */
-	DEF_WIDTH       = 600,                  /* default window width */
-	DEF_HEIGHT      = 460,                  /* default window height */
 	MARGIN          = 16,                   /* top margin above first row */
 
 	/* constants for parsing .ppm files */
@@ -983,16 +976,16 @@ commitdraw(Widget *widget)
 static void
 settitle(Widget *widget)
 {
-	char title[TITLE_BUFSIZE];
-	char nitems[STATUS_BUFSIZE];
+	char title[1028];       /* enough for a window title */
+	char nitems[64];        /* enough for writing number of files */
 	char *selitem, *status;
-	int scrollpct;                  /* scroll percentage */
+	int scrollpct;          /* scroll percentage */
 
 	if (widget->row == 0 && widget->nscreens > 1)
 		scrollpct = 0;
 	else
 		scrollpct = 100 * ((double)(widget->row + 1) / widget->nscreens);
-	(void)snprintf(nitems, STATUS_BUFSIZE, "%d items", widget->nitems - 1);
+	(void)snprintf(nitems, LEN(nitems), "%d items", widget->nitems - 1);
 	selitem = "";
 	status = nitems;
 	selitem = (widget->highlight > 0 ? widget->items[widget->highlight][ITEM_NAME] : "");
@@ -1004,7 +997,7 @@ settitle(Widget *widget)
 		status = widget->items[widget->highlight][ITEM_STATUS];
 	if (widget->title != NULL) {
 		(void)snprintf(
-			title, TITLE_BUFSIZE,
+			title, LEN(title),
 			"%s%s%s (%s) (%d%%)",
 			widget->title,
 			(strcmp(widget->title, "/") != 0 ? "/" : ""),
