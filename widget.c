@@ -162,7 +162,6 @@ enum {
 
 enum Layer {
 	LAYER_CANVAS,
-	LAYER_BACKGROUND,
 	LAYER_ICONS,
 	LAYER_SELALPHA,
 	LAYER_RECTALPHA,
@@ -576,7 +575,6 @@ calcsize(Widget *widget, int w, int h)
 	}
 	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
 	resetlayer(widget, LAYER_CANVAS, widget->w, widget->h);
-	resetlayer(widget, LAYER_BACKGROUND, widget->w, widget->h);
 	etunlock(&widget->lock);
 	return ret;
 }
@@ -793,7 +791,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 	if (widget->issel[index]) {
 		XRenderFillRectangle(
 			widget->display,
-			PictOpAtopReverse,
+			PictOpOverReverse,
 			widget->layers[LAYER_ICONS].pict,
 			&widget->colors[sel][COLOR_BG].chans,
 			x + widget->itemw / 2 - maxw / 2 - 1,
@@ -912,13 +910,6 @@ commitdraw(Widget *widget)
 		&(XRenderColor){ 0 },
 		0, 0, widget->w, widget->h
 	);
-	XRenderFillRectangle(
-		widget->display,
-		PictOpSrc,
-		widget->layers[LAYER_BACKGROUND].pict,
-		&color,
-		0, 0, widget->w, widget->h
-	);
 	XRenderComposite(
 		widget->display,
 		PictOpOver,
@@ -952,21 +943,18 @@ commitdraw(Widget *widget)
 		0, 0,
 		widget->w, widget->h
 	);
-	XRenderComposite(
+	XRenderFillRectangle(
 		widget->display,
-		PictOpOver,
+		PictOpOverReverse,
 		widget->layers[LAYER_CANVAS].pict,
-		None,
-		widget->layers[LAYER_BACKGROUND].pict,
-		0, 0,
-		0, 0,
+		&color,
 		0, 0,
 		widget->w, widget->h
 	);
 	XSetWindowBackgroundPixmap(
 		widget->display,
 		widget->window,
-		widget->layers[LAYER_BACKGROUND].pix
+		widget->layers[LAYER_CANVAS].pix
 	);
 	XClearWindow(widget->display, widget->window);
 	XFlush(widget->display);
