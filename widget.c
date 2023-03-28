@@ -2,10 +2,12 @@
 #include <err.h>
 #include <fcntl.h>
 #include <locale.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <X11/Xlib.h>
@@ -133,6 +135,7 @@ enum {
 	/* times in milliseconds */
 	DOUBLECLICK     = 250,                  /* time of a doubleclick, in milliseconds */
 	MOTION_TIME     = 32,                   /* update time rate for rectangular selection */
+	SCROLL_TIME     = 128,
 
 	/* scrolling */
 	SCROLL_STEP     = 32,                   /* pixels per scroll */
@@ -217,9 +220,11 @@ struct Widget {
 	XftFont *font;
 	Visual *visual;
 	Colormap colormap;
+	int fd;
 	int screen;
 	unsigned int depth;
 	unsigned short opacity;
+	struct timespec time;
 
 	struct {
 		XrmClass class;
@@ -1851,6 +1856,19 @@ done:
 	return retval;
 }
 
+static int
+scrollerpos(Widget *widget)
+{
+	int pos;
+
+	(void)querypointer(widget, widget->scroller, NULL, &pos, NULL);
+	if (pos > SCROLLER_SIZE)
+		return pos / SCROLLER_SIZE;
+	if (pos < 0)
+		return (pos - SCROLLER_SIZE) / SCROLLER_SIZE;
+	return 0;
+}
+
 /*
  * event filters
  */
@@ -2129,6 +2147,41 @@ checklastprop(Widget *widget, char **text)
  * event loops
  */
 
+static int
+nextevent(Widget *widget, XEvent *ev, int timeout)
+{
+	struct pollfd pfd = {
+		.fd = widget->fd,
+		.events = POLLIN,
+	};
+	struct timespec ts;
+	int elapsed;
+
+	widget->time = (struct timespec){ 0 };
+	for (;;) {
+		if (XPending(widget->display) > 0)
+			goto done;
+		if (clock_gettime(CLOCK_MONOTONIC, &ts) != RETURN_FAILURE) {
+			elapsed = (ts.tv_sec - widget->time.tv_sec) * 1000;
+			elapsed += (ts.tv_nsec - widget->time.tv_nsec) / 1000;
+			if (elapsed >= timeout)
+				return FALSE;
+			widget->time = ts;
+		}
+		switch (poll(&pfd, 1, timeout)) {
+		case -1:
+			continue;
+		case 0:
+			return FALSE;
+		default:
+			goto done;
+		}
+	}
+done:
+	(void)XNextEvent(widget->display, ev);
+	return TRUE;
+}
+
 static WidgetEvent
 scrollmode(Widget *widget, int x, int y)
 {
@@ -2140,7 +2193,15 @@ scrollmode(Widget *widget, int x, int y)
 	XMoveWindow(widget->display, widget->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
 	XMapRaised(widget->display, widget->scroller);
 	left = FALSE;
-	while (!XNextEvent(widget->display, &ev)) {
+	for (;;) {
+		if (!nextevent(widget, &ev, SCROLL_TIME)) {
+			if ((pos = scrollerpos(widget)) != 0) {
+				if (scroll(widget, pos))
+					drawitems(widget);
+				commitdraw(widget);
+			}
+			continue;
+		}
 		switch (processevent(widget, &ev)) {
 		case WIDGET_CLOSE:
 			return WIDGET_CLOSE;
@@ -2192,14 +2253,38 @@ static WidgetEvent
 selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 {
 	XEvent ev;
-	int rectrow, rectydiff, ownsel;
+	int rectrow, rectydiff, ownsel, pos;
 
 	rectrow = widget->row;
 	rectydiff = widget->ydiff;
 	ownsel = FALSE;
 	if (!shift)
 		unselectitems(widget);
-	while (!XNextEvent(widget->display, &ev)) {
+	for (;;) {
+		if (!nextevent(widget, &ev, SCROLL_TIME)) {
+			(void)querypointer(
+				widget,
+				widget->window,
+				&ev.xmotion.x,
+				&ev.xmotion.y,
+				NULL
+			);
+			pos = ev.xmotion.y;
+			if (pos > widget->h)
+				pos -= widget->h;
+			else if (pos >= 0)
+				continue;
+			if (pos > 0)
+				pos += SCROLL_STEP;
+			pos /= SCROLL_STEP;
+			if (pos != 0) {
+				if (scroll(widget, pos))
+					drawitems(widget);
+				widget->redraw = TRUE;
+				goto motion;
+			}
+			continue;
+		}
 		switch (processevent(widget, &ev)) {
 		case WIDGET_CLOSE:
 			return WIDGET_CLOSE;
@@ -2215,11 +2300,12 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 		case MotionNotify:
 			if (ev.xmotion.time - lasttime < MOTION_TIME)
 				break;
+			lasttime = ev.xmotion.time;
+motion:
 			rectdraw(widget, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
 			if (rectselect(widget, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y))
 				ownsel = TRUE;
 			commitdraw(widget);
-			lasttime = ev.xmotion.time;
 			break;
 		}
 		endevent(widget);
@@ -2429,8 +2515,10 @@ initxconn(Widget *widget, const char *class, const char *name, int argc, char *a
 		warnx("could not connect to X server");
 		return RETURN_FAILURE;
 	}
-	if (fcntl(XConnectionNumber(widget->display),
-	          F_SETFD, FD_CLOEXEC) == RETURN_FAILURE) {
+	widget->screen = DefaultScreen(widget->display);
+	widget->root = RootWindow(widget->display, widget->screen);
+	widget->fd = XConnectionNumber(widget->display);
+	if (fcntl(widget->fd, F_SETFD, FD_CLOEXEC) == RETURN_FAILURE) {
 		warnx("could not set connection to X server to close on exec");
 		return RETURN_FAILURE;
 	}
@@ -2439,8 +2527,6 @@ initxconn(Widget *widget, const char *class, const char *name, int argc, char *a
 		warnx("could not intern X atoms");
 		return RETURN_FAILURE;
 	}
-	widget->screen = DefaultScreen(widget->display);
-	widget->root = RootWindow(widget->display, widget->screen);
 	return RETURN_SUCCESS;
 }
 
