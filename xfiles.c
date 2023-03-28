@@ -516,7 +516,7 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 		fm->entries[i][STATE_PATH] = fullpath(cwd->path, array[i]->d_name);
 		islink = lstat(array[i]->d_name, &sb) != -1 && S_ISLNK(sb.st_mode);
 		if (stat(array[i]->d_name, &sb) == -1) {
-			warn("%s", cwd->path);
+			warn("%s", array[i]->d_name);
 			fm->entries[i][STATE_SIZE] = NULL;
 			fm->entries[i][STATE_TIME] = NULL;
 			fm->entries[i][STATE_MODE] = modefmt(fm, 0x0, 0x0, 0x0, islink);
