@@ -177,8 +177,8 @@ enum Layer {
 	LAYER_CANVAS,
 	LAYER_BACKGROUND,
 	LAYER_ICONS,
-	LAYER_SELALPHA,         // XXX: replace it with 8-bit depth
-	LAYER_RECTALPHA,        // XXX: replace it with 8-bit depth
+	LAYER_SELALPHA,
+	LAYER_RECTALPHA,
 	LAYER_SCROLLER,
 	LAYER_LAST,
 };
@@ -588,13 +588,6 @@ calcsize(Widget *widget, int w, int h)
 	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
 	resetlayer(widget, LAYER_CANVAS, widget->w, widget->h);
 	resetlayer(widget, LAYER_BACKGROUND, widget->w, widget->h);
-	XRenderFillRectangle(   // XXX remove-me
-		widget->display,
-		PictOpSrc,
-		widget->layers[LAYER_BACKGROUND].pict,
-		&widget->colors[SELECT_NOT][COLOR_BG].chans,
-		0, 0, widget->w, widget->h
-	);
 	etunlock(&widget->lock);
 	return ret;
 }
@@ -755,17 +748,6 @@ drawlabel(Widget *widget, int index, int x, int y)
 			textx, y + widget->itemh - (NLINES - i + 0.5) * widget->fonth
 		);
 	}
-	//if (index == widget->highlight) {
-	//	XSetForeground(widget->display, widget->gc, color[COLOR_FG].pixel);
-	//	XDrawRectangle(
-	//		widget->display,
-	//		widget->layers[LAYER_ICONS].pix,
-	//		widget->gc,
-	//		x + widget->itemw / 2 - maxw / 2 - 1,
-	//		y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1,
-	//		maxw + 1, i * widget->fonth + 1
-	//	);
-	//}
 	if (textw >= LABELWIDTH &&
 	    (extension = strrchr(text, '.')) != NULL &&
 	    extension[1] != '\0') {
@@ -808,6 +790,17 @@ drawlabel(Widget *widget, int index, int x, int y)
 			y + widget->itemh - (NLINES + 1 - widget->nlines[index] + 0.5) * widget->fonth
 		);
 	}
+	if (index == widget->highlight) {
+		XRenderFillRectangle(
+			widget->display,
+			PictOpOver,
+			widget->layers[LAYER_ICONS].pict,
+			&widget->colors[sel][COLOR_FG].chans,
+			x + widget->itemw / 2 - maxw / 2 - 1,
+			y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1 + i * widget->fonth + 1,
+			maxw + 2, 1
+		);
+	}
 	if (widget->issel[index]) {
 		XRenderFillRectangle(
 			widget->display,
@@ -816,7 +809,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 			&widget->colors[sel][COLOR_BG].chans,
 			x + widget->itemw / 2 - maxw / 2 - 1,
 			y + widget->itemh - (NLINES + 0.5) * widget->fonth - 1,
-			maxw + 1, i * widget->fonth + 1
+			maxw + 2, i * widget->fonth + 2
 		);
 	}
 }
