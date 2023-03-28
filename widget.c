@@ -80,11 +80,6 @@
 #define PPM_HEADER      "P6\n"
 #define PPM_COLOR       "255\n"
 
-#define WIDTH(d)        (DisplayWidth((d), DefaultScreen((d))))
-#define HEIGHT(d)       (DisplayHeight((d), DefaultScreen((d))))
-#define FLAG(f, b)      (((f) & (b)) == (b))
-#define ATOI(c)         (((c) >= '0' && (c) <= '9') ? (c) - '0' : -1)
-
 /* how much to scroll on PageUp/PageDown (half the window height) */
 #define PAGE_STEP(w)    ((w)->h / 2)
 
@@ -341,7 +336,6 @@ struct Widget {
 
 	/* Strings used to build the title bar. */
 	const char *title;
-	const char *class;
 
 	/*
 	 * Index of highlighted item (usually the last item clicked by
@@ -1011,12 +1005,11 @@ settitle(Widget *widget)
 	if (widget->title != NULL) {
 		(void)snprintf(
 			title, TITLE_BUFSIZE,
-			"%s%s%s (%s) - %s (%d%%)",
+			"%s%s%s (%s) (%d%%)",
 			widget->title,
 			(strcmp(widget->title, "/") != 0 ? "/" : ""),
 			selitem,
 			status,
-			widget->class,
 			scrollpct
 		);
 	}
@@ -1145,13 +1138,13 @@ readsize(FILE *fp)
 		c = fgetc(fp);
 		if (c == EOF)
 			return -1;
-		n = ATOI(c);
-		if (n == -1)
+		if (c < '0' || c > '9')
 			break;
+		n = c - '0';
 		size *= 10;
 		size += n;
 	}
-	if (i == 0 || (i == 3 && ATOI(c) != -1))
+	if (i == 0 || (i == 3 && c >= '0' && c <= '9'))
 		return -1;
 	return size;
 }
@@ -2882,7 +2875,6 @@ widget_create(const char *class, const char *name, int argc, char *argv[])
 		.colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG,
 		.opacity = DEF_OPACITY,
 		.lock = PTHREAD_MUTEX_INITIALIZER,
-		.class = class,
 		.highlight = -1,
 		.itemw = ITEM_WIDTH,
 	};
