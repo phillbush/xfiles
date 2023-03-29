@@ -1864,9 +1864,9 @@ scrollerpos(Widget *widget)
 
 	(void)querypointer(widget, widget->scroller, NULL, &pos, NULL);
 	if (pos > SCROLLER_SIZE)
-		return pos / SCROLLER_SIZE;
+		return pos - SCROLLER_SIZE;
 	if (pos < 0)
-		return (pos - SCROLLER_SIZE) / SCROLLER_SIZE;
+		return pos;
 	return 0;
 }
 
@@ -2158,16 +2158,18 @@ nextevent(Widget *widget, XEvent *ev, int timeout)
 	struct timespec ts;
 	int elapsed;
 
-	widget->time = (struct timespec){ 0 };
 	for (;;) {
 		if (XPending(widget->display) > 0)
 			goto done;
-		if (clock_gettime(CLOCK_MONOTONIC, &ts) != RETURN_FAILURE) {
+		if (clock_gettime(CLOCK_MONOTONIC, &ts) != -1) {
 			elapsed = (ts.tv_sec - widget->time.tv_sec) * 1000;
-			elapsed += (ts.tv_nsec - widget->time.tv_nsec) / 1000;
-			if (elapsed >= timeout)
-				return FALSE;
-			widget->time = ts;
+			elapsed += ts.tv_nsec / 1000000;
+			elapsed -= widget->time.tv_nsec / 1000000;
+			if (elapsed < timeout) {
+				timeout -= elapsed;
+			} else {
+				timeout = 0;
+			}
 		}
 		switch (poll(&pfd, 1, timeout)) {
 		case -1:
@@ -2190,6 +2192,7 @@ scrollmode(Widget *widget, int x, int y)
 {
 	XEvent ev;
 	int grabpos, pos, left;
+	struct timespec ts;
 
 	grabpos = widget->handlew / 2;             /* we grab the handle in its middle */
 	drawscroller(widget, gethandlepos(widget));
@@ -2202,6 +2205,9 @@ scrollmode(Widget *widget, int x, int y)
 				if (scroll(widget, pos))
 					drawitems(widget);
 				commitdraw(widget);
+			}
+			if (clock_gettime(CLOCK_MONOTONIC, &ts) != -1) {
+				widget->time = ts;
 			}
 			continue;
 		}
