@@ -43,12 +43,13 @@ Widget *widget_create(
 	const char *class,
 	const char *name,
 	int argc,
-	char *argv[]
+	char *argv[],
+	const char *resources[]
 );
 
-int widopenicons(Widget *widget, char **xpms[], int nxpms);
+int widget_openicons(Widget *widget, char **xpms[], int nxpms);
 
-int setwidget(
+int widget_set(
 	Widget *widget,
 	const char *title,
 	char **items[],
@@ -57,11 +58,11 @@ int setwidget(
 	Scroll *scrl
 );
 
-void mapwidget(Widget *widget);
+void widget_map(Widget *widget);
 
-WidgetEvent pollwidget(Widget *widget, int *selitems, int *nselitems, Scroll *scrl, char **sel);
+WidgetEvent widget_poll(Widget *widget, int *selitems, int *nselitems, Scroll *scrl, char **sel);
 
-void setthumbnail(Widget *widget, char *path, int index);
+void widget_thumb(Widget *widget, char *path, int index);
 
 void widget_free(Widget *widget);
 

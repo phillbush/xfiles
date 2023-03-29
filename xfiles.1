@@ -1,4 +1,4 @@
-.Dd January 12, 2023
+.Dd March 29, 2023
 .Dt XFILES 1
 .Os
 .Sh NAME
@@ -8,8 +8,8 @@
 .Sh SYNOPSIS
 .Nm xfiles
 .Op Fl a
-.Op Fl g Ar geometry
-.Op Fl n Ar name
+.Op Fl N Ar name
+.Op Fl X Ar resources
 .Op Ar directory
 .Pp
 .Nm xfilesctl
@@ -26,10 +26,7 @@ The options are as follows:
 .Bl -tag -width Ds
 .It Fl a
 Include directory entries whose name begin with a dot.
-.It Fl g Ar geometry
-Set window size and position as specified in
-.Xr XParseGeometry 3 .
-.It Fl n Ar name
+.It Fl N Ar name
 Specify the
 .Ic res_name
 member of the
@@ -38,12 +35,19 @@ property.
 .Ar name
 is used to retrieve resources.
 If not specified, defaults to
-the name of the command
+the value of the
+.Ev RESOURCES_NAME
+environment variable, or (if that variable is not set) to the name of the command
 .Nm xfiles
 was invoked as (that is, the
 .Xr basename 3
 of its
 .Ic "argv[0]" ) .
+.It Fl X Ar resources
+Specify additional resources to be added on top of the resources from X's resource database.
+If not specified, defaults to the value of the
+.Iv RESOURCES_DATA
+environment variable, or (if that variable is not set) to the empty string.
 .El
 .Pp
 If no
@@ -388,7 +392,7 @@ understands the following X resources.
 They must be prefixed with either the
 .Qq "XFiles"
 class or the name given with the
-.Fl n
+.Fl N
 command-line option, followed by a period.
 .Bl -tag -width Ds
 .It Ic faceName
@@ -440,6 +444,16 @@ on.
 Program to be called to open files.
 Defaults to
 .Xr xdg-open 1 .
+.It Ev RESOURCES_NAME
+Specify the name used to retrieve resources.
+See
+.Fl N
+above.
+.It Ev RESOURCES_DATA
+Specify additional resources.
+See
+.Fl X
+above.
 .It Ev XFILES_THUMBNAILDIR
 Path to the directory where thumbnails must be saved.
 .El
@@ -457,7 +471,7 @@ Note that this string contains the number in decimal notation,
 not in hexadecimal (as is usually exchanged by a few X applications).
 .El
 .Ss SEE ALSO
-.Xr X 1 ,
+.Xr X 7 ,
 .Xr dmenu 1 ,
 .Xr xmenu 1
 .Sh BUGS

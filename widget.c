@@ -231,6 +231,7 @@ struct Widget {
 		XrmClass class;
 		XrmName name;
 	} application, resources[NRESOURCES];
+	const char **cliresources;
 
 	Atom lastprop;
 	char *lasttext;
@@ -356,6 +357,13 @@ struct Widget {
 	 */
 	Window scroller;                /* the scroller popup window */
 	int handlew;                    /* size of scroller handle */
+};
+
+struct Options {
+	const char *class;
+	const char *name;
+	int argc;
+	char **argv;
 };
 
 static void
@@ -494,6 +502,21 @@ getresource(XrmDatabase xdb, XrmClass appclass, XrmName appname, XrmClass rescla
 	return NULL;
 }
 
+static XrmDatabase
+loadxdb(Widget *widget, const char *str)
+{
+	XrmDatabase xdb, tmp;
+	int i;
+
+	if ((xdb = XrmGetStringDatabase(str)) == NULL)
+		return NULL;
+	for (i = 0; widget->cliresources[i] != NULL; i++) {
+		tmp = XrmGetStringDatabase(widget->cliresources[i]);
+		XrmMergeDatabases(tmp, &xdb);
+	}
+	return xdb;
+}
+
 static void
 loadresources(Widget *widget, const char *str)
 {
@@ -503,7 +526,7 @@ loadresources(Widget *widget, const char *str)
 
 	if (str == NULL)
 		return;
-	if ((xdb = XrmGetStringDatabase(str)) == NULL)
+	if ((xdb = loadxdb(widget, str)) == NULL)
 		return;
 	for (resource = 0; resource < NRESOURCES; resource++) {
 		if (resource == GEOMETRY)
@@ -1769,7 +1792,7 @@ createdragwin(Widget *widget, int index)
 }
 
 static char *
-gettextprop(Widget *widget, Window window, Atom prop)
+gettextprop(Widget *widget, Window window, Atom prop, Bool delete)
 {
 	char *text;
 	unsigned char *p;
@@ -1785,7 +1808,7 @@ gettextprop(Widget *widget, Window window, Atom prop)
 		prop,
 		0L,
 		0x1FFFFFFF,
-		True,
+		delete,
 		AnyPropertyType,
 		&type, &format,
 		&len, &dl,
@@ -1816,7 +1839,7 @@ getgeometry(Widget *widget, XRectangle *rect)
 	retval = 0;
 	if ((str = XResourceManagerString(widget->display)) == NULL)
 		return 0;
-	if ((xdb = XrmGetStringDatabase(str)) == NULL)
+	if ((xdb = loadxdb(widget, str)) == NULL)
 		return 0;
 	geometry = getresource(
 		xdb,
@@ -2097,7 +2120,8 @@ processevent(Widget *widget, XEvent *ev)
 			str = gettextprop(
 				widget,
 				widget->root,
-				XA_RESOURCE_MANAGER
+				XA_RESOURCE_MANAGER,
+				False
 			);
 			if (str == NULL)
 				return WIDGET_NONE;
@@ -2112,7 +2136,8 @@ processevent(Widget *widget, XEvent *ev)
 			widget->lasttext = gettextprop(
 				widget,
 				widget->window,
-				widget->atoms[_CONTROL_GOTO]
+				widget->atoms[_CONTROL_GOTO],
+				True
 			);
 		}
 		break;
@@ -2501,18 +2526,23 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
  */
 
 static int
-initxconn(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+initxconn(Widget *widget, struct Options *options)
 {
 	static char *atomnames[] = {
 #define X(atom, name) [atom] = name ? name : #atom,
 		ATOMS
 #undef  X
 	};
+	static struct {
+		const char *class, *name;
+	} resourceids[] = {
+#define X(res, s1, s2) [res] = { .class = s1, .name = s2, },
+		RESOURCES
+#undef  X
+	};
+	int i;
 
-	(void)class;
-	(void)name;
-	(void)argc;
-	(void)argv;
+	(void)options;
 	if (!XInitThreads()) {
 		warnx("could not initialize support for threads");
 		return RETURN_FAILURE;
@@ -2536,20 +2566,24 @@ initxconn(Widget *widget, const char *class, const char *name, int argc, char *a
 		warnx("could not intern X atoms");
 		return RETURN_FAILURE;
 	}
+	XrmInitialize();
+	widget->application.class = XrmPermStringToQuark(options->class);
+	widget->application.name = XrmPermStringToQuark(options->name);
+	for (i = 0; i < NRESOURCES; i++) {
+		widget->resources[i].class = XrmPermStringToQuark(resourceids[i].class);
+		widget->resources[i].name = XrmPermStringToQuark(resourceids[i].name);
+	}
 	return RETURN_SUCCESS;
 }
 
 static int
-initvisual(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+initvisual(Widget *widget, struct Options *options)
 {
 	XVisualInfo vinfo;
 	Colormap colormap;
 	int success;
 
-	(void)class;
-	(void)name;
-	(void)argc;
-	(void)argv;
+	(void)options;
 	success = XMatchVisualInfo(
 		widget->display,
 		widget->screen,
@@ -2600,7 +2634,7 @@ error:
 }
 
 static int
-initwindow(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+initwindow(Widget *widget, struct Options *options)
 {
 	XRectangle geometry;
 	pid_t pid = getpid();
@@ -2669,15 +2703,15 @@ initwindow(Widget *widget, const char *class, const char *name, int argc, char *
 	(void)XmbSetWMProperties(
 		widget->display,
 		widget->window,
-		class,
-		class,
-		argv,
-		argc,
+		options->class,
+		options->class,
+		options->argv,
+		options->argc,
 		&(XSizeHints){ .flags = sizehints },
 		NULL,
 		&(XClassHint){
-			.res_class = (char *)class,
-			.res_name = (char *)name,
+			.res_class = (char *)options->class,
+			.res_name = (char *)options->name,
 		}
 	);
 	(void)XChangeProperty(
@@ -2687,8 +2721,8 @@ initwindow(Widget *widget, const char *class, const char *name, int argc, char *
 		widget->atoms[UTF8_STRING],
 		8,
 		PropModeReplace,
-		(unsigned char *)class,
-		strlen(class) + 1       /* +1 for '\0' */
+		(unsigned char *)options->class,
+		strlen(options->class) + 1       /* +1 for '\0' */
 	);
 	(void)XChangeProperty(
 		widget->display,
@@ -2727,14 +2761,11 @@ initwindow(Widget *widget, const char *class, const char *name, int argc, char *
 }
 
 static int
-initpictures(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+inittheme(Widget *widget, struct Options *options)
 {
 	int i, j;
 
-	(void)class;
-	(void)name;
-	(void)argc;
-	(void)argv;
+	(void)options;
 	resetlayer(widget, LAYER_SCROLLER, SCROLLER_SIZE, SCROLLER_SIZE);
 	for (i = 0; i < SELECT_LAST; i++) {
 		for (j = 0; j < COLOR_LAST; j++) {
@@ -2768,6 +2799,11 @@ initpictures(Widget *widget, const char *class, const char *name, int argc, char
 			);
 		}
 	}
+	loadresources(widget, XResourceManagerString(widget->display));
+	if (widget->font == NULL)
+		setfont(widget, NULL);
+	if (widget->font == NULL)
+		return RETURN_FAILURE;
 	return RETURN_SUCCESS;
 error:
 	warnx("could not create XRender picture");
@@ -2775,41 +2811,9 @@ error:
 }
 
 static int
-initresources(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+initselection(Widget *widget, struct Options *options)
 {
-	static struct {
-		const char *class, *name;
-	} resourceids[] = {
-#define X(res, s1, s2) [res] = { .class = s1, .name = s2, },
-		RESOURCES
-#undef  X
-	};
-	int i;
-
-	(void)argc;
-	(void)argv;
-	XrmInitialize();
-	widget->application.class = XrmPermStringToQuark(class);
-	widget->application.name = XrmPermStringToQuark(name);
-	for (i = 0; i < NRESOURCES; i++) {
-		widget->resources[i].class = XrmPermStringToQuark(resourceids[i].class);
-		widget->resources[i].name = XrmPermStringToQuark(resourceids[i].name);
-	}
-	loadresources(widget, XResourceManagerString(widget->display));
-	if (widget->font == NULL)
-		setfont(widget, NULL);
-	if (widget->font == NULL)
-		return RETURN_FAILURE;
-	return RETURN_SUCCESS;
-}
-
-static int
-initselection(Widget *widget, const char *class, const char *name, int argc, char *argv[])
-{
-	(void)class;
-	(void)name;
-	(void)argc;
-	(void)argv;
+	(void)options;
 	ctrlsel_filltarget(
 		widget->atoms[TEXT_URI_LIST],
 		widget->atoms[TEXT_URI_LIST],
@@ -2831,7 +2835,7 @@ initselection(Widget *widget, const char *class, const char *name, int argc, cha
 }
 
 static int
-initmisc(Widget *widget, const char *class, const char *name, int argc, char *argv[])
+initmisc(Widget *widget, struct Options *options)
 {
 	/*
 	 * No need to check for errors here.
@@ -2844,10 +2848,7 @@ initmisc(Widget *widget, const char *class, const char *name, int argc, char *ar
 	 *   we should not be able to reload theme on the fly, but it
 	 *   is not important for the widget to work correctly.
 	 */
-	(void)class;
-	(void)name;
-	(void)argc;
-	(void)argv;
+	(void)options;
 	widget->busycursor = XCreateFontCursor(widget->display, XC_watch);
 	(void)XSelectInput(widget->display, widget->root, PropertyChangeMask);
 	return RETURN_SUCCESS;
@@ -2926,16 +2927,21 @@ widget_free(Widget *widget)
 }
 
 Widget *
-widget_create(const char *class, const char *name, int argc, char *argv[])
+widget_create(const char *class, const char *name, int argc, char *argv[], const char *resources[])
 {
 	Widget *widget;
 	size_t i;
-	int (*initsteps[])(Widget *, const char *, const char *, int, char **) = {
+	struct Options options = {
+		.class = class,
+		.name = name,
+		.argc = argc,
+		.argv = argv,
+	};
+	int (*initsteps[])(Widget *, struct Options *) = {
 		initxconn,
 		initvisual,
 		initwindow,
-		initpictures,
-		initresources,
+		inittheme,
 		initselection,
 		initmisc,
 	};
@@ -2944,19 +2950,18 @@ widget_create(const char *class, const char *name, int argc, char *argv[])
 		warn("malloc");
 		return NULL;
 	}
-	*widget = (Widget){
-		.colors[SELECT_NOT][COLOR_BG].chans = DEF_COLOR_BG,
-		.colors[SELECT_NOT][COLOR_FG].chans = DEF_COLOR_FG,
-		.colors[SELECT_YES][COLOR_BG].chans = DEF_COLOR_SELBG,
-		.colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG,
-		.opacity = DEF_OPACITY,
-		.lock = PTHREAD_MUTEX_INITIALIZER,
-		.highlight = -1,
-		.itemw = ITEM_WIDTH,
-	};
+	*widget = (Widget){ 0 };
+	widget->colors[SELECT_NOT][COLOR_BG].chans = DEF_COLOR_BG;
+	widget->colors[SELECT_NOT][COLOR_FG].chans = DEF_COLOR_FG;
+	widget->colors[SELECT_YES][COLOR_BG].chans = DEF_COLOR_SELBG;
+	widget->colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG;
+	widget->opacity = DEF_OPACITY;
+	widget->lock = PTHREAD_MUTEX_INITIALIZER;
+	widget->highlight = -1;
+	widget->itemw = ITEM_WIDTH;
+	widget->cliresources = resources;
 	for (i = 0; i < LEN(initsteps); i++) {
-		if ((*initsteps[i])(widget, class, name, argc, argv)
-		    == RETURN_FAILURE) {
+		if ((*initsteps[i])(widget, &options) == RETURN_FAILURE) {
 			widget_free(widget);
 			return NULL;
 		}

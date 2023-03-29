@@ -20,24 +20,25 @@
 #endif
 
 /* actions for the controller command */
-#define DROPCOPY         "drop-copy"
-#define DROPMOVE         "drop-move"
-#define DROPLINK         "drop-link"
-#define DROPASK          "drop-ask"
-#define MENU             "menu"
+#define DROPCOPY        "drop-copy"
+#define DROPMOVE        "drop-move"
+#define DROPLINK        "drop-link"
+#define DROPASK         "drop-ask"
+#define MENU            "menu"
 
-#define APPCLASS         "XFiles"
-#define APPNAME          "xfiles"
-#define URI_PREFIX       "file://"
-#define INCRSIZE         512
-#define NCMDARGS         3
-#define DEF_OPENER       "xdg-open"
-#define THUMBNAILDIR     "XFILES_THUMBNAILDIR"
-#define CONTEXTCMD       "xfilesctl"
-#define DEV_NULL         "/dev/null"
-#define UNIT_LAST        7
-#define SIZE_BUFSIZE     6       /* 4 digits + suffix char + nul */
-#define TIME_BUFSIZE     128
+#define APPCLASS        "XFiles"
+#define APPNAME         "xfiles"
+#define MAX_RESOURCES   32      /* actually 31, the last must be NULL */
+#define URI_PREFIX      "file://"
+#define INCRSIZE        512
+#define NCMDARGS        3
+#define DEF_OPENER      "xdg-open"
+#define THUMBNAILDIR    "XFILES_THUMBNAILDIR"
+#define CONTEXTCMD      "xfilesctl"
+#define DEV_NULL        "/dev/null"
+#define UNIT_LAST       7
+#define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
+#define TIME_BUFSIZE    128
 
 enum {
 	CONFIG_PATTERN,
@@ -120,7 +121,7 @@ extern size_t nicons;
 static void
 usage(void)
 {
-	(void)fprintf(stderr, "usage: xfiles [-a] [path]\n");
+	(void)fprintf(stderr, "usage: xfiles [-a] [-N name] [-X resources] [path]\n");
 	exit(1);
 }
 
@@ -457,7 +458,7 @@ thumbnailer(void *arg)
 		if (setthumbpath(fm, fm->entries[i][STATE_PATH], path) == RETURN_FAILURE)
 			continue;
 		if (thumbexists(fm, fm->entries[i], path)) {
-			setthumbnail(fm->widget, path, i);
+			widget_thumb(fm->widget, path, i);
 		}
 	}
 	pthread_exit(0);
@@ -823,7 +824,7 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 	fm->cwd->here = cwd.here;
 	fm->last = fm->cwd;
 	scrl = keepscroll ? &fm->cwd->state : NULL;
-	if (setwidget(fm->widget, fm->cwd->here, fm->entries, fm->foundicons, fm->nentries, scrl) == RETURN_FAILURE) {
+	if (widget_set(fm->widget, fm->cwd->here, fm->entries, fm->foundicons, fm->nentries, scrl) == RETURN_FAILURE) {
 		retval = RETURN_FAILURE;
 		goto done;
 	}
@@ -842,7 +843,7 @@ openicons(struct FM *fm)
 		goto error;
 	for (i = 0; i < nicons; i++)
 		xpms[i] = icons[i][CONFIG_DATA];
-	if (widopenicons(fm->widget, xpms, nicons) == RETURN_FAILURE)
+	if (widget_openicons(fm->widget, xpms, nicons) == RETURN_FAILURE)
 		goto error;
 	free(xpms);
 	return RETURN_SUCCESS;
@@ -859,8 +860,10 @@ main(int argc, char *argv[])
 	struct Cwd *cwd;
 	int ch, nitems;
 	int saveargc, force_refresh;
+	int nresources = 0;
 	int exitval = EXIT_SUCCESS;
-	char *name = APPNAME;
+	const char *resources[MAX_RESOURCES];
+	char *name;
 	char *path = NULL;
 	char *home = NULL;
 	char **saveargv;
@@ -870,6 +873,7 @@ main(int argc, char *argv[])
 	saveargv = argv;
 	saveargc = argc;
 	home = getenv("HOME");
+	name = getenv("RESOURCES_NAME");
 	if (argv[0] != NULL && argv[0][0] != '\0') {
 		if ((name = strchr(argv[0], '/')) != NULL) {
 			name++;
@@ -877,43 +881,42 @@ main(int argc, char *argv[])
 			name = argv[0];
 		}
 	}
+	if (name == NULL)
+		name = APPNAME;
+	resources[0] = getenv("RESOURCES_DATA");
+	if (resources[0] != NULL)
+		nresources++;
 	fm = (struct FM){
-		.capacity = 0,
-		.nentries = 0,
 		.cwd = emalloc(sizeof(*fm.cwd)),
-		.last = NULL,
-		.entries = NULL,
-		.selitems = NULL,
-		.foundicons = NULL,
 		.home = home,
 		.homelen = ((home != NULL) ? strlen(home) : 0),
 		.uid = getuid(),
 		.gid = getgid(),
 		.thumblock = PTHREAD_MUTEX_INITIALIZER,
-		.thumbexit = 0,
-		.thumbnaildir = NULL,
-		.thumbnaildirlen = 0,
 	};
-	(*fm.cwd) = (struct Cwd){
-		.next = NULL,
-		.prev = NULL,
-		.path = NULL,
-		.here = NULL,
-	};
+	(*fm.cwd) = (struct Cwd){ 0 };
 	fm.hist = fm.cwd;
 	fm.ngrps = getgroups(NGROUPS_MAX, fm.grps);
 	if ((fm.opener = getenv("OPENER")) == NULL)
 		fm.opener = DEF_OPENER;
-	while ((ch = getopt(argc, argv, "a")) != -1) {
+	while ((ch = getopt(argc, argv, "aN:X:")) != -1) {
 		switch (ch) {
 		case 'a':
 			hide = 0;
+			break;
+		case 'N':
+			name = optarg;
+			break;
+		case 'X':
+			if (nresources < MAX_RESOURCES - 1)
+				resources[nresources++] = optarg;
 			break;
 		default:
 			usage();
 			break;
 		}
 	}
+	resources[nresources] = NULL;
 	argc -= optind;
 	argv += optind;
 	if (argc > 1)
@@ -921,19 +924,19 @@ main(int argc, char *argv[])
 	else if (argc == 1)
 		path = *argv;
 	initthumbnailer(&fm);
-	if ((fm.widget = widget_create(APPCLASS, name, saveargc, saveargv)) == NULL)
+	if ((fm.widget = widget_create(APPCLASS, name, saveargc, saveargv, resources)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
 	if (openicons(&fm) == RETURN_FAILURE)
 		goto error;
 	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)
 		goto error;
 	fm.last = fm.cwd;
-	if (setwidget(fm.widget, fm.cwd->here, fm.entries, fm.foundicons, fm.nentries, NULL) == RETURN_FAILURE)
+	if (widget_set(fm.widget, fm.cwd->here, fm.entries, fm.foundicons, fm.nentries, NULL) == RETURN_FAILURE)
 		goto error;
 	createthumbthread(&fm);
-	mapwidget(fm.widget);
+	widget_map(fm.widget);
 	text = NULL;
-	while ((event = pollwidget(fm.widget, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
+	while ((event = widget_poll(fm.widget, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
 		switch (event) {
 		case WIDGET_ERROR:
 			exitval = EXIT_FAILURE;
