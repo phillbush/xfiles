@@ -2965,7 +2965,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[])
 }
 
 int
-setwidget(Widget *widget, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
+widget_set(Widget *widget, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
 {
 	size_t i;
 
@@ -3033,13 +3033,13 @@ error:
 }
 
 void
-mapwidget(Widget *widget)
+widget_map(Widget *widget)
 {
 	XMapWindow(widget->display, widget->window);
 }
 
 WidgetEvent
-pollwidget(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **text)
+widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **text)
 {
 	XEvent ev;
 	int retval;
@@ -3063,7 +3063,7 @@ pollwidget(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **text
 }
 
 int
-widopenicons(Widget *widget, char **xpms[], int nxpms)
+widget_openicons(Widget *widget, char **xpms[], int nxpms)
 {
 	int retval, i;
 
@@ -3083,7 +3083,7 @@ widopenicons(Widget *widget, char **xpms[], int nxpms)
 }
 
 void
-setthumbnail(Widget *widget, char *path, int item)
+widget_thumb(Widget *widget, char *path, int item)
 {
 	FILE *fp;
 	size_t size, i;
