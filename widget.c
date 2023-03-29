@@ -2950,16 +2950,17 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 		warn("malloc");
 		return NULL;
 	}
-	*widget = (Widget){ 0 };
-	widget->colors[SELECT_NOT][COLOR_BG].chans = DEF_COLOR_BG;
-	widget->colors[SELECT_NOT][COLOR_FG].chans = DEF_COLOR_FG;
-	widget->colors[SELECT_YES][COLOR_BG].chans = DEF_COLOR_SELBG;
-	widget->colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG;
-	widget->opacity = DEF_OPACITY;
-	widget->lock = PTHREAD_MUTEX_INITIALIZER;
-	widget->highlight = -1;
-	widget->itemw = ITEM_WIDTH;
-	widget->cliresources = resources;
+	*widget = (Widget){
+		.colors[SELECT_NOT][COLOR_BG].chans = DEF_COLOR_BG,
+		.colors[SELECT_NOT][COLOR_FG].chans = DEF_COLOR_FG,
+		.colors[SELECT_YES][COLOR_BG].chans = DEF_COLOR_SELBG,
+		.colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG,
+		.opacity = DEF_OPACITY,
+		.lock = PTHREAD_MUTEX_INITIALIZER,
+		.highlight = -1,
+		.itemw = ITEM_WIDTH,
+		.cliresources = resources,
+	};
 	for (i = 0; i < LEN(initsteps); i++) {
 		if ((*initsteps[i])(widget, &options) == RETURN_FAILURE) {
 			widget_free(widget);
