@@ -711,6 +711,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 	widget->nlines[index] = 1;
 	textx = x + widget->itemw / 2 - LABELWIDTH / 2;
 	extension = NULL;
+	textw = 0;
 	maxw = 0;
 	textlen = 0;
 	widget->linelen[index] = 0;
@@ -764,13 +765,11 @@ drawlabel(Widget *widget, int index, int x, int y)
 			textx, y + widget->itemh - (NLINES - i + 0.5) * widget->fonth
 		);
 	}
-	if (textw >= LABELWIDTH &&
-	    (extension = strrchr(text, '.')) != NULL &&
-	    extension[1] != '\0') {
+	if (textw >= LABELWIDTH)
+		extension = strrchr(text, '.');
+	if (extension != NULL && extension[1] != '\0') {
 		extensionlen = strlen(extension);
 		extensionw = textwidth(widget, extension, extensionlen);
-	}
-	if (extension != NULL) {
 		/* draw ellipsis */
 		drawtext(
 			widget,
