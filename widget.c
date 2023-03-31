@@ -1463,7 +1463,8 @@ rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 			.blue  = 0xFFFF,
 			.alpha = 0xFFFF,
 		},
-		x, y, w, h
+		x, y,
+		w + 1, h + 1
 	);
 	XRenderFillRectangle(
 		widget->display,
@@ -1477,8 +1478,8 @@ rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 		},
 		x + 1,
 		y + 1,
-		max(w - 2, 0),
-		max(h - 2, 0)
+		max(w - 1, 0),
+		max(h - 1, 0)
 	);
 }
 
