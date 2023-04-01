@@ -1408,7 +1408,7 @@ mouse1click(Widget *widget, XButtonPressedEvent *ev)
 	return index;
 }
 
-static void
+static int
 mouse3click(Widget *widget, int x, int y)
 {
 	int index;
@@ -1423,6 +1423,7 @@ mouse3click(Widget *widget, int x, int y)
 			highlight(widget, index, TRUE);
 		}
 	}
+	return index;
 }
 
 static void
@@ -2471,8 +2472,8 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 				if (state != WIDGET_NONE)
 					return state;
 			} else if (ev.xbutton.button == Button3) {
-				mouse3click(widget, ev.xbutton.x, ev.xbutton.y);
-				*nitems = fillselitems(widget, selitems, -1);
+				if (mouse3click(widget, ev.xbutton.x, ev.xbutton.y) > 0)
+					*nitems = fillselitems(widget, selitems, -1);
 				commitdraw(widget);
 				XUngrabPointer(widget->display, ev.xbutton.time);
 				XFlush(widget->display);
@@ -3051,6 +3052,7 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 	int retval;
 
 	*text = NULL;
+	*nitems = 0;
 	widget->droptarget.buffer = NULL;
 	while (widget->start && XPending(widget->display) > 0) {
 		(void)XNextEvent(widget->display, &ev);
