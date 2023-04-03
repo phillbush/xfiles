@@ -51,8 +51,6 @@ enum {
 	STATE_PATH,     /* entry used by widget.c */
 	STATE_SIZE,     /* entry used by widget.c */
 	STATE_MODE,     /* entry used here just for matching icon spec */
-	STATE_TIME,     /* not used rn, I'll either remove it or find some use */
-	STATE_OWNER,    /* not used rn, I'll either remove it or find some use */
 	STATE_LAST,
 };
 
@@ -206,17 +204,6 @@ sizefmt(off_t size)
 }
 
 static char *
-timefmt(time_t time)
-{
-	struct tm *tm;
-	char buf[TIME_BUFSIZE];
-
-	tm = localtime(&time);
-	(void)strftime(buf, sizeof(buf), "%F %R", tm);
-	return estrdup(buf);
-}
-
-static char *
 modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid, int islink)
 {
 	char buf[MODE_BUFSIZE] = "     ";
@@ -251,24 +238,6 @@ modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid, int islink)
 
 	buf[MODE_BUFSIZE - 1] = '\0';
 	return estrdup(buf);
-}
-
-static char *
-ownerfmt(uid_t uid, gid_t gid)
-{
-	struct passwd *pw;
-	struct group *gr;
-	char buf[128];
-
-	pw = NULL;
-	if ((pw = getpwuid(uid)) == NULL)
-		goto error;
-	if ((gr = getgrgid(gid)) == NULL)
-		goto error;
-	(void)snprintf(buf, sizeof(buf), "%s:%s", pw->pw_name, gr->gr_name);
-	return estrdup(buf);
-error:
-	return estrdup("");
 }
 
 static int
@@ -519,14 +488,10 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 		if (stat(array[i]->d_name, &sb) == -1) {
 			warn("%s", array[i]->d_name);
 			fm->entries[i][STATE_SIZE] = NULL;
-			fm->entries[i][STATE_TIME] = NULL;
 			fm->entries[i][STATE_MODE] = modefmt(fm, 0x0, 0x0, 0x0, islink);
-			fm->entries[i][STATE_OWNER] = NULL;
 		} else {
 			fm->entries[i][STATE_SIZE] = sizefmt(sb.st_size);
-			fm->entries[i][STATE_TIME] = timefmt(sb.st_mtim.tv_sec);
 			fm->entries[i][STATE_MODE] = modefmt(fm, sb.st_mode, sb.st_uid, sb.st_gid, islink);
-			fm->entries[i][STATE_OWNER] = ownerfmt(sb.st_uid, sb.st_gid);
 		}
 		free(array[i]);
 	}

@@ -22,14 +22,6 @@ typedef enum {
 } WidgetEvent;
 
 enum {
-	CURSOR_NORMAL,
-	CURSOR_WATCH,
-	CURSOR_DRAG,
-	CURSOR_NODROP,
-	CURSOR_LAST,
-};
-
-enum {
 	/* item elements */
 	ITEM_NAME,   /* indexes the label displayed for the item */
 	ITEM_PATH,   /* indexes the path given in PRIMARY selection */
