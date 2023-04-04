@@ -1,0 +1,20 @@
+! Font
+XFiles.facename:                DejaVu Sans-9
+
+! Plan 9 Acme colors
+XFiles.background:              #FFFFAA
+XFiles.foreground:              #000000
+XFiles.activeBackground:        #AAFFFF
+XFiles.activeForeground:        #000000
+
+! Background transparency (requires X11 compositor)
+XFiles.opacity:                 0.5
+
+! Icons for XDG user directories
+XFiles.fileIcons:                       \n\
+	~/Documents/=documents_dir      \n\
+	~/Download/=downloads_dir       \n\
+	~/Memes/=meme_dir               \n\
+	~/Music/=music_dir              \n\
+	~/Pictures/=images_dir          \n\
+	~/Videos/=videos_dir
