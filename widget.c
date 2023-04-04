@@ -47,6 +47,7 @@
 	/*            CLASS               NAME             */ \
 	X(GEOMETRY,  "Geometry",         "geometry")          \
 	X(FACE_NAME, "FaceName",         "faceName")          \
+	X(ICONS,     "FileIcons",        "fileIcons")         \
 	X(NORMAL_BG, "Background",       "background")        \
 	X(NORMAL_FG, "Foreground",       "foreground")        \
 	X(SELECT_BG, "ActiveBackground", "activeBackground")  \
@@ -188,6 +189,7 @@ enum Resource {
 };
 
 struct Icon {
+	const char *name;
 	Pixmap pix, mask;
 };
 
@@ -325,13 +327,7 @@ struct Widget {
 	 * We use icons for items that do not have a thumbnail.
 	 */
 	struct Icon *icons;             /* array of icons set by the user */
-	int nicons;                     /* number of icons set by the user */
-
-	/*
-	 * This array, with .nitem members, defines the index in the
-	 * .icons array for the icon of each item.
-	 */
-	int *itemicons;
+	int nicons;                     // XXX: remove-me
 
 	/* Strings used to build the title bar. */
 	const char *title;
@@ -529,8 +525,6 @@ loadresources(Widget *widget, const char *str)
 	if ((xdb = loadxdb(widget, str)) == NULL)
 		return;
 	for (resource = 0; resource < NRESOURCES; resource++) {
-		if (resource == GEOMETRY)
-			continue; /* geometry is fetched at initialization */
 		value = getresource(
 			xdb,
 			widget->application.class,
@@ -639,15 +633,34 @@ setrow(Widget *widget, int row)
 	etunlock(&widget->lock);
 }
 
+static struct Icon *
+geticon(Widget *widget, int index)
+{
+	extern size_t deffiletype;
+	int i, cmp;
+
+	for (i = 0; widget->icons[i].name != NULL; i++) {
+		cmp = strcmp(
+			widget->icons[i].name,
+			widget->items[index][ITEM_TYPE]
+		);
+		if (cmp == 0) {
+			return &widget->icons[i];
+		}
+	}
+	return &widget->icons[deffiletype];
+}
+
 static void
 drawicon(Widget *widget, int index, int x, int y)
 {
+	struct Icon *icon;
 	Pixmap pix, mask;
-	int icon, xorigin;
+	int xorigin;
 
-	icon = widget->itemicons[index];
-	pix = widget->icons[icon].pix;
-	mask = widget->icons[icon].mask;
+	icon = geticon(widget, index);
+	pix = icon->pix;
+	mask = icon->mask;
 	if (widget->thumbs != NULL && widget->thumbs[index] != NULL) {
 		/* draw thumbnail */
 		XPutImage(
@@ -1708,10 +1721,11 @@ fillselitems(Widget *widget, int *selitems, int clicked)
 static Window
 createdragwin(Widget *widget, int index)
 {
+	struct Icon *icon;
 	Window win;
 	GC gc;
 	unsigned long opacity;
-	int icon, pix, mask;
+	int pix, mask;
 	int xroot, yroot, w, h;
 
 	if (index <= 0)
@@ -1754,8 +1768,7 @@ createdragwin(Widget *widget, int index)
 		1
 	);
 	if (widget->thumbs[index] == NULL) {
-		icon = widget->itemicons[index];
-		pix = widget->icons[icon].pix;
+		icon = geticon(widget, index);
 		if ((mask = XCreatePixmap(widget->display, win, w, h, CLIP_DEPTH)) == None) {
 			XDestroyWindow(widget->display, win);
 			return None;
@@ -1767,11 +1780,11 @@ createdragwin(Widget *widget, int index)
 		}
 		XSetForeground(widget->display, gc, 0);
 		XFillRectangle(widget->display, mask, gc, 0, 0, w, h);
-		XCopyArea(widget->display, widget->icons[icon].mask, mask, gc, 0, 0, w, h, 0, 0);
+		XCopyArea(widget->display, icon->mask, mask, gc, 0, 0, w, h, 0, 0);
 		XShapeCombineMask(widget->display, win, ShapeBounding, 0, 0, mask, ShapeSet);
 		XFreePixmap(widget->display, mask);
 		XFreeGC(widget->display, gc);
-		XSetWindowBackgroundPixmap(widget->display, win, pix);
+		XSetWindowBackgroundPixmap(widget->display, win, icon->pix);
 	} else {
 		if ((pix = XCreatePixmap(widget->display, win, w, h, widget->depth)) == None) {
 			XDestroyWindow(widget->display, win);
@@ -2812,6 +2825,39 @@ error:
 }
 
 static int
+initicons(Widget *widget, struct Options *options)
+{
+	extern size_t ndeffileicons;
+	extern char *deffiletypes[];
+	extern struct {int type; char **xpm;} deffileicons[];
+	int success, retval, i;
+
+	(void)options;
+	widget->nicons = ndeffileicons;
+	if ((widget->icons = calloc(widget->nicons, sizeof(*widget->icons))) == NULL) {
+		warn("calloc");
+		return RETURN_FAILURE;
+	}
+	retval = RETURN_SUCCESS;
+	for (i = 0; i < widget->nicons; i++) {
+		widget->icons[i].name = deffiletypes[deffileicons[i].type];
+		widget->icons[i].pix  = None;
+		widget->icons[i].mask = None;
+		success = pixmapfromdata(
+			widget,
+			deffileicons[i].xpm,
+			&widget->icons[i].pix,
+			&widget->icons[i].mask
+		) != RETURN_FAILURE;
+		if (!success) {
+			warnx("%s: could not open pixmap", widget->icons[i].name);
+			retval = RETURN_FAILURE;
+		}
+	}
+	return retval;
+}
+
+static int
 initselection(Widget *widget, struct Options *options)
 {
 	(void)options;
@@ -2943,6 +2989,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 		initvisual,
 		initwindow,
 		inittheme,
+		initicons,
 		initselection,
 		initmisc,
 	};
@@ -2972,7 +3019,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 }
 
 int
-widget_set(Widget *widget, const char *title, char **items[], int itemicons[], size_t nitems, Scroll *scrl)
+widget_set(Widget *widget, const char *title, char **items[], size_t nitems, Scroll *scrl)
 {
 	size_t i;
 
@@ -2980,7 +3027,6 @@ widget_set(Widget *widget, const char *title, char **items[], int itemicons[], s
 	cleanwidget(widget);
 	widget->items = items;
 	widget->nitems = nitems;
-	widget->itemicons = itemicons;
 	if (scrl == NULL) {
 		widget->ydiff = 0;
 		widget->row = 0;
@@ -3045,6 +3091,31 @@ widget_map(Widget *widget)
 	XMapWindow(widget->display, widget->window);
 }
 
+char *
+widget_gettypes(Widget *widget)
+{
+	XrmDatabase xdb;
+	char *str, *value, *p;
+
+	if ((str = XResourceManagerString(widget->display)) == NULL)
+		return NULL;
+	if ((xdb = loadxdb(widget, str)) == NULL)
+		return NULL;
+	value = getresource(
+		xdb,
+		widget->application.class,
+		widget->application.name,
+		widget->resources[ICONS].class,
+		widget->resources[ICONS].name
+	);
+	if (value == NULL)
+		p = NULL;
+	else
+		p = strdup(value);
+	XrmDestroyDatabase(xdb);
+	return p;
+}
+
 WidgetEvent
 widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **text)
 {
@@ -3067,26 +3138,6 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 	endevent(widget);
 	scrl->ydiff = widget->ydiff;
 	scrl->row = widget->row;
-	return retval;
-}
-
-int
-widget_openicons(Widget *widget, char **xpms[], int nxpms)
-{
-	int retval, i;
-
-	widget->nicons = nxpms;
-	if ((widget->icons = calloc(widget->nicons, sizeof(*widget->icons))) == NULL) {
-		warn("calloc");
-		return RETURN_FAILURE;
-	}
-	retval = RETURN_SUCCESS;
-	for (i = 0; i < widget->nicons; i++) {
-		if (pixmapfromdata(widget, xpms[i], &widget->icons[i].pix, &widget->icons[i].mask) == RETURN_FAILURE) {
-			warnx("could not open %d-th default icon pixmap", i);
-			retval = RETURN_FAILURE;
-		}
-	}
 	return retval;
 }
 

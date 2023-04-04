@@ -1,8 +1,9 @@
 PROG = xfiles
-OBJS = ${PROG:=.o} widget.o util.o config.o ctrlsel.o
+OBJS = ${PROG:=.o} widget.o util.o defaults.o ctrlsel.o
 SRCS = ${OBJS:.o=.c}
-MANS = ${PROG:=.1}
-SCRIPT = xfilesctl
+MAN  = ${PROG:=.1}
+SCRIPT1 = xfilesctl
+SCRIPT2 = xfilesthumb
 
 PREFIX ?= /usr/local
 MANPREFIX ?= ${PREFIX}/share/man
@@ -36,16 +37,18 @@ install: all
 	install -d ${DESTDIR}${PREFIX}/bin
 	install -d ${DESTDIR}${MANPREFIX}/man1
 	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
-	install -m 644 ${MANS} ${DESTDIR}${MANPREFIX}/man1/${MANS}
+	install -m 644 ${MAN} ${DESTDIR}${MANPREFIX}/man1/${MAN}
 
 install-script:
-	install -m 755 ${SCRIPT} ${DESTDIR}${PREFIX}/bin/${SCRIPT}
+	install -m 755 examples/${SCRIPT1} ${DESTDIR}${PREFIX}/bin/${SCRIPT1}
+	install -m 755 examples/${SCRIPT2} ${DESTDIR}${PREFIX}/bin/${SCRIPT2}
 
 uninstall:
 	rm ${DESTDIR}${PREFIX}/bin/${PROG}
-	rm ${DESTDIR}${MANPREFIX}/man1/${MANS}
+	rm ${DESTDIR}${MANPREFIX}/man1/${MAN}
 
 uninstall-script:
-	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT}
+	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT1}
+	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT2}
 
 .PHONY: all tags clean install uninstall

@@ -26,6 +26,7 @@ enum {
 	ITEM_NAME,   /* indexes the label displayed for the item */
 	ITEM_PATH,   /* indexes the path given in PRIMARY selection */
 	ITEM_STATUS, /* indexes the status displayed on titlebar when item is selected */
+	ITEM_TYPE,   /* indexes the type of icon to be displayed */
 	ITEM_LAST,
 };
 
@@ -39,16 +40,16 @@ Widget *widget_create(
 	const char *resources[]
 );
 
-int widget_openicons(Widget *widget, char **xpms[], int nxpms);
-
 int widget_set(
 	Widget *widget,
 	const char *title,
 	char **items[],
-	int itemicons[],
 	size_t nitems,
 	Scroll *scrl
 );
+
+/* get value of icons resource into allocated string */
+char *widget_gettypes(Widget *widget);
 
 void widget_map(Widget *widget);
 

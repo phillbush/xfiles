@@ -11,16 +11,18 @@
 .Op Fl N Ar name
 .Op Fl X Ar resources
 .Op Ar directory
-.Pp
 .Nm xfilesctl
 .Ar command
 .Op Ar file ...
+.Nm xfilesthumb
+.Ar filepath
+.Ar thumbpath
 .Sh DESCRIPTION
 .Nm xfiles
 is a file manager for X11.
 .Nm xfiles
 uses other programs to perform several tasks,
-such as open a file, generate thumbnails, or run arbitrary commands.
+such as to open a file, generate thumbnails, or run arbitrary commands.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -69,12 +71,13 @@ gets a
 as argument indicating the kind of interaction to perform with the user.
 Posible interactions are invoking a menu
 or popping up a terminal dialog.
-Refer to the
-.Nm xfilesctl
-script itself to check all the operations it can perform;
-and to check the programs it depends on.
 .Pp
-The commands are as follows:
+.Nm xfiles
+source comes with an example
+.Nm xfilesctl
+script.  But users are encouraged to create their own script satisfying their own needs.
+.Pp
+The commands passed to it are as follows:
 .Bl -tag -width Ds
 .It Cm menu
 .Nm xfilesctl
@@ -188,13 +191,34 @@ The paths to the selected files are given to
 as further arguments.
 These commands are used to do whatever the user wants to.
 .El
+.Pp
+.Nm xfilesthumb
+is a script called by
+.Nm xfiles
+to create 64x64 ppm image file called
+.Pq thumbnails .
+.Nm xfilesthumb
+should usually not be called manually.
+.Nm xfilesthumb
+gets a
+.Ar filepath
+as argument containing the full path to the file,
+and a
+.Ar thumbpath
+as argument containing the full path to the thumbnail file to be created.
+.Pp
+.Nm xfiles
+source comes with an example
+.Nm xfilesthumb
+script.
+But users are encouraged to create their own script satisfying their own needs.
 .Sh USAGE
 .Nm xfiles
 is controlled mainly with the mouse,
 but some actions can also be performed with the keyboard.
 .Pp
 .Nm xfiles
-has four modes of operation.
+has five modes of operation.
 In each mode, some mouse or keyboard actions are allowed while others are not.
 The modes of operation are as follows.
 .Bl -tag -width Ds
@@ -206,7 +230,7 @@ All actions, except rectangular selection and scroller manipulation,
 can be performed while in this mode.
 All other modes are accessible from the normal mode.
 .It Selection Mode
-This mode is entered after dragging the pointer with the first button in normal mode.
+This mode is entered after dragging the pointer on an empty space with the first button in normal mode.
 In this mode, a rectangle can be drawn, in which any file inside it can be selected.
 No action other than the rectangular selection can be performed while in this mode.
 To exit this mode, release the first mouse button.
@@ -216,6 +240,9 @@ In this mode, the file list can be scrolled up and down by moving the mouse.
 No action other than scrolling can be performed while in this mode.
 To exit this mode, press the second mouse button
 (or release it, if the pointer had not been released nor moved outside the scroller).
+.It Dragging Mode
+This mode is entered after dragging ithe pointer on a file with the first button in normal mode.
+In this mode, the file icon follows the mouse cursor, indicating that the file can be dropped on another window.
 .It Waiting Mode
 This mode is entered after
 .Nm xfilesctl
@@ -386,8 +413,87 @@ Go to parent directory.
 .It Delete
 Pop up a terminal dialog asking whether to send selected files to trash.
 .El
+.Sh ICONS
+.Nm xfiles
+can display a custom icon for a file based on a
+.Xr glob 3
+pattern matching the file.
+For example, files matching
+.Ic "*.png"
+are drawn with the
+.Ic image
+icon.
+.Pp
+The list of icons supported by files and the glob patterns associated to them are the following,
+in order of precedence of matching.
+.Bl -tag -width Ds
+.It Ic up_dir
+.Qq Ic ".."
+.It Ic archive
+.Qq Ic "*.zip" , "*.tar" , "*.gz" , "*.bz2" , "*.rar"
+.It Ic audio
+.Qq Ic "*.mp[23]" , "*.m4a" , "*m3u" , "*.ogg" , "*.opus" , "*.flac"
+.It Ic core
+.Qq Ic "*.core"
+.It Ic image
+.Qq Ic "*.xbm" , "*.xpm" , "*.p[bgp]m" , "*.png" , "*.bmp" , "*.gif" , "*.tiff" , "*.jpeg" , "*.jpg" , "*.gif" , "*.svg"
+.It Ic info
+.Qq Ic "*.[1-9]" , "README" , "README.md" , "COPYING" , "LICENSE" , "COPYRIGHT"
+.It Ic makefile
+.Qq Ic "[Mm]akefile" , "configure" , "configure"
+.It Ic document
+.Qq Ic "*.pdf" , "*.epub" , "*.txt" , "*.ps" , "*.eps" , "*.djvu"
+.It Ic object
+.Qq Ic "*.o" , "*.so" , "*.a"
+.It Ic video
+.Qq Ic "*.mp4" , "*.webm" , "*.mkv" , "*.mov" , "*.ogv"
+.It Ic home_dir
+.Qq Ic "~/"
+.It Ic dir
+.Qq Ic "*"
+(for directories).
+.It Ic file
+.Qq Ic "*"
+.El
+.Pp
+The following icons have no associated glob patterns
+(but custom patterns can be installled with the
+.Ic fileIcons
+X resource).
+.Bl -bullet -compact
+.It
+.Ic executable
+.It
+.Ic config
+.It
+.Ic apps_dir
+.It
+.Ic code_dir
+.It
+.Ic database_dir
+.It
+.Ic documents_dir
+.It
+.Ic downloads_dir
+.It
+.Ic games_dir
+.It
+.Ic images_dir
+.It
+.Ic config_dir
+.It
+.Ic meme_dir
+.It
+.Ic mount_dir
+.It
+.Ic music_dir
+.It
+.Ic videos_dir
+.It
+.Ic link_dir
+.El
 .Sh RESOURCES
-.Nm
+.Nm xfiles
 understands the following X resources.
 They must be prefixed with either the
 .Qq "XFiles"
@@ -397,11 +503,19 @@ command-line option, followed by a period.
 .Bl -tag -width Ds
 .It Ic faceName
 Font for drawing text.
+.It Ic fileIcons
+Sequence of associations between file patterns and icon names.
+Each association has the form
+.Ic "PATTERN=ICON" .
+And associations must be delimited with either newline characters or colon characters.
+See
+.Sx ICONS
+above for a list of supported icons.
 .It Ic background
 Background color.
 .It Ic foreground
 Text color.
-.It Ic opacity.
+.It Ic opacity
 Background opacity as a floating point number from 0.0 to 1.0.
 .It Ic selbackground
 Background color for selected entries.
@@ -474,5 +588,3 @@ not in hexadecimal (as is usually exchanged by a few X applications).
 .Xr X 7 ,
 .Xr dmenu 1 ,
 .Xr xmenu 1
-.Sh BUGS
-Yes.

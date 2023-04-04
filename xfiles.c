@@ -15,10 +15,6 @@
 #include "util.h"
 #include "widget.h"
 
-#ifndef FNM_CASEFOLD
-#define FNM_CASEFOLD     0
-#endif
-
 /* actions for the controller command */
 #define DROPCOPY        "drop-copy"
 #define DROPMOVE        "drop-move"
@@ -31,36 +27,17 @@
 #define MAX_RESOURCES   32      /* actually 31, the last must be NULL */
 #define URI_PREFIX      "file://"
 #define INCRSIZE        512
-#define NCMDARGS        3
 #define DEF_OPENER      "xdg-open"
 #define THUMBNAILDIR    "XFILES_THUMBNAILDIR"
 #define CONTEXTCMD      "xfilesctl"
+#define THUMBNAILERCMD  "xfilesthumb"
 #define DEV_NULL        "/dev/null"
 #define UNIT_LAST       7
 #define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
 #define TIME_BUFSIZE    128
 
-enum {
-	CONFIG_PATTERN,
-	CONFIG_DATA,
-	CONFIG_LAST,
-};
-
-enum {
-	STATE_NAME,     /* entry used by widget.c */
-	STATE_PATH,     /* entry used by widget.c */
-	STATE_SIZE,     /* entry used by widget.c */
-	STATE_MODE,     /* entry used here just for matching icon spec */
-	STATE_LAST,
-};
-
-enum {
-	MODE_TYPE     = 0,
-	MODE_READ     = 1,
-	MODE_WRITE    = 2,
-	MODE_EXEC     = 3,
-	MODE_LINK     = 4,
-	MODE_BUFSIZE  = 6,      /* 5 elems +1 for the nul byte */
+struct FileType {
+	char *patt, *type;
 };
 
 struct Cwd {
@@ -73,7 +50,6 @@ struct Cwd {
 struct FM {
 	Widget *widget;
 	char ***entries;
-	int *foundicons;        /* array of indices to found icons */
 	int *selitems;          /* array of indices to selected items */
 	int capacity;           /* capacity of entries */
 	int nentries;           /* number of entries */
@@ -83,6 +59,10 @@ struct FM {
 	struct Cwd *hist;       /* list of working directories */
 	struct Cwd *last;       /* last working directories */
 	struct timespec time;   /* ctime of current directory */
+
+	char *filetypebuf;
+	struct FileType *filetypes;
+	size_t nfiletypes;
 
 	uid_t uid;
 	gid_t gid;
@@ -99,6 +79,7 @@ struct FM {
 };
 
 static int hide = 1;
+
 static struct {
 	char u;
 	long long int n;
@@ -111,10 +92,6 @@ static struct {
 	{ 'P', 1024LL * 1024 * 1024 * 1024 * 1024 },
 	{ 'E', 1024LL * 1024 * 1024 * 1024 * 1024 * 1024 },
 };
-
-extern char **thumbs[][CONFIG_LAST];
-extern char **icons[][CONFIG_LAST];
-extern size_t nicons;
 
 static void
 usage(void)
@@ -148,23 +125,24 @@ direntselect(const struct dirent *dp)
 static void
 freeentries(struct FM *fm)
 {
-	int i, j;
+	int i;
 
 	for (i = 0; i < fm->nentries; i++) {
-		for (j = 0; j < STATE_LAST; j++)
-			free(fm->entries[i][j]);
+		free(fm->entries[i][ITEM_NAME]);
+		free(fm->entries[i][ITEM_PATH]);
+		free(fm->entries[i][ITEM_STATUS]);
 		free(fm->entries[i]);
 	}
 }
 
 static char *
-fullpath(char *dir, char *file)
+fullpath(char *dir, char *file, int isdir)
 {
 	char buf[PATH_MAX];
 
 	if (strcmp(dir, "/") == 0)
 		dir = "";
-	(void)snprintf(buf, sizeof(buf), "%s/%s", dir, file);
+	(void)snprintf(buf, sizeof(buf), "%s/%s%c", dir, file, isdir ? '/' : '\0');
 	return estrdup(buf);
 }
 
@@ -203,41 +181,13 @@ sizefmt(off_t size)
 	return estrdup(buf);
 }
 
-static char *
-modefmt(struct FM *fm, mode_t m, uid_t uid, gid_t gid, int islink)
+static int
+isdir(char **entry)
 {
-	char buf[MODE_BUFSIZE] = "     ";
-	int i, ismember;
-	size_t perm_off;
+	size_t len;
 
-	switch (m & S_IFMT) {
-	case S_IFBLK:   buf[MODE_TYPE] = 'b'; break;
-	case S_IFCHR:   buf[MODE_TYPE] = 'c'; break;
-	case S_IFDIR:   buf[MODE_TYPE] = 'd'; break;
-	case S_IFIFO:   buf[MODE_TYPE] = 'p'; break;
-	case S_IFSOCK:  buf[MODE_TYPE] = 's'; break;
-	default:        buf[MODE_TYPE] = 'f'; break;
-	}
-
-	for (i = 0, ismember = FALSE; i < fm->ngrps && !ismember; i++) {
-		if (fm->grps[i] == gid) {
-			ismember = TRUE;
-		}
-	}
-
-	if (uid == fm->uid) perm_off = 0;
-	else if (gid == fm->gid || ismember) perm_off = 3;
-	else perm_off = 6;
-
-	if (m & (S_IRUSR >> perm_off)) buf[MODE_READ]  = 'r';
-	if (m & (S_IWUSR >> perm_off)) buf[MODE_WRITE] = 'w';
-	if (m & (S_IXUSR >> perm_off)) buf[MODE_EXEC]  = 'x';
-
-	if (islink)
-		buf[MODE_LINK] = 'l';
-
-	buf[MODE_BUFSIZE - 1] = '\0';
-	return estrdup(buf);
+	len = strlen(entry[ITEM_PATH]);
+	return len > 0 && entry[ITEM_PATH][len-1] == '/';
 }
 
 static int
@@ -249,25 +199,25 @@ entrycmp(const void *ap, const void *bp)
 	a = *(char ***)ap;
 	b = *(char ***)bp;
 	/* dotdot (parent directory) first */
-	if (strcmp(a[STATE_NAME], "..") == 0)
+	if (strcmp(a[ITEM_NAME], "..") == 0)
 		return -1;
-	if (strcmp(b[STATE_NAME], "..") == 0)
+	if (strcmp(b[ITEM_NAME], "..") == 0)
 		return 1;
 
 	/* directories first */
-	aisdir = a[STATE_MODE] != NULL && a[STATE_MODE][MODE_TYPE] == 'd';
-	bisdir = b[STATE_MODE] != NULL && b[STATE_MODE][MODE_TYPE] == 'd';
+	aisdir = isdir(a);
+	bisdir = isdir(b);
 	if (aisdir && !bisdir)
 		return -1;
 	if (bisdir && !aisdir)
 		return 1;
 
 	/* dotentries (hidden entries) first */
-	if (a[STATE_NAME][0] == '.' && b[STATE_NAME][0] != '.')
+	if (a[ITEM_NAME][0] == '.' && b[ITEM_NAME][0] != '.')
 		return -1;
-	if (b[STATE_NAME][0] == '.' && a[STATE_NAME][0] != '.')
+	if (b[ITEM_NAME][0] == '.' && a[ITEM_NAME][0] != '.')
 		return 1;
-	return strcoll(a[STATE_NAME], b[STATE_NAME]);
+	return strcoll(a[ITEM_NAME], b[ITEM_NAME]);
 }
 
 static int
@@ -299,23 +249,20 @@ thumbexit(struct FM *fm)
 }
 
 static pid_t
-forkthumb(char **cmd, char *orig, char *thumb)
+forkthumb(char *orig, char *thumb)
 {
-	char *argv[NCMDARGS + 4]; /* +4 for "sh", orig, thumb, and NULL */
 	pid_t pid;
-	int i;
 
-	for (i = 0; cmd[i] != NULL; i++)
-		argv[i] = cmd[i];
-	argv[i++] = "sh";
-	argv[i++] = orig;
-	argv[i++] = thumb;
-	argv[i++] = NULL;
 	if ((pid = efork()) == 0) {     /* children */
 		close(STDOUT_FILENO);
 		close(STDIN_FILENO);
-		eexec(argv);
-		exit(EXIT_FAILURE);
+		eexec((char *[]){
+			THUMBNAILERCMD,
+			orig,
+			thumb,
+			NULL,
+		});
+		err(EXIT_FAILURE, "%s", THUMBNAILERCMD);
 	}
 	return pid;
 }
@@ -329,81 +276,75 @@ timespeclt(struct timespec *tsp, struct timespec *usp)
 }
 
 static int
-strchrs(const char *a, const char *b)
+checkicon(struct FM *fm, char **entry, char *patt)
 {
-	size_t i;
+	int flags;
+	char *s;
 
-	/* return nonzero iff a contains all characters in b */
-
-	for (i = 0; b[i] != '\0'; i++)
-		if (strchr(a, b[i]) == NULL)
+	if (patt[0] == '~' || strchr(patt, '/') != NULL) {
+		flags = FNM_CASEFOLD | FNM_PATHNAME | FNM_LEADING_DIR;
+		s = entry[ITEM_PATH];
+	} else {
+		flags = FNM_CASEFOLD;
+		s = entry[ITEM_NAME];
+	}
+	if (s == NULL)
+		return FALSE;
+	if (patt[0] == '~') {
+		if (strncmp(fm->home, s, fm->homelen) != 0)
 			return FALSE;
-	return TRUE;
+		patt++;
+		s += fm->homelen;
+	}
+	if (s != NULL && fnmatch(patt, s, flags) == 0)
+		return TRUE;
+	return FALSE;
 }
 
-static size_t
-getmatchingdata(struct FM *fm, char **tab[][CONFIG_LAST], char **entry)
+static char *
+geticon(struct FM *fm, char **entry)
 {
-	size_t i, j;
-	int flags;
-	char **patts;
-	char *p, *s;
+	extern size_t defdirtype;
+	extern char *deffiletypes[];
+	extern struct { char *patt; int type; } deffilepatts[];
+	size_t i;
+	char *patt;
 
-	for (i = 0; tab[i][CONFIG_PATTERN] != NULL; i++) {
-		patts = tab[i][CONFIG_PATTERN];
-		if (entry[STATE_MODE] != NULL && !strchrs(entry[STATE_MODE], patts[0]))
-			continue;
-		if (patts[1] == NULL)
-			return i;
-		for (j = 1; patts[j] != NULL; j++) {
-			p = patts[j];
-			if (p[0] == '~' || strchr(p, '/') != NULL) {
-				flags = FNM_CASEFOLD | FNM_PATHNAME;
-				s = entry[STATE_PATH];
-			} else {
-				flags = FNM_CASEFOLD;
-				s = entry[STATE_NAME];
-			}
-			if (s == NULL)
-				continue;
-			if (p[0] == '~') {
-				if (strncmp(fm->home, s, fm->homelen) != 0)
-					continue;
-				p++;
-				s += fm->homelen;
-			}
-			if (s != NULL && fnmatch(p, s, flags) == 0) {
-				return i;
-			}
+	for (i = 0; i < fm->nfiletypes; i++) {
+		patt = fm->filetypes[i].patt;
+		if (checkicon(fm, entry, patt)) {
+			return fm->filetypes[i].type;
 		}
 	}
-	return i;
+	for (i = 0; deffilepatts[i].patt != NULL; i++) {
+		patt = deffilepatts[i].patt;
+		if (checkicon(fm, entry, patt)) {
+			return deffiletypes[deffilepatts[i].type];
+		}
+	}
+	if (isdir(entry))
+		return deffiletypes[defdirtype];
+	return deffiletypes[deffilepatts[i].type];
 }
 
 static int
-thumbexists(struct FM *fm, char **entry, char *mime)
+thumbexists(char **entry, char *mime)
 {
 	struct stat sb;
 	struct timespec origt, mimet;
 	pid_t pid;
-	size_t n;
 	int status;
-	char **cmd;
 
 	if (stat(mime, &sb) == -1)
 		goto forkthumbnailer;
 	mimet = sb.st_mtim;
-	if (stat(entry[STATE_PATH], &sb) == -1)
+	if (stat(entry[ITEM_PATH], &sb) == -1)
 		goto forkthumbnailer;
 	origt = sb.st_mtim;
 	if (timespeclt(&origt, &mimet))
 		return TRUE;
 forkthumbnailer:
-	n = getmatchingdata(fm, thumbs, entry);
-	cmd = thumbs[n][CONFIG_DATA];
-	if (cmd == NULL)
-		return FALSE;
-	pid = forkthumb(cmd, entry[STATE_PATH], mime);
+	pid = forkthumb(entry[ITEM_PATH], mime);
 	if (waitpid(pid, &status, 0) == -1)
 		return FALSE;
 	return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
@@ -420,13 +361,13 @@ thumbnailer(void *arg)
 	for (i = 0; i < fm->nentries; i++) {
 		if (thumbexit(fm))
 			break;
-		if (fm->entries[i][STATE_PATH] == NULL)
+		if (fm->entries[i][ITEM_PATH] == NULL)
 			continue;
-		if (strncmp(fm->entries[i][STATE_PATH], fm->thumbnaildir, fm->thumbnaildirlen) == 0)
+		if (strncmp(fm->entries[i][ITEM_PATH], fm->thumbnaildir, fm->thumbnaildirlen) == 0)
 			continue;
-		if (setthumbpath(fm, fm->entries[i][STATE_PATH], path) == RETURN_FAILURE)
+		if (setthumbpath(fm, fm->entries[i][ITEM_PATH], path) == RETURN_FAILURE)
 			continue;
-		if (thumbexists(fm, fm->entries[i], path)) {
+		if (thumbexists(fm->entries[i], path)) {
 			widget_thumb(fm->widget, path, i);
 		}
 	}
@@ -460,7 +401,7 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 {
 	struct dirent **array;
 	struct stat sb;
-	int islink, i;
+	int isdir, i;
 	char buf[PATH_MAX];
 
 	if (path != NULL && wchdir(path) == RETURN_FAILURE)
@@ -475,30 +416,27 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 	freeentries(fm);
 	fm->nentries = escandir(cwd->path, &array, direntselect, NULL);
 	if (fm->nentries > fm->capacity) {
-		fm->foundicons = erealloc(fm->foundicons, fm->nentries * sizeof(*fm->foundicons));
 		fm->selitems = erealloc(fm->selitems, fm->nentries * sizeof(*fm->selitems));
 		fm->entries = erealloc(fm->entries, fm->nentries * sizeof(*fm->entries));
 		fm->capacity = fm->nentries;
 	}
 	for (i = 0; i < fm->nentries; i++) {
-		fm->entries[i] = emalloc(sizeof(*fm->entries[i]) * STATE_LAST);
-		fm->entries[i][STATE_NAME] = estrdup(array[i]->d_name);
-		fm->entries[i][STATE_PATH] = fullpath(cwd->path, array[i]->d_name);
-		islink = lstat(array[i]->d_name, &sb) != -1 && S_ISLNK(sb.st_mode);
+		fm->entries[i] = emalloc(sizeof(*fm->entries[i]) * ITEM_LAST);
+		isdir = FALSE;
 		if (stat(array[i]->d_name, &sb) == -1) {
 			warn("%s", array[i]->d_name);
-			fm->entries[i][STATE_SIZE] = NULL;
-			fm->entries[i][STATE_MODE] = modefmt(fm, 0x0, 0x0, 0x0, islink);
+			fm->entries[i][ITEM_STATUS] = NULL;
 		} else {
-			fm->entries[i][STATE_SIZE] = sizefmt(sb.st_size);
-			fm->entries[i][STATE_MODE] = modefmt(fm, sb.st_mode, sb.st_uid, sb.st_gid, islink);
+			isdir = S_ISDIR(sb.st_mode);
+			fm->entries[i][ITEM_STATUS] = sizefmt(sb.st_size);
 		}
+		fm->entries[i][ITEM_NAME] = estrdup(array[i]->d_name);
+		fm->entries[i][ITEM_PATH] = fullpath(cwd->path, array[i]->d_name, isdir);
+		fm->entries[i][ITEM_TYPE] = geticon(fm, fm->entries[i]);
 		free(array[i]);
 	}
 	free(array);
 	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycmp);
-	for (i = 0; i < fm->nentries; i++)
-		fm->foundicons[i] = getmatchingdata(fm, icons, fm->entries[i]);
 	if (strstr(cwd->path, fm->home) == cwd->path &&
 	    (cwd->path[fm->homelen] == '/' || cwd->path[fm->homelen] == '\0')) {
 		snprintf(buf, PATH_MAX, "~%s", cwd->path + fm->homelen);
@@ -613,7 +551,7 @@ runcontext(struct FM *fm, char *cmd, int nselitems)
 	argv[0] = CONTEXTCMD;
 	argv[1] = cmd;
 	for (i = 0; i < nselitems; i++)
-		argv[i+2] = fm->entries[fm->selitems[i]][STATE_PATH];
+		argv[i+2] = fm->entries[fm->selitems[i]][ITEM_PATH];
 	argv[i+2] = NULL;
 	forkexec(argv, NULL, FALSE);
 	free(argv);
@@ -632,7 +570,7 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 	 * fm->selitems[0] is the path where the files have been dropped
 	 * into.  The other items are the files being dropped.
 	 */
-	path = fm->entries[fm->selitems[0]][STATE_PATH];
+	path = fm->entries[fm->selitems[0]][ITEM_PATH];
 	if ((argv = malloc((nitems + 2) * sizeof(*argv))) == NULL)
 		return;
 	argv[0] = CONTEXTCMD;
@@ -643,7 +581,7 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 	default:              argv[1] = DROPASK;  break;
 	}
 	for (i = 1; i < nitems; i++)
-		argv[i + 1] = fm->entries[fm->selitems[i]][STATE_PATH];
+		argv[i + 1] = fm->entries[fm->selitems[i]][ITEM_PATH];
 	argv[nitems + 1] = NULL;
 	forkexec(argv, path, FALSE);
 }
@@ -789,33 +727,74 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 	fm->cwd->here = cwd.here;
 	fm->last = fm->cwd;
 	scrl = keepscroll ? &fm->cwd->state : NULL;
-	if (widget_set(fm->widget, fm->cwd->here, fm->entries, fm->foundicons, fm->nentries, scrl) == RETURN_FAILURE) {
+	if (widget_set(fm->widget, fm->cwd->here, fm->entries, fm->nentries, scrl) == RETURN_FAILURE)
 		retval = RETURN_FAILURE;
-		goto done;
-	}
 done:
 	createthumbthread(fm);
 	return retval;
 }
 
-static int
-openicons(struct FM *fm)
+static void
+initfiletypes(struct FM *fm)
 {
-	size_t i;
-	char ***xpms;
+	size_t i, ntypes;
+	char *s, *t;
 
-	if ((xpms = calloc(nicons, sizeof(*xpms))) == NULL)
+	fm->nfiletypes = 0;
+	fm->filetypes = NULL;
+	fm->filetypebuf = NULL;
+	if ((fm->filetypebuf = widget_gettypes(fm->widget)) == NULL)
+		return;
+	ntypes = 1;
+	for (s = fm->filetypebuf; *s != '\0'; s++)
+		if (*s == ':' || *s == '\n')
+			ntypes++;
+	fm->filetypes = calloc(ntypes, sizeof(*fm->filetypes));
+	if (fm->filetypes == NULL) {
+		warn("could not set file types");
 		goto error;
-	for (i = 0; i < nicons; i++)
-		xpms[i] = icons[i][CONFIG_DATA];
-	if (widget_openicons(fm->widget, xpms, nicons) == RETURN_FAILURE)
-		goto error;
-	free(xpms);
-	return RETURN_SUCCESS;
+	}
+	i = 0;
+	for (s = fm->filetypebuf; *s != '\0'; s++) {
+		t = NULL;
+		while (*s == ' ' || *s == '\t')
+			s++;
+		fm->filetypes[i].patt = s;
+		while (*s != '\0' && *s != ':' && *s != '\n') {
+			if (*s == '=')
+				t = s;
+			s++;
+		}
+		*s = '\0';
+		if (t == NULL || t + 1 == s)
+			continue;
+		*t = '\0';
+		t++;
+		fm->filetypes[i].type = t;
+		t[strcspn(t, " \t")] = '\0';
+		i++;
+	}
+	fm->nfiletypes = i;
+	return;
 error:
-	free(xpms);
-	return RETURN_FAILURE;
+	free(fm->filetypes);
+	free(fm->filetypebuf);
+	fm->filetypes = NULL;
+	fm->filetypebuf = NULL;
+	fm->nfiletypes = 0;
+	return;
+}
 
+static void
+freefm(struct FM *fm)
+{
+	clearcwd(fm->hist);
+	freeentries(fm);
+	free(fm->entries);
+	free(fm->selitems);
+	free(fm->thumbnaildir);
+	free(fm->filetypebuf);
+	free(fm->filetypes);
 }
 
 int
@@ -891,12 +870,11 @@ main(int argc, char *argv[])
 	initthumbnailer(&fm);
 	if ((fm.widget = widget_create(APPCLASS, name, saveargc, saveargv, resources)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
-	if (openicons(&fm) == RETURN_FAILURE)
-		goto error;
+	initfiletypes(&fm);
 	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)
 		goto error;
 	fm.last = fm.cwd;
-	if (widget_set(fm.widget, fm.cwd->here, fm.entries, fm.foundicons, fm.nentries, NULL) == RETURN_FAILURE)
+	if (widget_set(fm.widget, fm.cwd->here, fm.entries, fm.nentries, NULL) == RETURN_FAILURE)
 		goto error;
 	createthumbthread(&fm);
 	widget_map(fm.widget);
@@ -939,15 +917,13 @@ main(int argc, char *argv[])
 				break;
 			if (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries)
 				break;
-			if (fm.entries[fm.selitems[0]][STATE_MODE] == NULL)
-				break;
-			if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
-				if (changedir(&fm, fm.entries[fm.selitems[0]][STATE_PATH], FALSE) == RETURN_FAILURE) {
+			if (isdir(fm.entries[fm.selitems[0]])) {
+				if (changedir(&fm, fm.entries[fm.selitems[0]][ITEM_PATH], FALSE) == RETURN_FAILURE) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
-			} else if (fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'f') {
-				fileopen(&fm, fm.entries[fm.selitems[0]][STATE_PATH]);
+			} else {
+				fileopen(&fm, fm.entries[fm.selitems[0]][ITEM_PATH]);
 			}
 			break;
 		case WIDGET_DROPASK:
@@ -959,9 +935,9 @@ main(int argc, char *argv[])
 				if (nitems > 0 && (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries))
 					path = NULL;
 				else
-					path = fm.entries[fm.selitems[0]][STATE_PATH];
+					path = fm.entries[fm.selitems[0]][ITEM_PATH];
 				runexdrop(event, text, path);
-			} else if (nitems > 1 && fm.entries[fm.selitems[0]][STATE_MODE][MODE_TYPE] == 'd') {
+			} else if (nitems > 1 && isdir(fm.entries[fm.selitems[0]])) {
 				/* drag-and-drop in the same window */
 				runindrop(&fm, event, nitems);
 			}
@@ -999,12 +975,7 @@ done:
 	free(text);
 	closethumbthread(&fm);
 error:
-	clearcwd(fm.hist);
-	freeentries(&fm);
-	free(fm.entries);
-	free(fm.foundicons);
-	free(fm.selitems);
-	free(fm.thumbnaildir);
+	freefm(&fm);
 	widget_free(fm.widget);
 	return exitval;
 }
