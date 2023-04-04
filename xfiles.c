@@ -815,6 +815,10 @@ main(int argc, char *argv[])
 	char *text;
 	WidgetEvent event;
 
+#if __OpenBSD__
+	if (pledge("unix cpath stdio rpath proc exec", NULL) == RETURN_FAILURE)
+		err(EXIT_FAILURE, "pledge");
+#endif
 	saveargv = argv;
 	saveargc = argc;
 	home = getenv("HOME");
@@ -871,6 +875,10 @@ main(int argc, char *argv[])
 	initthumbnailer(&fm);
 	if ((fm.widget = widget_create(APPCLASS, name, saveargc, saveargv, resources)) == NULL)
 		errx(EXIT_FAILURE, "could not initialize X widget");
+#if __OpenBSD__
+	if (pledge("stdio rpath proc exec", NULL) == RETURN_FAILURE)
+		err(EXIT_FAILURE, "pledge");
+#endif
 	initfiletypes(&fm);
 	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)
 		goto error;
