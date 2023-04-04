@@ -459,13 +459,15 @@ initthumbnailer(struct FM *fm)
 	if ((str = getenv("CACHEDIR")) == NULL)
 		if ((str = getenv("XDG_CACHE_HOME")) == NULL)
 			return;
+	len = strlen(str);
+	if (PATH_MAX < len + 12)        /* strlen("/thumbnails") + '\0' */
+		return;
 	mode = 0777 & ~umask(0);
 	dir_mode = mode | S_IWUSR | S_IXUSR;
 	(void)snprintf(path, PATH_MAX, "%s", str);
 	slash = strrchr(path, '\0');
 	while (--slash > path && *slash == '/')
 		*slash = '\0';
-	len = strlen(path);
 	(void)snprintf(path + len, PATH_MAX - len, "/thumbnails");
 	fm->thumbnaildir = estrdup(path);
 	slash = path;
