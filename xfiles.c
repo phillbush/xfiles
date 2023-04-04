@@ -28,7 +28,6 @@
 #define URI_PREFIX      "file://"
 #define INCRSIZE        512
 #define DEF_OPENER      "xdg-open"
-#define THUMBNAILDIR    "XFILES_THUMBNAILDIR"
 #define CONTEXTCMD      "xfilesctl"
 #define THUMBNAILERCMD  "xfilesthumb"
 #define DEV_NULL        "/dev/null"
@@ -456,14 +455,16 @@ initthumbnailer(struct FM *fm)
 	char path[PATH_MAX];
 	char *slash, *str;
 
-	if ((str = getenv(THUMBNAILDIR)) == NULL)
-		return;
+	if ((str = getenv("CACHEDIR")) == NULL)
+		if ((str = getenv("XDG_CACHE_HOME")) == NULL)
+			return;
 	mode = 0777 & ~umask(0);
 	dir_mode = mode | S_IWUSR | S_IXUSR;
 	(void)snprintf(path, PATH_MAX, "%s", str);
 	slash = strrchr(path, '\0');
 	while (--slash > path && *slash == '/')
 		*slash = '\0';
+	(void)snprintf(path, PATH_MAX, "%s/thumbnails", path);
 	fm->thumbnaildir = estrdup(path);
 	slash = path;
 	for (;;) {

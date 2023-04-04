@@ -550,6 +550,10 @@ if possible.
 The following environment variables affect the execution of
 .Nm Ns .
 .Bl -tag -width Ds
+.It Ev CACHEDIR
+Path to a cache directory where the
+.Pa thumbnails
+directory will be created.
 .It Ev DISPLAY
 The display to start
 .Nm xfiles
@@ -568,8 +572,10 @@ Specify additional resources.
 See
 .Fl X
 above.
-.It Ev XFILES_THUMBNAILDIR
-Path to the directory where thumbnails must be saved.
+.It Ev XDG_CACHE_HOME
+Value used when
+.Ev CACHEDIR
+is not set.
 .El
 .Pp
 The following environment variables are set by
@@ -584,7 +590,7 @@ process.
 Note that this string contains the number in decimal notation,
 not in hexadecimal (as is usually exchanged by a few X applications).
 .El
-.Ss SEE ALSO
+.Sh SEE ALSO
 .Xr X 7 ,
 .Xr dmenu 1 ,
 .Xr xmenu 1
