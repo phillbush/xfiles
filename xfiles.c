@@ -451,6 +451,7 @@ initthumbnailer(struct FM *fm)
 {
 	struct stat sb;
 	mode_t mode, dir_mode;
+	size_t len;
 	int mkdir_errno, done;
 	char path[PATH_MAX];
 	char *slash, *str;
@@ -464,7 +465,8 @@ initthumbnailer(struct FM *fm)
 	slash = strrchr(path, '\0');
 	while (--slash > path && *slash == '/')
 		*slash = '\0';
-	(void)snprintf(path, PATH_MAX, "%s/thumbnails", path);
+	len = strlen(path);
+	(void)snprintf(path + len, PATH_MAX - len, "/thumbnails");
 	fm->thumbnaildir = estrdup(path);
 	slash = path;
 	for (;;) {
