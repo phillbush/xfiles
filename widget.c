@@ -331,6 +331,7 @@ struct Widget {
 
 	/* Strings used to build the title bar. */
 	const char *title;
+	const char *class;
 
 	/*
 	 * Index of highlighted item (usually the last item clicked by
@@ -1027,11 +1028,12 @@ settitle(Widget *widget)
 	if (widget->title != NULL) {
 		(void)snprintf(
 			title, LEN(title),
-			"%s%s%s (%s) (%d%%)",
+			"%s%s%s (%s) - %s (%d%%)",
 			widget->title,
 			(strcmp(widget->title, "/") != 0 ? "/" : ""),
 			selitem,
 			status,
+			widget->class,
 			scrollpct
 		);
 	}
@@ -2999,6 +3001,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 		return NULL;
 	}
 	*widget = (Widget){
+		.class = class,
 		.colors[SELECT_NOT][COLOR_BG].chans = DEF_COLOR_BG,
 		.colors[SELECT_NOT][COLOR_FG].chans = DEF_COLOR_FG,
 		.colors[SELECT_YES][COLOR_BG].chans = DEF_COLOR_SELBG,
