@@ -1,0 +1,47 @@
+#!/bin/sh
+
+BACKGROUND="#0A0A0A"
+THUMBSIZE=64
+umask 077
+
+case "$#" in
+(2)
+	;;
+(*)
+	printf "usage: %s file\n" "$0" >&2
+	exit 1
+	;;
+esac
+
+case "$2" in
+(*/*)
+	mkdir -p "${2%/*}"
+	;;
+(*)
+	;;
+esac
+
+case "${1##*.}" in
+png|jpg|jpeg|gif|xpm|xbm|ppm)
+	convert "${1}[0]" -background "$BACKGROUND" -flatten \
+		-define filename:literal=true -format ppm \
+		-thumbnail "${THUMBSIZE}x${THUMBSIZE}" \
+		"${2}"
+	;;
+webm|mp4|mkv|ogv)
+	ffmpegthumbnailer -c png -i "${1}" -o - -s "${THUMBSIZE}" \
+		| convert - -define filename:literal=true -format ppm \
+		"${2}"
+	;;
+svg)
+	rsvg-convert -h "${THUMBSIZE}" "${1}" \
+		| convert - -format ppm "${2}"
+	;;
+pdf)
+	pdftoppm -f 1 -l 1 -scale-to "${THUMBSIZE}" -singlefile \
+		"${1}" "${2%.ppm}"
+	;;
+*)
+	exit 1
+	;;
+esac 2>/dev/null
