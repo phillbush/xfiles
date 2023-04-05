@@ -832,7 +832,7 @@ main(int argc, char *argv[])
 	home = getenv("HOME");
 	name = getenv("RESOURCES_NAME");
 	if (argv[0] != NULL && argv[0][0] != '\0') {
-		if ((name = strchr(argv[0], '/')) != NULL) {
+		if ((name = strrchr(argv[0], '/')) != NULL) {
 			name++;
 		} else {
 			name = argv[0];
