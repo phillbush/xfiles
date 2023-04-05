@@ -149,5 +149,5 @@ struct {
 size_t ndeffileicons = NTYPES;
 
 size_t defdirtype = dir;
-
+size_t defupdirtype = up_dir;
 size_t deffiletype = file;

@@ -183,10 +183,10 @@ sizefmt(off_t size)
 static int
 isdir(char **entry)
 {
-	size_t len;
+	char *s;
 
-	len = strlen(entry[ITEM_PATH]);
-	return len > 0 && entry[ITEM_PATH][len-1] == '/';
+	s = strrchr(entry[ITEM_PATH], '/');
+	return s != NULL && s[1] == '\0';
 }
 
 static int
@@ -283,6 +283,8 @@ checkicon(struct FM *fm, char **entry, char *patt)
 	if (patt[0] == '~' || strchr(patt, '/') != NULL) {
 		flags = FNM_CASEFOLD | FNM_PATHNAME | FNM_LEADING_DIR;
 		s = entry[ITEM_PATH];
+	} else if (isdir(entry)) {
+		return FALSE;
 	} else {
 		flags = FNM_CASEFOLD;
 		s = entry[ITEM_NAME];
@@ -303,12 +305,14 @@ checkicon(struct FM *fm, char **entry, char *patt)
 static char *
 geticon(struct FM *fm, char **entry)
 {
-	extern size_t defdirtype;
+	extern size_t defdirtype, defupdirtype;
 	extern char *deffiletypes[];
 	extern struct { char *patt; int type; } deffilepatts[];
 	size_t i;
 	char *patt;
 
+	if (strcmp(entry[ITEM_NAME], "..") == 0)
+		return deffiletypes[defupdirtype];
 	for (i = 0; i < fm->nfiletypes; i++) {
 		patt = fm->filetypes[i].patt;
 		if (checkicon(fm, entry, patt)) {
