@@ -1056,7 +1056,7 @@ settitle(Widget *widget)
 		8,
 		PropModeReplace,
 		(unsigned char *)widget->title,
-		strlen(title)
+		strlen(widget->title)
 	);
 }
 
