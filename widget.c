@@ -2084,9 +2084,9 @@ processevent(Widget *widget, XEvent *ev)
 		case CTRLSEL_LOST:
 			unselectitems(widget);
 			disownprimary(widget);
-			return WIDGET_INTERNAL;
+			goto done;
 		case CTRLSEL_INTERNAL:
-			return WIDGET_INTERNAL;
+			goto done;
 		default:
 			break;
 		}
@@ -2095,12 +2095,12 @@ processevent(Widget *widget, XEvent *ev)
 		switch (ctrlsel_dndsend(widget->dragctx, ev)) {
 		case CTRLSEL_SENT:
 			widget->dragctx = NULL;
-			return WIDGET_REFRESH;
+			goto done;
 		case CTRLSEL_LOST:
 			disowndnd(widget);
-			return WIDGET_INTERNAL;
+			goto done;
 		case CTRLSEL_INTERNAL:
-			return WIDGET_INTERNAL;
+			goto done;
 		default:
 			break;
 		}
@@ -2108,9 +2108,9 @@ processevent(Widget *widget, XEvent *ev)
 	switch (ctrlsel_dndreceive(widget->dropctx, ev)) {
 	case CTRLSEL_RECEIVED:
 		FREE(widget->droptarget.buffer);
-		return WIDGET_INTERNAL;
+		goto done;
 	case CTRLSEL_INTERNAL:
-		return WIDGET_INTERNAL;
+		goto done;
 	default:
 		break;
 	}
@@ -2160,6 +2160,7 @@ processevent(Widget *widget, XEvent *ev)
 	default:
 		return WIDGET_NONE;
 	}
+done:
 	endevent(widget);
 	return WIDGET_INTERNAL;
 }
