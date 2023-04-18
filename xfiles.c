@@ -32,8 +32,7 @@
 #define THUMBNAILERCMD  "xfilesthumb"
 #define DEV_NULL        "/dev/null"
 #define UNIT_LAST       7
-#define SIZE_BUFSIZE    6       /* 4 digits + suffix char + nul */
-#define TIME_BUFSIZE    128
+#define STATUS_BUFSIZE  1024
 
 struct FileType {
 	char *patt, *type;
@@ -146,37 +145,79 @@ fullpath(char *dir, char *file, int isdir)
 }
 
 static char *
-sizefmt(off_t size)
+statusfmt(struct stat *sb)
 {
 	int i;
-	char buf[SIZE_BUFSIZE] = "0B";
+	time_t time;
 	long long int number, fract;
+	struct passwd *pw = NULL;
+	struct group *gr = NULL;
+	struct tm tm;
+	char *user, *group;
+	char timebuf[128];
+	char buf[STATUS_BUFSIZE] = "???";
 
-	if (size <= 0)
-		return estrdup("0B");
+	number = 0;
+	if (sb->st_size <= 0)
+		goto done;
 	for (i = 0; i < UNIT_LAST; i++)
-		if (size < units[i + 1].n)
+		if (sb->st_size < units[i + 1].n)
 			break;
 	if (i == UNIT_LAST)
-		return estrdup("inf");
-	fract = (i == 0) ? 0 : size % units[i].n;
+		goto done;
+	fract = (i == 0) ? 0 : sb->st_size % units[i].n;
 	fract /= (i == 0) ? 1 : units[i - 1].n;
 	fract = (10 * fract + 512) / 1024;
-	number = size / units[i].n;
+	number = sb->st_size / units[i].n;
 	if (number <= 0)
-		return estrdup("0B");
+		goto done;
 	if (fract >= 10 || (fract >= 5 && number >= 100)) {
 		number++;
 		fract = 0;
 	} else if (fract < 0) {
 		fract = 0;
 	}
-	if (number == 0)
-		return estrdup("0B");
-	if (number >= 100)
-		(void)snprintf(buf, sizeof(buf), "%lld%c", number, units[i].u);
-	else
-		(void)snprintf(buf, sizeof(buf), "%lld.%lld%c", number, fract, units[i].u);
+done:
+	pw = getpwuid(sb->st_uid);
+	gr = getgrgid(sb->st_gid);
+	user = pw->pw_name != NULL ? pw->pw_name : "?";
+	group = gr->gr_name != NULL ? gr->gr_name : "?";
+	time = sb->st_mtim.tv_sec;
+	(void)localtime_r(&time, &tm);
+	(void)strftime(timebuf, sizeof(timebuf), "%F %R", &tm);
+	if (number <= 0) {
+		(void)snprintf(
+			buf,
+			sizeof(buf),
+			"0B - %s:%s - %s",
+			user,
+			group,
+			timebuf
+		);
+	} else if (number >= 100) {
+		(void)snprintf(
+			buf,
+			sizeof(buf),
+			"%lld%c - %s:%s - %s",
+			number,
+			units[i].u,
+			user,
+			group,
+			timebuf
+		);
+	} else {
+		(void)snprintf(
+			buf,
+			sizeof(buf),
+			"%lld.%lld%c - %s:%s - %s",
+			number,
+			fract,
+			units[i].u,
+			user,
+			group,
+			timebuf
+		);
+	}
 	return estrdup(buf);
 }
 
@@ -431,7 +472,7 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 			fm->entries[i][ITEM_STATUS] = NULL;
 		} else {
 			isdir = S_ISDIR(sb.st_mode);
-			fm->entries[i][ITEM_STATUS] = sizefmt(sb.st_size);
+			fm->entries[i][ITEM_STATUS] = statusfmt(&sb);
 		}
 		fm->entries[i][ITEM_NAME] = estrdup(array[i]->d_name);
 		fm->entries[i][ITEM_PATH] = fullpath(cwd->path, array[i]->d_name, isdir);

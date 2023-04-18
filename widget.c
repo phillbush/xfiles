@@ -354,6 +354,11 @@ struct Widget {
 	 */
 	Window scroller;                /* the scroller popup window */
 	int handlew;                    /* size of scroller handle */
+
+	/*
+	 * Statusbar describing highlighted item.
+	 */
+	Window status;
 };
 
 struct Options {
@@ -561,6 +566,12 @@ loadresources(Widget *widget, const char *str)
 	XrmDestroyDatabase(xdb);
 }
 
+static void
+unmapstatusbar(Widget *widget)
+{
+	XUnmapWindow(widget->display, widget->status);
+}
+
 static int
 calcsize(Widget *widget, int w, int h)
 {
@@ -570,6 +581,7 @@ calcsize(Widget *widget, int w, int h)
 	ret = FALSE;
 	if (widget->w == w && widget->h == h)
 		return FALSE;
+	unmapstatusbar(widget);
 	widget->redraw = TRUE;
 	etlock(&widget->lock);
 	ncols = widget->ncols;
@@ -610,11 +622,21 @@ isbreakable(char c)
 }
 
 static void
-drawtext(Widget *widget, Drawable pix, XftColor *color, int x, const char *text, int len)
+drawtext(Widget *widget, Drawable pix, XftColor *color, int x, int y, const char *text, int len)
 {
 	XftDraw *draw;
 
 	draw = XftDrawCreate(widget->display, pix, widget->visual, widget->colormap);
+	XftDrawStringUtf8(draw, color, widget->font, x, y + widget->font->ascent, (const FcChar8 *)text, len);
+	XftDrawDestroy(draw);
+}
+
+static void
+drawname(Widget *widget, XftColor *color, int x, const char *text, int len)
+{
+	XftDraw *draw;
+
+	draw = XftDrawCreate(widget->display, widget->namepix, widget->visual, widget->colormap);
 	XRenderFillRectangle(
 		widget->display,
 		PictOpClear,
@@ -761,9 +783,8 @@ drawlabel(Widget *widget, int index, int x, int y)
 		}
 		textw = min(LABELWIDTH, textw);
 		maxw = max(textw, maxw);
-		drawtext(
+		drawname(
 			widget,
-			widget->namepix,
 			&color,
 			max(LABELWIDTH / 2 - textw / 2, 0),
 			text, textlen
@@ -785,9 +806,8 @@ drawlabel(Widget *widget, int index, int x, int y)
 		extensionlen = strlen(extension);
 		extensionw = textwidth(widget, extension, extensionlen);
 		/* draw ellipsis */
-		drawtext(
+		drawname(
 			widget,
-			widget->namepix,
 			&color,
 			0,
 			ELLIPSIS, strlen(ELLIPSIS)
@@ -803,12 +823,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 		);
 
 		/* draw extension */
-		drawtext(
-			widget,
-			widget->namepix,
-			&color,
-			0, extension, extensionlen
-		);
+		drawname(widget, &color, 0, extension, extensionlen);
 		XCopyArea(
 			widget->display,
 			widget->namepix, widget->layers[LAYER_ICONS].pix,
@@ -1008,7 +1023,6 @@ settitle(Widget *widget)
 {
 	char title[1028];       /* enough for a window title */
 	char nitems[64];        /* enough for writing number of files */
-	char *selitem, *status;
 	int scrollpct;          /* scroll percentage */
 
 	if (widget->row == 0 && widget->nscreens > 1)
@@ -1016,23 +1030,12 @@ settitle(Widget *widget)
 	else
 		scrollpct = 100 * ((double)(widget->row + 1) / widget->nscreens);
 	(void)snprintf(nitems, LEN(nitems), "%d items", widget->nitems - 1);
-	selitem = "";
-	status = nitems;
-	selitem = (widget->highlight > 0 ? widget->items[widget->highlight][ITEM_NAME] : "");
-	if (widget->highlight <= 0)
-		status = nitems;
-	else if (widget->items[widget->highlight][ITEM_STATUS] == NULL)
-		status = STATUS_UNKNOWN;
-	else
-		status = widget->items[widget->highlight][ITEM_STATUS];
 	if (widget->title != NULL) {
 		(void)snprintf(
 			title, LEN(title),
-			"%s%s%s (%s) - %s (%d%%)",
+			"%s (%s) - %s (%d%%)",
 			widget->title,
-			(strcmp(widget->title, "/") != 0 ? "/" : ""),
-			selitem,
-			status,
+			nitems,
 			widget->class,
 			scrollpct
 		);
@@ -1197,7 +1200,7 @@ getitem(Widget *widget, int row, int ydiff, int *x, int *y)
 }
 
 static int
-getpointerclick(Widget *widget, int x, int y)
+getitemundercursor(Widget *widget, int x, int y)
 {
 	int iconx, textx, texty, i;
 
@@ -1285,6 +1288,7 @@ cleanwidget(Widget *widget)
 	struct Selection *sel;
 	void *tmp;
 
+	XUnmapWindow(widget->display, widget->status);
 	thumb = widget->thumbhead;
 	while (thumb != NULL) {
 		tmp = thumb;
@@ -1355,6 +1359,105 @@ selectitem(Widget *widget, int index, int select, int rectsel)
 }
 
 static void
+mapstatusbar(Widget *widget, int index)
+{
+	Pixmap pix = None;
+	Picture pict = None;
+	int y, tmp, width, height, margin;
+	size_t namelen, statuslen;
+
+	unmapstatusbar(widget);
+	if (index <= 0)
+		return;
+	margin = widget->fonth / 2;
+	height = widget->fonth * 2;     /* 4 lines: name, size */
+	height += margin * 2;
+	namelen = strlen(widget->items[index][ITEM_NAME]);
+	statuslen = strlen(widget->items[index][ITEM_STATUS]);
+	width = textwidth(widget, widget->items[index][ITEM_NAME], namelen);
+	tmp = textwidth(widget, widget->items[index][ITEM_STATUS], statuslen);
+	width = max(width, tmp);
+	width += margin * 2;
+	if (index / widget->ncols + 1 >= widget->row + (widget->ydiff + widget->h) / widget->itemh)
+		y = 0;
+	else
+		y = widget->h - height;
+	pix = XCreatePixmap(
+		widget->display,
+		widget->window,
+		width,
+		height,
+		widget->depth
+	);
+	if (pix == None)
+		goto done;
+	pict = XRenderCreatePicture(
+		widget->display,
+		pix,
+		widget->format,
+		0,
+		NULL
+	);
+	if (pict == None)
+		goto done;
+	XMoveResizeWindow(
+		widget->display,
+		widget->status,
+		0,
+		y,
+		width,
+		height
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		pict,
+		&widget->colors[SELECT_NOT][COLOR_FG].chans,
+		0, 0, width, height
+	);
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		pict,
+		&widget->colors[SELECT_NOT][COLOR_BG].chans,
+		1, 1, width - 2, height - 2
+	);
+	drawtext(
+		widget,
+		pix,
+		&(XftColor){
+			.color = widget->colors[SELECT_NOT][COLOR_FG].chans,
+		},
+		margin,
+		margin,
+		widget->items[index][ITEM_NAME],
+		namelen
+	);
+	drawtext(
+		widget,
+		pix,
+		&(XftColor){
+			.color = widget->colors[SELECT_NOT][COLOR_FG].chans,
+		},
+		margin,
+		margin + widget->fonth,
+		widget->items[index][ITEM_STATUS],
+		statuslen
+	);
+	XSetWindowBackgroundPixmap(
+		widget->display,
+		widget->status,
+		pix
+	);
+	XMapWindow(widget->display, widget->status);
+done:
+	if (pix != None)
+		XFreePixmap(widget->display, pix);
+	if (pict != None)
+		XRenderFreePicture(widget->display, pict);
+}
+
+static void
 highlight(Widget *widget, int index, int redraw)
 {
 	int prevhili;
@@ -1363,6 +1466,8 @@ highlight(Widget *widget, int index, int redraw)
 		return;
 	prevhili = widget->highlight;
 	widget->highlight = index;
+	if (prevhili != widget->highlight)
+		mapstatusbar(widget, widget->highlight);
 	if (redraw)
 		drawitem(widget, index);
 	/* we still have to redraw the previous one */
@@ -1402,13 +1507,15 @@ mouse1click(Widget *widget, XButtonPressedEvent *ev)
 {
 	int prevhili, index;
 
-	index = getpointerclick(widget, ev->x, ev->y);
+	index = getitemundercursor(widget, ev->x, ev->y);
 	if (index > 0 && widget->issel[index] != NULL)
 		return index;
 	if (!(ev->state & (ControlMask | ShiftMask)))
 		unselectitems(widget);
-	if (index < 0)
+	if (index < 0) {
+		unmapstatusbar(widget);
 		return index;
+	}
 	/*
 	 * If index != 0, there's no need to ask highlight() to redraw the item,
 	 * as selectitem() or selectitems() will already redraw it.
@@ -1428,7 +1535,7 @@ mouse3click(Widget *widget, int x, int y)
 {
 	int index;
 
-	index = getpointerclick(widget, x, y);
+	index = getitemundercursor(widget, x, y);
 	if (index != -1) {
 		if (widget->issel[index] == NULL) {
 			highlight(widget, index, FALSE);
@@ -1727,7 +1834,7 @@ createdragwin(Widget *widget, int index)
 	Window win;
 	GC gc;
 	unsigned long opacity;
-	int pix, mask;
+	Pixmap pix, mask;
 	int xroot, yroot, w, h;
 
 	if (index <= 0)
@@ -1907,6 +2014,30 @@ scrollerpos(Widget *widget)
 	if (pos < 0)
 		return pos;
 	return 0;
+}
+
+static Window
+createwindow(Widget *widget, Window parent, XRectangle rect, long eventmask)
+{
+	return XCreateWindow(
+		widget->display,
+		parent,
+		rect.x,
+		rect.y,
+		rect.width,
+		rect.height,
+		0,
+		widget->depth,
+		InputOutput,
+		widget->visual,
+		WINDOW_MASK,
+		&(XSetWindowAttributes){
+			.border_pixel = 0,
+			.background_pixel = 0,
+			.colormap = widget->colormap,
+			.event_mask = eventmask,
+		}
+	);
 }
 
 /*
@@ -2203,7 +2334,7 @@ nextevent(Widget *widget, XEvent *ev, int timeout)
 	for (;;) {
 		if (XPending(widget->display) > 0)
 			goto done;
-		if (clock_gettime(CLOCK_MONOTONIC, &ts) != -1) {
+		if (timeout > 0 && clock_gettime(CLOCK_MONOTONIC, &ts) != -1) {
 			elapsed = (ts.tv_sec - widget->time.tv_sec) * 1000;
 			elapsed += ts.tv_nsec / 1000000;
 			elapsed -= widget->time.tv_nsec / 1000000;
@@ -2406,7 +2537,7 @@ dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 		warnx("could not perform drag-and-drop");
 	} else if (state == CTRLSEL_DROPSELF) {
 		querypointer(widget, widget->window, &x, &y, &mask);
-		clicki = getpointerclick(widget, x, y);
+		clicki = getitemundercursor(widget, x, y);
 		if (clicki < 1)
 			return WIDGET_NONE;
 		*nitems = fillselitems(widget, selitems, clicki);
@@ -2442,7 +2573,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			*text = (char *)widget->droptarget.buffer;
 			*nitems = 1;
 			querypointer(widget, widget->window, &x, &y, NULL);
-			selitems[0] = getpointerclick(widget, x, y);
+			selitems[0] = getitemundercursor(widget, x, y);
 			if (widget->droptarget.action == CTRLSEL_COPY)
 				return WIDGET_DROPCOPY;
 			if (widget->droptarget.action == CTRLSEL_MOVE)
@@ -2482,7 +2613,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
 				if (scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
 					drawitems(widget);
-				commitdraw(widget);
+				widget->redraw = TRUE;
 			} else if (ev.xbutton.button == Button2) {
 				state = scrollmode(widget, ev.xmotion.x, ev.xmotion.y);
 				if (state != WIDGET_NONE)
@@ -2490,7 +2621,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			} else if (ev.xbutton.button == Button3) {
 				if (mouse3click(widget, ev.xbutton.x, ev.xbutton.y) > 0)
 					*nitems = fillselitems(widget, selitems, -1);
-				commitdraw(widget);
+				widget->redraw = TRUE;
 				XUngrabPointer(widget->display, ev.xbutton.time);
 				XFlush(widget->display);
 				return WIDGET_CONTEXT;
@@ -2522,11 +2653,12 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 				break;
 			if (diff(ev.xmotion.x, clickx) * diff(ev.xmotion.y, clicky) < DRAG_SQUARE)
 				break;
-			if (clicki == -1) {
+			if (clicki == 0)
+				break;
+			if (clicki == -1)
 				state = selmode(widget, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
-			} else if (clicki > 0) {
+			else
 				state = dragmode(widget, ev.xmotion.time, clicki, selitems, nitems);
-			}
 			if (state != WIDGET_NONE)
 				return state;
 			break;
@@ -2661,48 +2793,33 @@ initwindow(Widget *widget, struct Options *options)
 	sizehints = getgeometry(widget, &geometry);
 	widget->w = geometry.width,
 	widget->h = geometry.height,
-	widget->window = XCreateWindow(
-		widget->display,
+	widget->window = createwindow(
+		widget,
 		widget->root,
-		geometry.x,
-		geometry.y,
-		geometry.width,
-		geometry.height,
-		0,
-		widget->depth,
-		InputOutput,
-		widget->visual,
-		WINDOW_MASK,
-		&(XSetWindowAttributes){
-			.border_pixel = 0,
-			.background_pixel = 0,
-			.colormap = widget->colormap,
-			.event_mask = EVENT_MASK,
-		}
+		geometry,
+		EVENT_MASK
 	);
 	if (widget->window == None) {
 		warnx("could not create window");
 		return RETURN_FAILURE;
 	}
-	widget->scroller = XCreateWindow(
-		widget->display,
+	widget->scroller = createwindow(
+		widget,
 		widget->window,
-		0, 0,
-		SCROLLER_SIZE,
-		SCROLLER_SIZE,
-		0,
-		widget->depth,
-		InputOutput,
-		widget->visual,
-		WINDOW_MASK,
-		&(XSetWindowAttributes){
-			.border_pixel = 0,
-			.background_pixel = 0,
-			.colormap = widget->colormap,
-			.event_mask = ButtonPressMask | PointerMotionMask,
-		}
+		(XRectangle){.width = SCROLLER_SIZE, .height = SCROLLER_SIZE},
+		ButtonPressMask | PointerMotionMask
 	);
 	if (widget->scroller == None) {
+		warnx("could not create window");
+		return RETURN_FAILURE;
+	}
+	widget->status = createwindow(
+		widget,
+		widget->window,
+		(XRectangle){.width = 10, .height = 10},
+		0
+	);
+	if (widget->status == None) {
 		warnx("could not create window");
 		return RETURN_FAILURE;
 	}
