@@ -2140,8 +2140,10 @@ hjkl:
 			 */
 			if (row[i] < newrow) {
 				newrow = row[i];
-			} else if (row[i] >= newrow + WIN_ROWS(widget)) {
-				newrow = row[i] - WIN_ROWS(widget) + 1;
+			} else if (row[i] + 1 >= newrow + WIN_ROWS(widget)) {
+				newrow = row[i] - WIN_ROWS(widget) + 2;
+				newrow = min(newrow, row[i]);
+				newrow = min(newrow, widget->nscreens);
 			}
 		}
 		if (widget->row != newrow) {
