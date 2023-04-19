@@ -1466,8 +1466,7 @@ highlight(Widget *widget, int index, int redraw)
 		return;
 	prevhili = widget->highlight;
 	widget->highlight = index;
-	if (prevhili != widget->highlight)
-		mapstatusbar(widget, widget->highlight);
+	mapstatusbar(widget, widget->highlight);
 	if (redraw)
 		drawitem(widget, index);
 	/* we still have to redraw the previous one */
@@ -2072,6 +2071,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	case XK_Escape:
 		if (widget->sel == NULL)
 			break;
+		unmapstatusbar(widget);
 		unselectitems(widget);
 		break;
 	case XK_Return:
