@@ -2069,9 +2069,9 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	}
 	switch (ksym) {
 	case XK_Escape:
+		unmapstatusbar(widget);
 		if (widget->sel == NULL)
 			break;
-		unmapstatusbar(widget);
 		unselectitems(widget);
 		break;
 	case XK_Return:
