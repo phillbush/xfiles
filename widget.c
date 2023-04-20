@@ -40,6 +40,7 @@
 	X(_NET_WM_WINDOW_TYPE_DND, NULL)        \
 	X(_NET_WM_WINDOW_TYPE_NORMAL, NULL)     \
 	X(_NET_WM_WINDOW_OPACITY, NULL)         \
+	X(_CONTROL_STATUS, NULL)                \
 	X(_CONTROL_CWD, NULL)                   \
 	X(_CONTROL_GOTO, NULL)
 
@@ -52,6 +53,8 @@
 	X(NORMAL_FG, "Foreground",       "foreground")        \
 	X(SELECT_BG, "ActiveBackground", "activeBackground")  \
 	X(SELECT_FG, "ActiveForeground", "activeForeground")  \
+	X(STATUSBAR, "StatusBarEnable",  "statusBarEnable")     \
+	X(BARSTATUS, "EnableStatusBar",  "enableStatusBar")     \
 	X(OPACITY,   "Opacity",          "opacity")
 
 #define EVENT_MASK      (StructureNotifyMask | PropertyChangeMask | KeyPressMask |\
@@ -64,14 +67,12 @@
 #define DEF_COLOR_SELFG (XRenderColor){ .red = 0xFFFF, .green = 0xFFFF, .blue = 0xFFFF, .alpha = 0xFFFF }
 #define DEF_SIZE        (XRectangle){ .x = 0, .y = 0, .width = 600 , .height = 460 }
 #define DEF_OPACITY     0xFFFF
+#define DEF_STATUSBAR   TRUE
 
 #define FREE(x)         do{free(x); x = NULL;}while(0)
 
 /* ellipsis has two dots rather than three; the third comes from the extension */
 #define ELLIPSIS        ".."
-
-/* what to display when item's status is unknown */
-#define STATUS_UNKNOWN  "?"
 
 /* opacity of drag-and-drop mini window */
 #define DND_OPACITY     0x7FFFFFFF
@@ -98,6 +99,9 @@
 
 /* actual number of rows (either whole or not) that the current directory has */
 #define ALL_ROWS(w)     (WHL_ROWS(w) + MOD_ROWS(w))
+
+#define STATUSBAR_HEIGHT(w) ((w)->fonth * 2)
+#define STATUSBAR_MARGIN(w) ((w)->fonth / 2)
 
 enum {
 	/* distance the cursor must move to be considered a drag */
@@ -171,6 +175,7 @@ enum Layer {
 	LAYER_SELALPHA,
 	LAYER_RECTALPHA,
 	LAYER_SCROLLER,
+	LAYER_STATUSBAR,
 	LAYER_LAST,
 };
 
@@ -312,7 +317,8 @@ struct Widget {
 	 * I call "screenful" what is being visible at a given time on
 	 * the window.
 	 */
-	int w, h;                       /* window size */
+	int w, h;                       /* icon area size */
+	int winw, winh;                 /* window size */
 	int pixw, pixh;                 /* pixmap size */
 	int itemw, itemh;               /* size of a item (margin + icon + label) */
 	int ydiff;                      /* how much the pixmap is scrolled up */
@@ -358,7 +364,7 @@ struct Widget {
 	/*
 	 * Statusbar describing highlighted item.
 	 */
-	Window status;
+	int status_enable;
 };
 
 struct Options {
@@ -520,6 +526,73 @@ loadxdb(Widget *widget, const char *str)
 }
 
 static void
+drawtext(Widget *widget, Drawable pix, XftColor *color, int x, int y, const char *text, int len)
+{
+	XftDraw *draw;
+
+	draw = XftDrawCreate(widget->display, pix, widget->visual, widget->colormap);
+	XftDrawStringUtf8(draw, color, widget->font, x, y + widget->font->ascent, (const FcChar8 *)text, len);
+	XftDrawDestroy(draw);
+}
+
+static void
+drawstatusbar(Widget *widget)
+{
+	size_t namelen, statuslen, statuswid;
+
+	if (!widget->status_enable)
+		return;
+	widget->redraw = TRUE;
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_STATUSBAR].pict,
+		&widget->colors[SELECT_NOT][COLOR_BG].chans,
+		0, 0, widget->winw, STATUSBAR_HEIGHT(widget)
+	);
+	if (widget->highlight < 1)
+		return;
+	namelen = strlen(widget->items[widget->highlight][ITEM_NAME]);
+	drawtext(
+		widget,
+		widget->layers[LAYER_STATUSBAR].pix,
+		&(XftColor){
+			.color = widget->colors[SELECT_NOT][COLOR_FG].chans,
+		},
+		STATUSBAR_MARGIN(widget),
+		STATUSBAR_MARGIN(widget),
+		widget->items[widget->highlight][ITEM_NAME],
+		namelen
+	);
+	statuslen = strlen(widget->items[widget->highlight][ITEM_STATUS]);
+	statuswid = textwidth(
+		widget,
+		widget->items[widget->highlight][ITEM_STATUS],
+		statuslen
+	);
+	statuswid += STATUSBAR_MARGIN(widget) * 2;
+	XRenderFillRectangle(
+		widget->display,
+		PictOpSrc,
+		widget->layers[LAYER_STATUSBAR].pict,
+		&widget->colors[SELECT_NOT][COLOR_BG].chans,
+		widget->winw - statuswid, 0,
+		statuswid, STATUSBAR_HEIGHT(widget)
+	);
+	drawtext(
+		widget,
+		widget->layers[LAYER_STATUSBAR].pix,
+		&(XftColor){
+			.color = widget->colors[SELECT_NOT][COLOR_FG].chans,
+		},
+		widget->winw - statuswid + STATUSBAR_MARGIN(widget),
+		STATUSBAR_MARGIN(widget),
+		widget->items[widget->highlight][ITEM_STATUS],
+		statuslen
+	);
+}
+
+static void
 loadresources(Widget *widget, const char *str)
 {
 	XrmDatabase xdb;
@@ -559,17 +632,17 @@ loadresources(Widget *widget, const char *str)
 		case OPACITY:
 			setopacity(widget, value);
 			break;
+		case STATUSBAR:
+		case BARSTATUS:
+			widget->status_enable =  strcasecmp(value, "on") == 0
+			                     || strcasecmp(value, "true") == 0
+			                     || strcmp(value, "1") == 0;
+			break;
 		default:
 			break;
 		}
 	}
 	XrmDestroyDatabase(xdb);
-}
-
-static void
-unmapstatusbar(Widget *widget)
-{
-	XUnmapWindow(widget->display, widget->status);
 }
 
 static int
@@ -579,18 +652,22 @@ calcsize(Widget *widget, int w, int h)
 	double d;
 
 	ret = FALSE;
-	if (widget->w == w && widget->h == h)
+	if (widget->winw == w && widget->winh == h)
 		return FALSE;
-	unmapstatusbar(widget);
 	widget->redraw = TRUE;
 	etlock(&widget->lock);
 	ncols = widget->ncols;
 	nrows = widget->nrows;
 	if (w > 0 && h > 0) {
-		widget->w = w;
-		widget->h = h;
+		widget->winw = w;
+		widget->winh = h;
 		widget->ydiff = 0;
 	}
+	if (widget->status_enable)
+		widget->h = max(widget->winh - STATUSBAR_HEIGHT(widget), widget->itemh);
+	else
+		widget->h = widget->winh;
+	widget->w = widget->winw;
 	widget->ncols = max(widget->w / widget->itemw, 1);
 	widget->nrows = max(WIN_ROWS(widget) + (widget->h % widget->itemh ? 2 : 1), 1);
 	widget->x0 = max((widget->w - widget->ncols * widget->itemw) / 2, 0);
@@ -610,7 +687,8 @@ calcsize(Widget *widget, int w, int h)
 		ret = TRUE;
 	}
 	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
-	resetlayer(widget, LAYER_CANVAS, widget->w, widget->h);
+	resetlayer(widget, LAYER_STATUSBAR, widget->winw, STATUSBAR_HEIGHT(widget));
+	resetlayer(widget, LAYER_CANVAS, widget->winw, widget->winh);
 	etunlock(&widget->lock);
 	return ret;
 }
@@ -619,16 +697,6 @@ static int
 isbreakable(char c)
 {
 	return c == '.' || c == '-' || c == '_';
-}
-
-static void
-drawtext(Widget *widget, Drawable pix, XftColor *color, int x, int y, const char *text, int len)
-{
-	XftDraw *draw;
-
-	draw = XftDrawCreate(widget->display, pix, widget->visual, widget->colormap);
-	XftDrawStringUtf8(draw, color, widget->font, x, y + widget->font->ascent, (const FcChar8 *)text, len);
-	XftDrawDestroy(draw);
 }
 
 static void
@@ -976,7 +1044,7 @@ commitdraw(Widget *widget)
 		0, widget->ydiff - MARGIN,
 		0, 0,
 		widget->x0, 0,
-		widget->pixw, widget->pixh
+		widget->w, widget->h
 	);
 	XRenderComposite(
 		widget->display,
@@ -987,7 +1055,7 @@ commitdraw(Widget *widget)
 		0, 0,
 		0, widget->ydiff - MARGIN,
 		widget->x0, 0,
-		widget->pixw, widget->pixh
+		widget->w, widget->h
 	);
 	XRenderComposite(
 		widget->display,
@@ -1000,13 +1068,26 @@ commitdraw(Widget *widget)
 		0, 0,
 		widget->w, widget->h
 	);
+	if (widget->status_enable) {
+		XRenderComposite(
+			widget->display,
+			PictOpOver,
+			widget->layers[LAYER_STATUSBAR].pict,
+			None,
+			widget->layers[LAYER_CANVAS].pict,
+			0, 0,
+			0, 0,
+			0, widget->h,
+			widget->winw, STATUSBAR_HEIGHT(widget)
+		);
+	}
 	XRenderFillRectangle(
 		widget->display,
 		PictOpOverReverse,
 		widget->layers[LAYER_CANVAS].pict,
 		&color,
 		0, 0,
-		widget->w, widget->h
+		widget->winw, widget->winh
 	);
 	XSetWindowBackgroundPixmap(
 		widget->display,
@@ -1288,7 +1369,6 @@ cleanwidget(Widget *widget)
 	struct Selection *sel;
 	void *tmp;
 
-	XUnmapWindow(widget->display, widget->status);
 	thumb = widget->thumbhead;
 	while (thumb != NULL) {
 		tmp = thumb;
@@ -1315,6 +1395,16 @@ cleanwidget(Widget *widget)
 	FREE(widget->dndbuf);
 	disownprimary(widget);
 	disowndnd(widget);
+	(void)XChangeProperty(
+		widget->display,
+		widget->window,
+		widget->atoms[_CONTROL_STATUS],
+		widget->atoms[UTF8_STRING],
+		8,
+		PropModeReplace,
+		(unsigned char *)"",
+		0
+	);
 }
 
 static void
@@ -1359,110 +1449,10 @@ selectitem(Widget *widget, int index, int select, int rectsel)
 }
 
 static void
-mapstatusbar(Widget *widget, int index)
-{
-	Pixmap pix = None;
-	Picture pict = None;
-	int y, tmp, width, height, margin;
-	size_t namelen, statuslen;
-
-	unmapstatusbar(widget);
-	if (index <= 0)
-		return;
-	margin = widget->fonth / 2;
-	height = widget->fonth * 2;     /* 4 lines: name, size */
-	height += margin * 2;
-	namelen = strlen(widget->items[index][ITEM_NAME]);
-	statuslen = strlen(widget->items[index][ITEM_STATUS]);
-	width = textwidth(widget, widget->items[index][ITEM_NAME], namelen);
-	tmp = textwidth(widget, widget->items[index][ITEM_STATUS], statuslen);
-	width = max(width, tmp);
-	width += margin * 2;
-	if (index / widget->ncols + 1 >= widget->row + (widget->ydiff + widget->h) / widget->itemh)
-		y = 0;
-	else
-		y = widget->h - height;
-	pix = XCreatePixmap(
-		widget->display,
-		widget->window,
-		width,
-		height,
-		widget->depth
-	);
-	if (pix == None)
-		goto done;
-	pict = XRenderCreatePicture(
-		widget->display,
-		pix,
-		widget->format,
-		0,
-		NULL
-	);
-	if (pict == None)
-		goto done;
-	XMoveResizeWindow(
-		widget->display,
-		widget->status,
-		0,
-		y,
-		width,
-		height
-	);
-	XRenderFillRectangle(
-		widget->display,
-		PictOpSrc,
-		pict,
-		&widget->colors[SELECT_NOT][COLOR_FG].chans,
-		0, 0, width, height
-	);
-	XRenderFillRectangle(
-		widget->display,
-		PictOpSrc,
-		pict,
-		&widget->colors[SELECT_NOT][COLOR_BG].chans,
-		1, 1, width - 2, height - 2
-	);
-	drawtext(
-		widget,
-		pix,
-		&(XftColor){
-			.color = widget->colors[SELECT_NOT][COLOR_FG].chans,
-		},
-		margin,
-		margin,
-		widget->items[index][ITEM_NAME],
-		namelen
-	);
-	drawtext(
-		widget,
-		pix,
-		&(XftColor){
-			.color = widget->colors[SELECT_NOT][COLOR_FG].chans,
-		},
-		margin,
-		margin + widget->fonth,
-		widget->items[index][ITEM_STATUS],
-		statuslen
-	);
-	XSetWindowBackgroundPixmap(
-		widget->display,
-		widget->status,
-		pix
-	);
-	XMapWindow(widget->display, widget->status);
-done:
-	if (pix != None)
-		XFreePixmap(widget->display, pix);
-	if (pict != None)
-		XRenderFreePicture(widget->display, pict);
-}
-
-static void
 highlight(Widget *widget, int index, int redraw)
 {
 	int prevhili;
 
-	mapstatusbar(widget, index);
 	if (widget->highlight == index)
 		return;
 	prevhili = widget->highlight;
@@ -1471,7 +1461,50 @@ highlight(Widget *widget, int index, int redraw)
 		drawitem(widget, index);
 	/* we still have to redraw the previous one */
 	drawitem(widget, prevhili);
-	settitle(widget);
+	drawstatusbar(widget);
+	if (widget->highlight > 0) {
+		(void)XChangeProperty(
+			widget->display,
+			widget->window,
+			widget->atoms[_CONTROL_STATUS],
+			widget->atoms[UTF8_STRING],
+			8,
+			PropModeReplace,
+			(unsigned char *)widget->items[widget->highlight][ITEM_NAME],
+			strlen(widget->items[widget->highlight][ITEM_NAME])
+		);
+		(void)XChangeProperty(
+			widget->display,
+			widget->window,
+			widget->atoms[_CONTROL_STATUS],
+			widget->atoms[UTF8_STRING],
+			8,
+			PropModeAppend,
+			(unsigned char *)" - ",
+			3
+		);
+		(void)XChangeProperty(
+			widget->display,
+			widget->window,
+			widget->atoms[_CONTROL_STATUS],
+			widget->atoms[UTF8_STRING],
+			8,
+			PropModeAppend,
+			(unsigned char *)widget->items[widget->highlight][ITEM_STATUS],
+			strlen(widget->items[widget->highlight][ITEM_STATUS])
+		);
+	} else {
+		(void)XChangeProperty(
+			widget->display,
+			widget->window,
+			widget->atoms[_CONTROL_STATUS],
+			widget->atoms[UTF8_STRING],
+			8,
+			PropModeReplace,
+			(unsigned char *)"",
+			0
+		);
+	}
 }
 
 static void
@@ -1512,7 +1545,6 @@ mouse1click(Widget *widget, XButtonPressedEvent *ev)
 	if (!(ev->state & (ControlMask | ShiftMask)))
 		unselectitems(widget);
 	if (index < 0) {
-		unmapstatusbar(widget);
 		return index;
 	}
 	/*
@@ -2069,7 +2101,6 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	}
 	switch (ksym) {
 	case XK_Escape:
-		unmapstatusbar(widget);
 		if (widget->sel == NULL)
 			break;
 		unselectitems(widget);
@@ -2140,10 +2171,8 @@ hjkl:
 			 */
 			if (row[i] < newrow) {
 				newrow = row[i];
-			} else if (row[i] + 1 >= newrow + WIN_ROWS(widget)) {
-				newrow = row[i] - WIN_ROWS(widget) + 2;
-				newrow = min(newrow, row[i]);
-				newrow = min(newrow, widget->nscreens);
+			} else if (row[i] >= newrow + WIN_ROWS(widget)) {
+				newrow = row[i] - WIN_ROWS(widget) + 1;
 			}
 		}
 		if (widget->row != newrow) {
@@ -2260,6 +2289,7 @@ processevent(Widget *widget, XEvent *ev)
 				setrow(widget, widget->nscreens - 1);
 			drawitems(widget);
 		}
+		drawstatusbar(widget);
 		break;
 	case PropertyNotify:
 		if (ev->xproperty.state != PropertyNewValue)
@@ -2793,8 +2823,8 @@ initwindow(Widget *widget, struct Options *options)
 	char buf[16]; /* 16: enough for digits in 32-bit number + final '\0' */
 
 	sizehints = getgeometry(widget, &geometry);
-	widget->w = geometry.width,
-	widget->h = geometry.height,
+	widget->winw = geometry.width,
+	widget->winh = geometry.height,
 	widget->window = createwindow(
 		widget,
 		widget->root,
@@ -2812,16 +2842,6 @@ initwindow(Widget *widget, struct Options *options)
 		ButtonPressMask | PointerMotionMask
 	);
 	if (widget->scroller == None) {
-		warnx("could not create window");
-		return RETURN_FAILURE;
-	}
-	widget->status = createwindow(
-		widget,
-		widget->window,
-		(XRectangle){.width = 10, .height = 10},
-		0
-	);
-	if (widget->status == None) {
 		warnx("could not create window");
 		return RETURN_FAILURE;
 	}
@@ -2858,7 +2878,7 @@ initwindow(Widget *widget, struct Options *options)
 		8,
 		PropModeReplace,
 		(unsigned char *)options->class,
-		strlen(options->class) + 1       /* +1 for '\0' */
+		strlen(options->class)
 	);
 	(void)XChangeProperty(
 		widget->display,
@@ -3126,6 +3146,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 		.colors[SELECT_NOT][COLOR_FG].chans = DEF_COLOR_FG,
 		.colors[SELECT_YES][COLOR_BG].chans = DEF_COLOR_SELBG,
 		.colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG,
+		.status_enable = DEF_STATUSBAR,
 		.opacity = DEF_OPACITY,
 		.lock = PTHREAD_MUTEX_INITIALIZER,
 		.highlight = -1,

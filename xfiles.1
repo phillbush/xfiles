@@ -521,6 +521,15 @@ above for a list of supported icons.
 Text color.
 .It Ic opacity
 Background opacity as a floating point number from 0.0 to 1.0.
+.It Ic statusBarEnable, enableStatusBar
+Whether a status bar listing information about the highlighted file should be displayed.
+The status bar can be enabled
+(if this resource is set to
+.Ic true )
+or disabled
+(if set to
+.Ic false ) .
+Either option can be used (they are synonyms).
 .El
 .Sh PROPERTIES
 .Nm xfiles
@@ -528,13 +537,9 @@ sets the following properties on its window:
 .Bl -tag -width Ds
 .It Ic "_CONTROL_CWD"
 Contains the current working directory.
-.It Ic "WM_NAME"
-Contains the title of the window.
-It has the format
-.Qq "CWD/ (N items) - XFiles (SCROLL%)"
-when no file is highlighted; or
-.Qq "CWD/FILE (SIZE) - XFiles (SCROLL%)"
-when a file is highlighted.
+.It Ic "_CONTROL_STATUS"
+Contains information about the current highlighted file
+(the same information displayed on the status bar, if enabled).
 .El
 .Pp
 .Nm xfiles

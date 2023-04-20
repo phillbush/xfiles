@@ -153,7 +153,9 @@ statusfmt(struct stat *sb)
 	struct passwd *pw = NULL;
 	struct group *gr = NULL;
 	struct tm tm;
-	char *user, *group;
+	char *user = "?";
+	char *group = "";
+	char *sep = "";
 	char timebuf[128];
 	char buf[STATUS_BUFSIZE] = "???";
 
@@ -180,8 +182,16 @@ statusfmt(struct stat *sb)
 done:
 	pw = getpwuid(sb->st_uid);
 	gr = getgrgid(sb->st_gid);
-	user = pw->pw_name != NULL ? pw->pw_name : "?";
-	group = gr->gr_name != NULL ? gr->gr_name : "?";
+	if (gr->gr_name != NULL)
+		group = gr->gr_name;
+	if (pw->pw_name != NULL) {
+		user = pw->pw_name;
+		if (strcmp(user, group) == 0) {
+			group = "";
+		} else {
+			sep = ":";
+		}
+	}
 	time = sb->st_mtim.tv_sec;
 	(void)localtime_r(&time, &tm);
 	(void)strftime(timebuf, sizeof(timebuf), "%F %R", &tm);
@@ -189,8 +199,9 @@ done:
 		(void)snprintf(
 			buf,
 			sizeof(buf),
-			"0B - %s:%s - %s",
+			"0B - %s%s%s - %s",
 			user,
+			sep,
 			group,
 			timebuf
 		);
@@ -198,10 +209,11 @@ done:
 		(void)snprintf(
 			buf,
 			sizeof(buf),
-			"%lld%c - %s:%s - %s",
+			"%lld%c - %s%s%s - %s",
 			number,
 			units[i].u,
 			user,
+			sep,
 			group,
 			timebuf
 		);
@@ -209,11 +221,12 @@ done:
 		(void)snprintf(
 			buf,
 			sizeof(buf),
-			"%lld.%lld%c - %s:%s - %s",
+			"%lld.%lld%c - %s%s%s - %s",
 			number,
 			fract,
 			units[i].u,
 			user,
+			sep,
 			group,
 			timebuf
 		);
