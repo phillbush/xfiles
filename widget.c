@@ -1462,11 +1462,11 @@ highlight(Widget *widget, int index, int redraw)
 {
 	int prevhili;
 
+	mapstatusbar(widget, index);
 	if (widget->highlight == index)
 		return;
 	prevhili = widget->highlight;
 	widget->highlight = index;
-	mapstatusbar(widget, widget->highlight);
 	if (redraw)
 		drawitem(widget, index);
 	/* we still have to redraw the previous one */
