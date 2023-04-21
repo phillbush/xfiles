@@ -182,9 +182,9 @@ statusfmt(struct stat *sb)
 done:
 	pw = getpwuid(sb->st_uid);
 	gr = getgrgid(sb->st_gid);
-	if (gr->gr_name != NULL)
+	if (gr != NULL && gr->gr_name != NULL)
 		group = gr->gr_name;
-	if (pw->pw_name != NULL) {
+	if (pw != NULL && pw->pw_name != NULL) {
 		user = pw->pw_name;
 		if (strcmp(user, group) == 0) {
 			group = "";
