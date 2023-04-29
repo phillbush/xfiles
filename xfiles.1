@@ -512,6 +512,28 @@ Text color for selected entries.
 Background color.
 .It Ic faceName
 Font for drawing text.
+If the value is prefixed with
+.Qq Ic "xft:"
+(case insensitive), then
+.Nm xfiles
+uses the Xft library for drawing text;
+and fallback fonts can be specified by delimiting the fonts with commas.
+If the value is prefixed with
+.Qq Ic "x:"
+or
+.Qq Ic "x11:"
+(case insensitive), then
+.Nm xfiles
+uses the X11 library for drawing text;
+if only one font is specified, regular X11 fonts are used;
+if two or more fonts are specified (delimited with commas), a
+.Ft XFontSet
+is used
+(but that is not reliable, and depends on the locale,
+so it is better to not use more than one X11 font).
+.It Ic faceSize
+The size, in points, of the font.
+This only affects Xft fonts.
 .It Ic fileIcons
 Sequence of associations between file patterns and icon names.
 Each association has the form

@@ -18,11 +18,11 @@
 #include <X11/XKBlib.h>
 #include <X11/cursorfont.h>
 #include <X11/xpm.h>
-#include <X11/Xft/Xft.h>
 #include <X11/Xcursor/Xcursor.h>
 #include <X11/extensions/Xrender.h>
 #include <X11/extensions/shape.h>
 
+#include "ctrlfnt.h"
 #include "ctrlsel.h"
 #include "util.h"
 #include "widget.h"
@@ -48,6 +48,7 @@
 	/*            CLASS               NAME             */ \
 	X(GEOMETRY,  "Geometry",         "geometry")          \
 	X(FACE_NAME, "FaceName",         "faceName")          \
+	X(FACE_SIZE, "FaceSize",         "faceSize")          \
 	X(ICONS,     "FileIcons",        "fileIcons")         \
 	X(NORMAL_BG, "Background",       "background")        \
 	X(NORMAL_FG, "Foreground",       "foreground")        \
@@ -225,7 +226,6 @@ struct Widget {
 		Picture pict;
 	} colors[SELECT_LAST][COLOR_LAST];
 	XRenderPictFormat *format, *alpha_format;
-	XftFont *font;
 	Visual *visual;
 	Colormap colormap;
 	int fd;
@@ -233,6 +233,8 @@ struct Widget {
 	unsigned int depth;
 	unsigned short opacity;
 	struct timespec time;
+
+	CtrlFontSet *fontset;
 
 	struct {
 		XrmClass class;
@@ -249,6 +251,7 @@ struct Widget {
 	} layers[LAYER_LAST];
 
 	Pixmap namepix;                 /* temporary pixmap for the labels */
+	Pixmap namepict;
 
 	/*
 	 * Lock used for synchronizing the thumbnail and the main threads.
@@ -333,7 +336,7 @@ struct Widget {
 	 * We use icons for items that do not have a thumbnail.
 	 */
 	struct Icon *icons;             /* array of icons set by the user */
-	int nicons;                     // XXX: remove-me
+	int nicons;
 
 	/* Strings used to build the title bar. */
 	const char *title;
@@ -406,52 +409,46 @@ resetlayer(Widget *widget, enum Layer layer, int width, int height)
 	);
 }
 
-static int
-textwidth(Widget *widget, const char *text, int len)
-{
-	XGlyphInfo box;
-
-	XftTextExtentsUtf8(widget->display, widget->font, (const FcChar8 *)text, len, &box);
-	return box.width;
-}
-
 static void
-setfont(Widget *widget, const char *facename)
+setfont(Widget *widget, const char *facename, double fontsize)
 {
-	XftFont *font;
+	CtrlFontSet *fontset;
 
 	if (facename == NULL)
-		facename = "";
-	font = XftFontOpenXlfd(
+		facename = "xft:";
+	fontset = ctrlfnt_open(
 		widget->display,
 		widget->screen,
-		facename
+		widget->visual,
+		widget->colormap,
+		facename,
+		fontsize
 	);
-	if (font == NULL) {
-		font = XftFontOpenName(
-			widget->display,
-			widget->screen,
-			facename
-		);
-	}
-	if (font == NULL) {
-		warnx("%s: unknown face name", facename);
+	if (fontset == NULL)
 		return;
-	}
-	if (widget->font != NULL)
-		XftFontClose(widget->display, widget->font);
-	widget->font = font;
-	widget->fonth = widget->font->height;
+	if (widget->fontset != NULL)
+		ctrlfnt_free(widget->fontset);
+	widget->fontset = fontset;
+	widget->fonth = ctrlfnt_height(widget->fontset);
 	widget->itemh = THUMBSIZE + (NLINES + 1) * widget->fonth;
-	widget->ellipsisw = textwidth(widget, ELLIPSIS, strlen(ELLIPSIS));
+	widget->ellipsisw = ctrlfnt_width(widget->fontset, ELLIPSIS, strlen(ELLIPSIS));
 	if (widget->namepix != None)
 		XFreePixmap(widget->display, widget->namepix);
+	if (widget->namepict != None)
+		XRenderFreePicture(widget->display, widget->namepict);
 	widget->namepix = XCreatePixmap(
 		widget->display,
 		widget->window,
 		LABELWIDTH,
 		widget->fonth,
 		widget->depth
+	);
+	widget->namepict = XRenderCreatePicture(
+		widget->display,
+		widget->namepix,
+		widget->format,
+		0,
+		NULL
 	);
 }
 
@@ -526,19 +523,10 @@ loadxdb(Widget *widget, const char *str)
 }
 
 static void
-drawtext(Widget *widget, Drawable pix, XftColor *color, int x, int y, const char *text, int len)
-{
-	XftDraw *draw;
-
-	draw = XftDrawCreate(widget->display, pix, widget->visual, widget->colormap);
-	XftDrawStringUtf8(draw, color, widget->font, x, y + widget->font->ascent, (const FcChar8 *)text, len);
-	XftDrawDestroy(draw);
-}
-
-static void
 drawstatusbar(Widget *widget)
 {
-	size_t namelen, statuslen, statuswid;
+	size_t namelen, statuslen;
+	int statuswid;
 
 	if (!widget->status_enable)
 		return;
@@ -553,20 +541,22 @@ drawstatusbar(Widget *widget)
 	if (widget->highlight < 1)
 		return;
 	namelen = strlen(widget->items[widget->highlight][ITEM_NAME]);
-	drawtext(
-		widget,
-		widget->layers[LAYER_STATUSBAR].pix,
-		&(XftColor){
-			.color = widget->colors[SELECT_NOT][COLOR_FG].chans,
+	ctrlfnt_draw(
+		widget->fontset,
+		widget->layers[LAYER_STATUSBAR].pict,
+		widget->colors[SELECT_NOT][COLOR_FG].pict,
+		(XRectangle){
+			.x = STATUSBAR_MARGIN(widget),
+			.y = STATUSBAR_MARGIN(widget),
+			.width = widget->w,
+			.height = widget->fonth,
 		},
-		STATUSBAR_MARGIN(widget),
-		STATUSBAR_MARGIN(widget),
 		widget->items[widget->highlight][ITEM_NAME],
 		namelen
 	);
 	statuslen = strlen(widget->items[widget->highlight][ITEM_STATUS]);
-	statuswid = textwidth(
-		widget,
+	statuswid = ctrlfnt_width(
+		widget->fontset,
 		widget->items[widget->highlight][ITEM_STATUS],
 		statuslen
 	);
@@ -579,16 +569,18 @@ drawstatusbar(Widget *widget)
 		widget->winw - statuswid, 0,
 		statuswid, STATUSBAR_HEIGHT(widget)
 	);
-	drawtext(
-		widget,
-		widget->layers[LAYER_STATUSBAR].pix,
-		&(XftColor){
-			.color = widget->colors[SELECT_NOT][COLOR_FG].chans,
+	ctrlfnt_draw(
+		widget->fontset,
+		widget->layers[LAYER_STATUSBAR].pict,
+		widget->colors[SELECT_NOT][COLOR_FG].pict,
+		(XRectangle){
+			.x = widget->winw - statuswid + STATUSBAR_MARGIN(widget),
+			.y = STATUSBAR_MARGIN(widget),
+			.width = statuswid,
+			.height = widget->fonth,
 		},
-		widget->winw - statuswid + STATUSBAR_MARGIN(widget),
-		STATUSBAR_MARGIN(widget),
-		widget->items[widget->highlight][ITEM_STATUS],
-		statuslen
+		widget->items[widget->highlight][ITEM_NAME],
+		namelen
 	);
 }
 
@@ -598,6 +590,11 @@ loadresources(Widget *widget, const char *str)
 	XrmDatabase xdb;
 	char *value;
 	enum Resource resource;
+	char *endp;
+	char *fontname = NULL;
+	double d;
+	double fontsize = 0.0;
+	int changefont = FALSE;
 
 	if (str == NULL)
 		return;
@@ -615,7 +612,15 @@ loadresources(Widget *widget, const char *str)
 			continue;
 		switch (resource) {
 		case FACE_NAME:
-			setfont(widget, value);
+			fontname = value;
+			changefont = TRUE;
+			break;
+		case FACE_SIZE:
+			d = strtod(value, &endp);
+			if (value[0] != '\0' && *endp == '\0' && d > 0.0 && d <= 100.0) {
+				fontsize = d;
+				changefont = TRUE;
+			}
 			break;
 		case NORMAL_BG:
 			setcolor(widget, SELECT_NOT, COLOR_BG, value);
@@ -642,6 +647,8 @@ loadresources(Widget *widget, const char *str)
 			break;
 		}
 	}
+	if (changefont)
+		setfont(widget, fontname, fontsize);
 	XrmDestroyDatabase(xdb);
 }
 
@@ -700,20 +707,28 @@ isbreakable(char c)
 }
 
 static void
-drawname(Widget *widget, XftColor *color, int x, const char *text, int len)
+drawname(Widget *widget, Picture color, int x, const char *text, int len)
 {
-	XftDraw *draw;
-
-	draw = XftDrawCreate(widget->display, widget->namepix, widget->visual, widget->colormap);
 	XRenderFillRectangle(
 		widget->display,
 		PictOpClear,
-		XftDrawPicture(draw),
+		widget->namepict,
 		&(XRenderColor){ 0 },
 		0, 0, LABELWIDTH, widget->fonth
 	);
-	XftDrawStringUtf8(draw, color, widget->font, x, widget->font->ascent, (const FcChar8 *)text, len);
-	XftDrawDestroy(draw);
+	ctrlfnt_draw(
+		widget->fontset,
+		widget->namepict,
+		color,
+		(XRectangle){
+			.x = x,
+			.y = 0,
+			.width = LABELWIDTH,
+			.height = widget->fonth,
+		},
+		text,
+		len
+	);
 }
 
 static void
@@ -799,7 +814,7 @@ drawicon(Widget *widget, int index, int x, int y)
 static void
 drawlabel(Widget *widget, int index, int x, int y)
 {
-	XftColor color;
+	Picture color;
 	int i, sel;
 	int textx, maxw;
 	int textw, w, textlen, len;
@@ -810,7 +825,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 		sel = SELECT_YES;
 	else
 		sel = SELECT_NOT;
-	color.color = widget->colors[sel][COLOR_FG].chans;
+	color = widget->colors[sel][COLOR_FG].pict;
 	text = widget->items[index][ITEM_NAME];
 	widget->nlines[index] = 1;
 	textx = x + widget->itemw / 2 - LABELWIDTH / 2;
@@ -824,7 +839,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 			textlen++;
 		text += textlen;
 		textlen = strlen(text);
-		textw = textwidth(widget, text, textlen);
+		textw = ctrlfnt_width(widget->fontset, text, textlen);
 		if (widget->nlines[index] < NLINES && textw >= LABELWIDTH) {
 			textlen = len = 0;
 			w = 0;
@@ -837,7 +852,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 					len++;
 				while (text[len] != '\0' && !isspace(text[len]) && !isbreakable(text[len]))
 					len++;
-				w = textwidth(widget, text, len);
+				w = ctrlfnt_width(widget->fontset, text, len);
 				if (text[len] == '\0') {
 					break;
 				}
@@ -853,7 +868,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 		maxw = max(textw, maxw);
 		drawname(
 			widget,
-			&color,
+			color,
 			max(LABELWIDTH / 2 - textw / 2, 0),
 			text, textlen
 		);
@@ -872,11 +887,11 @@ drawlabel(Widget *widget, int index, int x, int y)
 		extension = strrchr(text, '.');
 	if (extension != NULL && extension[1] != '\0') {
 		extensionlen = strlen(extension);
-		extensionw = textwidth(widget, extension, extensionlen);
+		extensionw = ctrlfnt_width(widget->fontset, extension, extensionlen);
 		/* draw ellipsis */
 		drawname(
 			widget,
-			&color,
+			color,
 			0,
 			ELLIPSIS, strlen(ELLIPSIS)
 		);
@@ -891,7 +906,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 		);
 
 		/* draw extension */
-		drawname(widget, &color, 0, extension, extensionlen);
+		drawname(widget, color, 0, extension, extensionlen);
 		XCopyArea(
 			widget->display,
 			widget->namepix, widget->layers[LAYER_ICONS].pix,
@@ -2724,6 +2739,7 @@ initxconn(Widget *widget, struct Options *options)
 	int i;
 
 	(void)options;
+	ctrlfnt_init();
 	if (!XInitThreads()) {
 		warnx("could not initialize support for threads");
 		return RETURN_FAILURE;
@@ -2956,9 +2972,9 @@ inittheme(Widget *widget, struct Options *options)
 		}
 	}
 	loadresources(widget, XResourceManagerString(widget->display));
-	if (widget->font == NULL)
-		setfont(widget, NULL);
-	if (widget->font == NULL)
+	if (widget->fontset == NULL)
+		setfont(widget, NULL, 0.0);
+	if (widget->fontset == NULL)
 		return RETURN_FAILURE;
 	return RETURN_SUCCESS;
 error:
@@ -3098,10 +3114,12 @@ widget_free(Widget *widget)
 	FREE(widget->icons);
 	if (widget->busycursor != None)
 		XFreeCursor(widget->display, widget->busycursor);
-	if (widget->font != NULL)
-		XftFontClose(widget->display, widget->font);
+	if (widget->fontset != NULL)
+		ctrlfnt_free(widget->fontset);
 	if (widget->namepix != None)
 		XFreePixmap(widget->display, widget->namepix);
+	if (widget->namepict != None)
+		XRenderFreePicture(widget->display, widget->namepict);
 	if (widget->scroller != None)
 		XDestroyWindow(widget->display, widget->scroller);
 	if (widget->window != None)
@@ -3113,6 +3131,7 @@ widget_free(Widget *widget)
 	if (widget->display != NULL)
 		XCloseDisplay(widget->display);
 	FREE(widget);
+	ctrlfnt_term();
 }
 
 Widget *
