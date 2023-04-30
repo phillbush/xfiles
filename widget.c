@@ -579,8 +579,8 @@ drawstatusbar(Widget *widget)
 			.width = statuswid,
 			.height = widget->fonth,
 		},
-		widget->items[widget->highlight][ITEM_NAME],
-		namelen
+		widget->items[widget->highlight][ITEM_STATUS],
+		statuslen
 	);
 }
 
