@@ -72,6 +72,8 @@
 
 #define FREE(x)         do{free(x); x = NULL;}while(0)
 
+#define UNKNOWN_STATUS  "<\?\?\?>"
+
 /* ellipsis has two dots rather than three; the third comes from the extension */
 #define ELLIPSIS        ".."
 
@@ -377,6 +379,16 @@ struct Options {
 	char **argv;
 };
 
+static char *
+getitemstatus(Widget *widget, int index)
+{
+	if (index < 0 || index >= widget->nitems)
+		return UNKNOWN_STATUS;
+	if (widget->items[widget->highlight][ITEM_STATUS] == NULL)
+		return UNKNOWN_STATUS;
+	return widget->items[widget->highlight][ITEM_STATUS];
+}
+
 static void
 resetlayer(Widget *widget, enum Layer layer, int width, int height)
 {
@@ -527,6 +539,7 @@ drawstatusbar(Widget *widget)
 {
 	size_t namelen, statuslen;
 	int statuswid;
+	char *status;
 
 	if (!widget->status_enable)
 		return;
@@ -554,10 +567,11 @@ drawstatusbar(Widget *widget)
 		widget->items[widget->highlight][ITEM_NAME],
 		namelen
 	);
-	statuslen = strlen(widget->items[widget->highlight][ITEM_STATUS]);
+	status = getitemstatus(widget, widget->highlight);
+	statuslen = strlen(status);
 	statuswid = ctrlfnt_width(
 		widget->fontset,
-		widget->items[widget->highlight][ITEM_STATUS],
+		status,
 		statuslen
 	);
 	statuswid += STATUSBAR_MARGIN(widget) * 2;
@@ -579,7 +593,7 @@ drawstatusbar(Widget *widget)
 			.width = statuswid,
 			.height = widget->fonth,
 		},
-		widget->items[widget->highlight][ITEM_STATUS],
+		status,
 		statuslen
 	);
 }
@@ -1467,6 +1481,7 @@ static void
 highlight(Widget *widget, int index, int redraw)
 {
 	int prevhili;
+	char *status;
 
 	if (widget->highlight == index)
 		return;
@@ -1478,6 +1493,7 @@ highlight(Widget *widget, int index, int redraw)
 	drawitem(widget, prevhili);
 	drawstatusbar(widget);
 	if (widget->highlight > 0) {
+		status = getitemstatus(widget, widget->highlight);
 		(void)XChangeProperty(
 			widget->display,
 			widget->window,
@@ -1505,8 +1521,8 @@ highlight(Widget *widget, int index, int redraw)
 			widget->atoms[UTF8_STRING],
 			8,
 			PropModeAppend,
-			(unsigned char *)widget->items[widget->highlight][ITEM_STATUS],
-			strlen(widget->items[widget->highlight][ITEM_STATUS])
+			(unsigned char *)status,
+			strlen(status)
 		);
 	} else {
 		(void)XChangeProperty(
