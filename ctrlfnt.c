@@ -47,15 +47,15 @@ openxftfont(Display *display, const char *fontname, double fontsize)
 		goto error;
 	if ((font = XftFontOpenPattern(display, match)) == NULL)
 		goto error;
-	FcPatternDestroy(match);
 	FcPatternDestroy(pattern);
+	FcPatternDestroy(match);
 	return font;
 error:
 	warnx("%s: could not open font", fontname);
-	if (match != NULL)
-		FcPatternDestroy(match);
 	if (pattern != NULL)
 		FcPatternDestroy(pattern);
+	if (match != NULL)
+		FcPatternDestroy(match);
 	if (font != NULL)
 		XftFontClose(display, font);
 	return NULL;
