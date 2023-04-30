@@ -343,9 +343,9 @@ drawxstring(CtrlFontSet *fontset, Pixmap pix, GC gc, XRectangle rect,
 		pix,
 		gc,
 		0,
-		rect.y + rect.height / 2
-		       + fontset->xlfd_font->ascent / 2
-		       - fontset->xlfd_font->descent / 2,
+		rect.height / 2
+		+ fontset->xlfd_font->ascent / 2
+		- fontset->xlfd_font->descent / 2,
 		glyphs,
 		nglyphs
 	);
@@ -392,7 +392,6 @@ drawx(CtrlFontSet *fontset, Picture picture, Picture src,
 		rect.height
 	);
 	XSetForeground(fontset->display, gc, 1);
-	XSetFont(fontset->display, gc, fontset->xlfd_font->fid);
 	if (fontset->xlfd_font != NULL)
 		drawxstring(fontset, pix, gc, rect, text, nbytes);
 	else if (fontset->xlfd_fontset != NULL)
