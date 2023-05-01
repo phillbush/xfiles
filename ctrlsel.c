@@ -7,14 +7,8 @@
 #include <X11/cursorfont.h>
 #include <X11/Xcursor/Xcursor.h>
 
+#include "defs.h"
 #include "ctrlsel.h"
-
-#ifndef FALSE
-#define FALSE 0
-#endif
-#ifndef TRUE
-#define TRUE 1
-#endif
 
 #define _TIMESTAMP_PROP "_TIMESTAMP_PROP"
 #define TIMESTAMP       "TIMESTAMP"
