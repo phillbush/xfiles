@@ -3259,6 +3259,7 @@ widget_set(Widget *widget, const char *title, char **items[], size_t nitems, Scr
 	widget->thumbhead = NULL;
 	settitle(widget);
 	drawitems(widget);
+	drawstatusbar(widget);
 	commitdraw(widget);
 	return RETURN_SUCCESS;
 error:
