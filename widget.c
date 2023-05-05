@@ -2991,7 +2991,7 @@ inittheme(Widget *widget, struct Options *options)
 	if (widget->fontset == NULL)
 		setfont(widget, NULL, 0.0);
 	if (widget->fontset == NULL) {
-		warnx("could not load a valid font");
+		warnx("could not load any font");
 		return RETURN_FAILURE;
 	}
 	return RETURN_SUCCESS;

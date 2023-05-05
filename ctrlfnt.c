@@ -79,6 +79,17 @@ openxftfontset(Display *display, const char *fontspec, double fontsize)
 	};
 	if ((s = strdup(fontspec)) == NULL)
 		goto error;
+	if (fontspec[0] == '\0') {
+		fontset->capacity = 1;
+		fontset->nmemb = 1;
+		fontset->fonts = malloc(sizeof(*fontset->fonts));
+		if (fontset->fonts == NULL)
+			goto error;
+		fontset->fonts[0] = openxftfont(display, "", fontsize);
+		if (fontset->fonts[0] == NULL)
+			goto error;
+		return fontset;
+	}
 	for (t = strtok_r(s, ",", &last);
 	     t != NULL;
 	     t = strtok_r(NULL, ",", &last)) {
