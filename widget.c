@@ -2990,8 +2990,10 @@ inittheme(Widget *widget, struct Options *options)
 	loadresources(widget, XResourceManagerString(widget->display));
 	if (widget->fontset == NULL)
 		setfont(widget, NULL, 0.0);
-	if (widget->fontset == NULL)
+	if (widget->fontset == NULL) {
+		warnx("could not load a valid font");
 		return RETURN_FAILURE;
+	}
 	return RETURN_SUCCESS;
 error:
 	warnx("could not create XRender picture");
