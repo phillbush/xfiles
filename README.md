@@ -9,13 +9,21 @@ show icons for files, select files, call a command to open files,
 generate thumbnails, and call a command to run on right mouse button
 click.
 
-**Environment.**
+## Options
+XFiles understand the following command-line options in addition to a
+directory given as argument.
+
+* `-a`:           List all files, including dotfiles.
+* `-N name`:      Specify a resource/instance name for XFiles.
+* `-X resources`: Specify X resources for XFiles.
+
+## Environment
 XFiles depends on a few environment variables to be usable:
 
 * `OPENER`: Program to be called to open files.  Defaults to `xdg-open`.
 * `CACHEDIR` or `XDG_CACHE_HOME`: Path to directory where thumbnails must be cached.
 
-**Scripting.**
+## Scripting
 XFiles depends on a few scripts that the user must have in their
 `$PATH`.  XFiles comes with examples for those scripts.
 
@@ -36,20 +44,22 @@ XFiles depends on a few scripts that the user must have in their
   path of an existing writeable and readable directory where a directory
   will be created for thumbnails to be cached.
 
-**Customization.**
+## Customization
 XFiles can be customized by setting the following X resources, either
 before invoking XFiles, or while it is running (XFiles updates its theme
 after a updating the X resources database with xrdb).
 
 * `XFiles.faceName`:         Font for drawing text.
+* `XFiles.faceSize`:         Font size.
 * `XFiles.fileIcons`:        File glob patterns to icons associations.
 * `XFiles.opacity`:          Background opacity (from 0.0 to 1.0).
 * `XFiles.background`:       Background color.
 * `XFiles.foreground`:       Text color.
 * `XFiles.activeBackground`: Background color for selected entries.
 * `XFiles.activeForeground`: Text color for selected entries.
+* `XFiles.statusBarEnable`:  Whether to enable the statusbar.
 
-**Non-features.**
+## Non-features
 XFiles does not come with any of the following features:
 
 * Context menu:     Use `xmenu` or `pmenu` for that.
@@ -58,11 +68,11 @@ XFiles does not come with any of the following features:
 * File opening:     Use `xdg-open` for that.
 * Clipboard copy:   Use `xclip` for that.
 
-**Installation.**
+## Installation
 Run `make all` to build, and `make install` to install the binary and
 the manual into `${PREFIX}` (`/usr/local`).
 
-**Usage.**
+## Usage
 
 * Double left click on files open them.
 * Dragging files perform drag-and-drop.
@@ -70,9 +80,10 @@ the manual into `${PREFIX}` (`/usr/local`).
 * Middle click opens the scroller (a kind of scrollbar + autoScroll).
 * Right click invokes `xfilesctl`.
 
-**License.**
+## License
 The code and manual are under the MIT/X license.
 The icons are in CC0/Public Domain.
 See `./LICENSE` for more information.
 
-Read the manual.
+## Epilogue
+**Read the manual.**
