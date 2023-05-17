@@ -228,7 +228,7 @@ opennewfont(CtrlFontSet *fontset, FcChar32 glyph)
 		goto done;
 	if (!FcCharSetAddChar(fccharset, glyph))
 		goto done;
-	if ((fcpattern = FcPatternDuplicate(retfont->pattern)) == NULL)
+	if ((fcpattern = FcPatternCreate()) == NULL)
 		goto done;
 	if (!FcPatternAddCharSet(fcpattern, FC_CHARSET, fccharset))
 		goto done;

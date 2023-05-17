@@ -543,6 +543,7 @@ drawstatusbar(Widget *widget)
 
 	if (!widget->status_enable)
 		return;
+	etlock(&widget->lock);
 	widget->redraw = TRUE;
 	XRenderFillRectangle(
 		widget->display,
@@ -552,7 +553,7 @@ drawstatusbar(Widget *widget)
 		0, 0, widget->winw, STATUSBAR_HEIGHT(widget)
 	);
 	if (widget->highlight < 1)
-		return;
+		goto done;
 	namelen = strlen(widget->items[widget->highlight][ITEM_NAME]);
 	ctrlfnt_draw(
 		widget->fontset,
@@ -596,6 +597,8 @@ drawstatusbar(Widget *widget)
 		status,
 		statuslen
 	);
+done:
+	etunlock(&widget->lock);
 }
 
 static void
