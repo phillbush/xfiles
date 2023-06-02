@@ -877,10 +877,6 @@ main(int argc, char *argv[])
 	char *text;
 	WidgetEvent event;
 
-#if __OpenBSD__
-	if (pledge("unix cpath stdio rpath proc exec", NULL) == RETURN_FAILURE)
-		err(EXIT_FAILURE, "pledge");
-#endif
 	saveargv = argv;
 	saveargc = argc;
 	home = getenv("HOME");
