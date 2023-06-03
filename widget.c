@@ -107,6 +107,9 @@
 #define STATUSBAR_MARGIN(w) ((w)->fonth / 2)
 
 enum {
+	/* size of border of rectangular selection */
+	RECT_BORDER     = 1,
+
 	/* distance the cursor must move to be considered a drag */
 	DRAG_THRESHOLD  = 8,
 	DRAG_SQUARE     = (DRAG_THRESHOLD * DRAG_THRESHOLD),
@@ -129,6 +132,7 @@ enum {
 	/* hardcoded object sizes in pixels */
 	/* there's no ITEM_HEIGHT for it is computed at runtime from font height */
 	THUMBSIZE       = 64,                   /* maximum thumbnail size */
+	ICON_MARGIN     = (THUMBSIZE / 2),      /* margin around item icon */
 	ITEM_WIDTH      = (THUMBSIZE * 2),      /* width of an item (icon + margins) */
 	MARGIN          = 16,                   /* top margin above first row */
 
@@ -1671,81 +1675,72 @@ rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 	);
 }
 
+static void
+pixelstocolrow(Widget *widget, int visrow, int x, int y, int *col, int *row)
+{
+	int i, w, h;
+
+	/* get column and row given position in pixels */
+	w = x / widget->itemw;
+	h = y / widget->itemh;
+	visrow *= widget->ncols;
+	i = visrow + h * widget->ncols + w;
+	*col = i % widget->ncols;
+	*row = i / widget->ncols;
+}
+
 static int
-rectselect(Widget *widget, int srcrow, int srcydiff, int srcx, int srcy, int dstx, int dsty)
+rectselect(Widget *widget, int srcrow, int srcydiff, int x0, int y0, int x1, int y1)
 {
 	int row, col, tmp, i;
-	int changed;
-	int sel, x, y;
+	int sel, changed;
+	int col0, col1, row0, row1;
 
-	/* x,y positions of the vertices of the rectangular selection */
-	int minx, maxx, miny;
+	/* normalize source and destination points to geometry of icon area */
+	x0 -= widget->x0;
+	x1 -= widget->x0;
+	y0 += srcydiff - MARGIN;
+	y1 += widget->ydiff - MARGIN;
+	x0 = min(widget->itemw * widget->ncols - 1, max(0, x0));
+	x1 = min(widget->itemw * widget->ncols - 1, max(0, x1));
+	y0 = min(widget->itemh * widget->nrows - 1, max(0, y0));
+	y1 = min(widget->itemh * widget->nrows - 1, max(0, y1));
 
-	/*
-	 * Indices of visible items.
-	 */
-	int vismin, vismax;
+	/* convert position in pixels into column and row */
+	pixelstocolrow(widget, srcrow, x0, y0, &col0, &row0);
+	pixelstocolrow(widget, widget->row, x1, y1, &col1, &row1);
 
-	/*
-	 * Indices of items at the top left of the rectangular selection
-	 * and at bottom right of the rectangular selection.
-	 */
-	int indexmin, indexmax, srci, dsti;
-
-	/*
-	 * First and last columns and rows of the items at the
-	 * rectangular selection.
-	 */
-	int colmin, colmax;
-	int rowmin;
-	int rowsrc;
-
-	miny = min(srcy, dsty);
-	minx = min(srcx, dstx);
-	maxx = max(srcx, dstx);
-	if ((dstx > srcx && srcy > dsty) || (dstx < srcx && srcy < dsty)) {
-		tmp = dstx;
-		dstx = srcx;
-		srcx = tmp;
+	/* make x0,y0 the top-left and x1,y1 the bottom-right values */
+	if (x0 > x1) {
+		tmp = x0, x0 = x1, x1 = tmp;
+		tmp = col0, col0 = col1, col1 = tmp;
 	}
-	if (dstx < widget->x0)              dstx = widget->x0;
-	if (srcx < widget->x0)              srcx = widget->x0;
-	if (dstx >= widget->x0 + widget->pixw) dstx = widget->x0 + widget->pixw - 1;
-	if (srcx >= widget->x0 + widget->pixw) srcx = widget->x0 + widget->pixw - 1;
-	if (dsty < MARGIN)               dsty = MARGIN;
-	if (srcy < MARGIN)               srcy = MARGIN;
-	if (dsty >= widget->h)              dsty = widget->h - 1;
-	if (srcy >= widget->h)              srcy = widget->h - 1;
-	if ((srci = getitem(widget, srcrow, srcydiff, &srcx, &srcy)) < 0)
-		return FALSE;
-	if ((dsti = getitem(widget, widget->row, widget->ydiff, &dstx, &dsty)) < 0)
-		return FALSE;
-	vismin = firstvisible(widget);
-	vismax = lastvisible(widget);
-	indexmin = min(srci, dsti);
-	indexmax = max(srci, dsti);
-	colmin = indexmin % widget->ncols;
-	colmax = indexmax % widget->ncols;
-	indexmin = min(indexmin, widget->nitems - 1);
-	indexmax = min(indexmax, widget->nitems - 1);
-	rowmin = indexmin / widget->ncols;
-	rowsrc = srci / widget->ncols;
-	changed = FALSE;
-	for (i = vismin; i <= vismax; i++) {
+	if (y0 > y1) {
+		tmp = y0, y0 = y1, y1 = tmp;
+		tmp = row0, row0 = row1, row1 = tmp;
+	}
+
+	/* make position relative to window be relative to item bounding box */
+	x0 %= widget->itemw;
+	x1 %= widget->itemw;
+	y0 %= widget->itemh;
+	y1 %= widget->itemh;
+
+	/* select (unselect) items inside (outside) rectangle */
+	for (i = firstvisible(widget); i <= lastvisible(widget); i++) {
 		sel = TRUE;
 		row = i / widget->ncols;
 		col = i % widget->ncols;
-		x = widget->x0 + col * widget->itemw + (widget->itemw - THUMBSIZE) / 2;
-		y = (row - widget->row + 1) * widget->itemh -
-		    (NLINES - widget->nlines[i] + 0.5) * widget->fonth +
-		    MARGIN - widget->ydiff;
-		if (i < indexmin || i > indexmax) {
+		if (col < col0 || col > col1 || row < row0 || row > row1) {
+			/* item is out of selection */
 			sel = FALSE;
-		} else if ((col == colmin || col == colmax) && (minx > x + THUMBSIZE || maxx < x)) {
+		} else if ((col == col0 && x0 > ITEM_WIDTH - ICON_MARGIN) ||
+		           (col == col1 && x1 < ICON_MARGIN)) {
+			/* item is on a column at edge of selection */
 			sel = FALSE;
-		} else if (col < colmin || col > colmax) {
-			sel = FALSE;
-		} else if (row == rowmin && row != rowsrc && row >= widget->row && miny > y) {
+		} else if ((row == row0 && y0 > widget->fonth / 2 + THUMBSIZE) ||
+		           (row == row1 && y1 < widget->fonth / 2)) {
+			/* item is on a row at edge of selection */
 			sel = FALSE;
 		}
 		if (!sel && (widget->issel[i] == NULL || widget->issel[i]->index > 0))
