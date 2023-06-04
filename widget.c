@@ -1741,8 +1741,8 @@ rectselect(Widget *widget, int srcrow, int srcydiff, int x0, int y0, int x1, int
 		           (col == col1 && x1 < ICON_MARGIN)) {
 			/* item is on a column at edge of selection */
 			sel = false;
-		} else if ((row == row0 && y0 > widget->fonth / 2 + THUMBSIZE) ||
-		           (row == row1 && y1 < widget->fonth / 2)) {
+		} else if ((row == row0 && y0 > THUMBSIZE) ||
+		           (row == row1 && y1 < 0)) {
 			/* item is on a row at edge of selection */
 			sel = false;
 		}
