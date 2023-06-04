@@ -4,7 +4,10 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#include "defs.h"
+#define LEN(a)          (sizeof(a) / sizeof((a)[0]))
+#define FLAG(f, b)      (((f) & (b)) == (b))
+#define RETURN_FAILURE  (-1)
+#define RETURN_SUCCESS  0
 
 pid_t efork(void);
 int max(int x, int y);

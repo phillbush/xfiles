@@ -7,7 +7,6 @@
 #include <X11/cursorfont.h>
 #include <X11/Xcursor/Xcursor.h>
 
-#include "defs.h"
 #include "ctrlsel.h"
 
 #define _TIMESTAMP_PROP "_TIMESTAMP_PROP"
@@ -1441,8 +1440,8 @@ ctrlsel_dndown(
 	if (context == NULL)
 		return CTRLSEL_ERROR;
 	d[0] = window;
-	accept = TRUE;
-	sendposition = TRUE;
+	accept = 1;
+	sendposition = 1;
 	x = y = w = h = 0;
 	retval = CTRLSEL_ERROR;
 	lastaction = action = None;
@@ -1543,14 +1542,14 @@ ctrlsel_dndown(
 				d[2] |= event.xmotion.y_root & 0xFFFF;
 				d[3] = event.xmotion.time;
 				clientmsg(display, lastwin, atoms[XDND_POSITION], d);
-				sendposition = TRUE;
+				sendposition = 1;
 			}
 			time = event.xmotion.time;
 			lastaction = action;
 			winbelow = getdndwindowbelow(display, wattr.root, atoms[XDND_AWARE], &version);
 			if (winbelow == lastwin)
 				break;
-			sendposition = TRUE;
+			sendposition = 1;
 			x = y = w = h = 0;
 			if (version > XDND_VERSION)
 				version = XDND_VERSION;

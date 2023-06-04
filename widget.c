@@ -6,6 +6,7 @@
 #include <poll.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -68,7 +69,7 @@
 #define DEF_COLOR_SELFG (XRenderColor){ .red = 0xFFFF, .green = 0xFFFF, .blue = 0xFFFF, .alpha = 0xFFFF }
 #define DEF_SIZE        (XRectangle){ .x = 0, .y = 0, .width = 600 , .height = 460 }
 #define DEF_OPACITY     0xFFFF
-#define DEF_STATUSBAR   TRUE
+#define DEF_STATUSBAR   true
 
 #define FREE(x)         do{free(x); x = NULL;}while(0)
 
@@ -548,7 +549,7 @@ drawstatusbar(Widget *widget)
 	if (!widget->status_enable)
 		return;
 	etlock(&widget->lock);
-	widget->redraw = TRUE;
+	widget->redraw = true;
 	XRenderFillRectangle(
 		widget->display,
 		PictOpSrc,
@@ -615,7 +616,7 @@ loadresources(Widget *widget, const char *str)
 	char *fontname = NULL;
 	double d;
 	double fontsize = 0.0;
-	int changefont = FALSE;
+	int changefont = false;
 
 	if (str == NULL)
 		return;
@@ -634,13 +635,13 @@ loadresources(Widget *widget, const char *str)
 		switch (resource) {
 		case FACE_NAME:
 			fontname = value;
-			changefont = TRUE;
+			changefont = true;
 			break;
 		case FACE_SIZE:
 			d = strtod(value, &endp);
 			if (value[0] != '\0' && *endp == '\0' && d > 0.0 && d <= 100.0) {
 				fontsize = d;
-				changefont = TRUE;
+				changefont = true;
 			}
 			break;
 		case NORMAL_BG:
@@ -679,10 +680,10 @@ calcsize(Widget *widget, int w, int h)
 	int ncols, nrows, ret;
 	double d;
 
-	ret = FALSE;
+	ret = false;
 	if (widget->winw == w && widget->winh == h)
-		return FALSE;
-	widget->redraw = TRUE;
+		return false;
+	widget->redraw = true;
 	etlock(&widget->lock);
 	ncols = widget->ncols;
 	nrows = widget->nrows;
@@ -712,7 +713,7 @@ calcsize(Widget *widget, int w, int h)
 		widget->pixh = widget->nrows * widget->itemh;
 		resetlayer(widget, LAYER_ICONS, widget->pixw, widget->pixh);
 		resetlayer(widget, LAYER_SELALPHA, widget->pixw, widget->pixh);
-		ret = TRUE;
+		ret = true;
 	}
 	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
 	resetlayer(widget, LAYER_STATUSBAR, widget->winw, STATUSBAR_HEIGHT(widget));
@@ -1025,7 +1026,7 @@ drawitem(Widget *widget, int index)
 	);
 done:
 	etunlock(&widget->lock);
-	widget->redraw = TRUE;
+	widget->redraw = true;
 }
 
 static void
@@ -1237,9 +1238,9 @@ scroll(Widget *widget, int y)
 	int prevrow, newrow;
 
 	if (y == 0)
-		return FALSE;
+		return false;
 	if (ALL_ROWS(widget) + 1 < widget->nrows)
-		return FALSE;
+		return false;
 	prevhand = gethandlepos(widget);
 	newrow = prevrow = widget->row;
 	widget->ydiff += y;
@@ -1267,9 +1268,9 @@ scroll(Widget *widget, int y)
 	}
 	if (prevrow != newrow) {
 		settitle(widget);
-		return TRUE;
+		return true;
 	}
-	return FALSE;
+	return false;
 }
 
 static int
@@ -1560,7 +1561,7 @@ selectitems(Widget *widget, int a, int b)
 		max = a;
 	}
 	for (i = min; i <= max; i++) {
-		selectitem(widget, i, TRUE, 0);
+		selectitem(widget, i, true, 0);
 	}
 }
 
@@ -1568,7 +1569,7 @@ static void
 unselectitems(Widget *widget)
 {
 	while (widget->sel) {
-		selectitem(widget, widget->sel->index, FALSE, 0);
+		selectitem(widget, widget->sel->index, false, 0);
 	}
 }
 
@@ -1594,7 +1595,7 @@ mouse1click(Widget *widget, XButtonPressedEvent *ev)
 	if (prevhili != -1 && ev->state & ShiftMask)
 		selectitems(widget, widget->highlight, prevhili);
 	else
-		selectitem(widget, widget->highlight, ((ev->state & ControlMask) ? widget->issel[widget->highlight] == NULL : TRUE), FALSE);
+		selectitem(widget, widget->highlight, ((ev->state & ControlMask) ? widget->issel[widget->highlight] == NULL : true), false);
 	ownprimary(widget, ev->time);
 	return index;
 }
@@ -1607,11 +1608,11 @@ mouse3click(Widget *widget, int x, int y)
 	index = getitemundercursor(widget, x, y);
 	if (index != -1) {
 		if (widget->issel[index] == NULL) {
-			highlight(widget, index, FALSE);
+			highlight(widget, index, false);
 			unselectitems(widget);
-			selectitem(widget, index, TRUE, FALSE);
+			selectitem(widget, index, true, false);
 		} else {
-			highlight(widget, index, TRUE);
+			highlight(widget, index, true);
 		}
 	}
 	return index;
@@ -1728,27 +1729,27 @@ rectselect(Widget *widget, int srcrow, int srcydiff, int x0, int y0, int x1, int
 
 	/* select (unselect) items inside (outside) rectangle */
 	for (i = firstvisible(widget); i <= lastvisible(widget); i++) {
-		sel = TRUE;
+		sel = true;
 		row = i / widget->ncols;
 		col = i % widget->ncols;
 		if (col < col0 || col > col1 || row < row0 || row > row1) {
 			/* item is out of selection */
-			sel = FALSE;
+			sel = false;
 		} else if ((col == col0 && x0 > ITEM_WIDTH - ICON_MARGIN) ||
 		           (col == col1 && x1 < ICON_MARGIN)) {
 			/* item is on a column at edge of selection */
-			sel = FALSE;
+			sel = false;
 		} else if ((row == row0 && y0 > widget->fonth / 2 + THUMBSIZE) ||
 		           (row == row1 && y1 < widget->fonth / 2)) {
 			/* item is on a row at edge of selection */
-			sel = FALSE;
+			sel = false;
 		}
 		if (!sel && (widget->issel[i] == NULL || widget->issel[i]->index > 0))
 			continue;
 		if (sel && widget->issel[i] != NULL && widget->issel[i]->index > 0)
-			selectitem(widget, i, FALSE, FALSE);
-		selectitem(widget, i, sel, TRUE);
-		changed = TRUE;
+			selectitem(widget, i, false, false);
+		selectitem(widget, i, sel, true);
+		changed = true;
 	}
 	return changed;
 }
@@ -2145,7 +2146,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	case XK_space:
 		if (widget->highlight == -1)
 			break;
-		selectitem(widget, widget->highlight, widget->issel[widget->highlight] == NULL, FALSE);
+		selectitem(widget, widget->highlight, widget->issel[widget->highlight] == NULL, false);
 		break;
 	case XK_Prior:
 	case XK_Next:
@@ -2159,7 +2160,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	case XK_Left:
 	case XK_Right:
 hjkl:
-		redrawall = TRUE;
+		redrawall = true;
 		if (ksym == XK_Home) {
 			index = 0;
 			widget->ydiff = 0;
@@ -2207,18 +2208,18 @@ hjkl:
 		if (widget->row != newrow) {
 			widget->ydiff = 0;
 			setrow(widget, newrow);
-			redrawall = TRUE;
+			redrawall = true;
 		} else if (widget->row == index / widget->ncols) {
 			widget->ydiff = 0;
-			widget->redraw = TRUE;
+			widget->redraw = true;
 		}
 draw:
 		previtem = widget->highlight;
-		highlight(widget, index, TRUE);
+		highlight(widget, index, true);
 		if (xev->state & ShiftMask)
 			selectitems(widget, index, previtem);
 		else if (xev->state & ControlMask)
-			selectitem(widget, index, TRUE, 0);
+			selectitem(widget, index, true, 0);
 		if (redrawall)
 			drawitems(widget);
 		break;
@@ -2305,7 +2306,7 @@ processevent(Widget *widget, XEvent *ev)
 	default:
 		break;
 	}
-	widget->redraw = FALSE;
+	widget->redraw = false;
 	switch (ev->type) {
 	case ClientMessage:
 		if (ev->xclient.message_type == widget->atoms[WM_PROTOCOLS] &&
@@ -2336,7 +2337,7 @@ processevent(Widget *widget, XEvent *ev)
 			loadresources(widget, str);
 			FREE(str);
 			drawitems(widget);
-			widget->redraw = TRUE;
+			widget->redraw = true;
 		} else if (ev->xproperty.window == widget->window &&
 		           ev->xproperty.atom == widget->atoms[_CONTROL_GOTO]) {
 			FREE(widget->lasttext);
@@ -2411,14 +2412,14 @@ nextevent(Widget *widget, XEvent *ev, int timeout)
 				continue;
 			goto done;
 		case 0:
-			return FALSE;
+			return false;
 		default:
 			goto done;
 		}
 	}
 done:
 	(void)XNextEvent(widget->display, ev);
-	return TRUE;
+	return true;
 }
 
 static WidgetEvent
@@ -2432,7 +2433,7 @@ scrollmode(Widget *widget, int x, int y)
 	drawscroller(widget, gethandlepos(widget));
 	XMoveWindow(widget->display, widget->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
 	XMapRaised(widget->display, widget->scroller);
-	left = FALSE;
+	left = false;
 	for (;;) {
 		if (!nextevent(widget, &ev, SCROLL_TIME)) {
 			if ((pos = scrollerpos(widget)) != 0) {
@@ -2459,7 +2460,7 @@ scrollmode(Widget *widget, int x, int y)
 				scrollerset(widget, ev.xmotion.y - grabpos);
 			} else if (ev.xmotion.window == widget->window &&
 			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
-				left = TRUE;
+				left = true;
 			}
 			break;
 		case ButtonRelease:
@@ -2472,7 +2473,7 @@ scrollmode(Widget *widget, int x, int y)
 			if (ev.xbutton.window == widget->window)
 				goto done;
 			if (ev.xbutton.window == widget->scroller) {
-				left = TRUE;
+				left = true;
 				pos = gethandlepos(widget);
 				if (ev.xmotion.y < pos || ev.xmotion.y > pos + widget->handlew) {
 					/* grab handle in the middle */
@@ -2500,7 +2501,7 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 
 	rectrow = widget->row;
 	rectydiff = widget->ydiff;
-	ownsel = FALSE;
+	ownsel = false;
 	if (!shift)
 		unselectitems(widget);
 	for (;;) {
@@ -2523,7 +2524,7 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 			if (pos != 0) {
 				if (scroll(widget, pos))
 					drawitems(widget);
-				widget->redraw = TRUE;
+				widget->redraw = true;
 				goto motion;
 			}
 			continue;
@@ -2547,7 +2548,7 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 motion:
 			rectdraw(widget, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
 			if (rectselect(widget, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y))
-				ownsel = TRUE;
+				ownsel = true;
 			commitdraw(widget);
 			break;
 		}
@@ -2674,7 +2675,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
 				if (scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
 					drawitems(widget);
-				widget->redraw = TRUE;
+				widget->redraw = true;
 			} else if (ev.xbutton.button == Button2) {
 				state = scrollmode(widget, ev.xmotion.x, ev.xmotion.y);
 				if (state != WIDGET_NONE)
@@ -2682,7 +2683,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			} else if (ev.xbutton.button == Button3) {
 				if (mouse3click(widget, ev.xbutton.x, ev.xbutton.y) > 0)
 					*nitems = fillselitems(widget, selitems, -1);
-				widget->redraw = TRUE;
+				widget->redraw = true;
 				XUngrabPointer(widget->display, ev.xbutton.time);
 				XFlush(widget->display);
 				return WIDGET_CONTEXT;
@@ -2941,7 +2942,7 @@ initwindow(Widget *widget, struct Options *options)
 		1
 	);
 	(void)snprintf(buf, LEN(buf), "%lu", (unsigned long)widget->window);
-	if (setenv("WINDOWID", buf, TRUE) == RETURN_FAILURE)
+	if (setenv("WINDOWID", buf, true) == RETURN_FAILURE)
 		warn("setenv");
 	return RETURN_SUCCESS;
 }
@@ -3312,7 +3313,7 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 			return WIDGET_CLOSE;
 		}
 	}
-	widget->start = TRUE;
+	widget->start = true;
 	if ((retval = checklastprop(widget, text)) == WIDGET_NONE)
 		retval = mainmode(widget, selitems, nitems, text);
 	endevent(widget);

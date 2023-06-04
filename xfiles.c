@@ -8,6 +8,7 @@
 #include <grp.h>
 #include <limits.h>
 #include <pwd.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -112,12 +113,12 @@ static int
 direntselect(const struct dirent *dp)
 {
 	if (strcmp(dp->d_name, ".") == 0)
-		return FALSE;
+		return false;
 	if (strcmp(dp->d_name, "..") == 0)
-		return TRUE;
+		return true;
 	if (hide && dp->d_name[0] == '.')
-		return FALSE;
-	return TRUE;
+		return false;
+	return true;
 }
 
 static void
@@ -338,22 +339,22 @@ checkicon(struct FM *fm, char **entry, char *patt)
 		flags = FNM_CASEFOLD | FNM_PATHNAME | FNM_LEADING_DIR;
 		s = entry[ITEM_PATH];
 	} else if (isdir(entry)) {
-		return FALSE;
+		return false;
 	} else {
 		flags = FNM_CASEFOLD;
 		s = entry[ITEM_NAME];
 	}
 	if (s == NULL)
-		return FALSE;
+		return false;
 	if (patt[0] == '~') {
 		if (strncmp(fm->home, s, fm->homelen) != 0)
-			return FALSE;
+			return false;
 		patt++;
 		s += fm->homelen;
 	}
 	if (s != NULL && fnmatch(patt, s, flags) == 0)
-		return TRUE;
-	return FALSE;
+		return true;
+	return false;
 }
 
 static char *
@@ -399,11 +400,11 @@ thumbexists(char **entry, char *mime)
 		goto forkthumbnailer;
 	origt = sb.st_mtim;
 	if (timespeclt(&origt, &mimet))
-		return TRUE;
+		return true;
 forkthumbnailer:
 	pid = forkthumb(entry[ITEM_PATH], mime);
 	if (waitpid(pid, &status, 0) == -1)
-		return FALSE;
+		return false;
 	return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
@@ -479,7 +480,7 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 	}
 	for (i = 0; i < fm->nentries; i++) {
 		fm->entries[i] = emalloc(sizeof(*fm->entries[i]) * ITEM_LAST);
-		isdir = FALSE;
+		isdir = false;
 		if (stat(array[i]->d_name, &sb) == -1) {
 			warn("%s", array[i]->d_name);
 			fm->entries[i][ITEM_STATUS] = NULL;
@@ -599,7 +600,7 @@ fileopen(struct FM *fm, char *path)
 			NULL,
 		},
 		NULL,
-		TRUE
+		true
 	);
 }
 
@@ -616,7 +617,7 @@ runcontext(struct FM *fm, char *cmd, int nselitems)
 	for (i = 0; i < nselitems; i++)
 		argv[i+2] = fm->entries[fm->selitems[i]][ITEM_PATH];
 	argv[i+2] = NULL;
-	forkexec(argv, NULL, FALSE);
+	forkexec(argv, NULL, false);
 	free(argv);
 }
 
@@ -646,7 +647,7 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 	for (i = 1; i < nitems; i++)
 		argv[i + 1] = fm->entries[fm->selitems[i]][ITEM_PATH];
 	argv[nitems + 1] = NULL;
-	forkexec(argv, path, FALSE);
+	forkexec(argv, path, false);
 }
 
 static void
@@ -697,7 +698,7 @@ runexdrop(WidgetEvent event, char *text, char *path)
 		i = j;
 	}
 	argv[argc++] = NULL;
-	forkexec(argv, path, FALSE);
+	forkexec(argv, path, false);
 	free(argv);
 }
 
@@ -767,7 +768,7 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 		 * We're changing to the directory we currently are.
 		 * Keep the scroll position we have now.
 		 */
-		keepscroll = TRUE;
+		keepscroll = true;
 	} else if (fm->cwd->prev != NULL && fm->cwd->prev->path != NULL &&
 	           strcmp(cwd.path, fm->cwd->prev->path) == 0) {
 		/*
@@ -775,14 +776,14 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 		 * Keep the scroll position we had there.
 		 */
 		fm->cwd = fm->cwd->prev;
-		keepscroll = TRUE;
+		keepscroll = true;
 	} else {
 		/*
 		 * We're changing to a new directory.
 		 * Scroll to the top.
 		 */
 		newcwd(fm);
-		keepscroll = FALSE;
+		keepscroll = false;
 	}
 	free(fm->cwd->path);
 	free(fm->cwd->here);
@@ -954,7 +955,7 @@ main(int argc, char *argv[])
 			break;
 		case WIDGET_CONTEXT:
 			runcontext(&fm, MENU, nitems);
-			if (changedir(&fm, fm.cwd->path, FALSE) == RETURN_FAILURE) {
+			if (changedir(&fm, fm.cwd->path, false) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -968,13 +969,13 @@ main(int argc, char *argv[])
 			if (cwd == NULL)
 				break;
 			fm.cwd = cwd;
-			if (changedir(&fm, cwd->path, FALSE) == RETURN_FAILURE) {
+			if (changedir(&fm, cwd->path, false) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
 			break;
 		case WIDGET_REFRESH:
-			if (changedir(&fm, fm.cwd->path, TRUE) == RETURN_FAILURE) {
+			if (changedir(&fm, fm.cwd->path, true) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -985,7 +986,7 @@ main(int argc, char *argv[])
 			if (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries)
 				break;
 			if (isdir(fm.entries[fm.selitems[0]])) {
-				if (changedir(&fm, fm.entries[fm.selitems[0]][ITEM_PATH], FALSE) == RETURN_FAILURE) {
+				if (changedir(&fm, fm.entries[fm.selitems[0]][ITEM_PATH], false) == RETURN_FAILURE) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
@@ -1008,7 +1009,7 @@ main(int argc, char *argv[])
 				/* drag-and-drop in the same window */
 				runindrop(&fm, event, nitems);
 			}
-			if (changedir(&fm, fm.cwd->path, FALSE) == RETURN_FAILURE) {
+			if (changedir(&fm, fm.cwd->path, false) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -1016,10 +1017,10 @@ main(int argc, char *argv[])
 		case WIDGET_KEYPRESS:
 			if (strcmp(text, "^period") == 0) {
 				hide = !hide;
-				force_refresh = TRUE;
+				force_refresh = true;
 			} else {
 				runcontext(&fm, text, nitems);
-				force_refresh = FALSE;
+				force_refresh = false;
 			}
 			if (changedir(&fm, fm.cwd->path, force_refresh) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
@@ -1027,7 +1028,7 @@ main(int argc, char *argv[])
 			}
 			break;
 		case WIDGET_GOTO:
-			if (changedir(&fm, text, TRUE) == RETURN_FAILURE) {
+			if (changedir(&fm, text, true) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}

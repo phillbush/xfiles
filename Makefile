@@ -25,10 +25,10 @@ ${PROG}: ${OBJS}
 .c.o:
 	${CC} -std=c99 -pedantic ${DEFS} ${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
 
-xfiles.o:  defs.h util.h widget.h icons/file.xpm icons/folder.xpm
-widget.o:  defs.h util.h widget.h ctrlsel.h ctrlfnt.h winicon.data icons/x.xpm
-ctrlsel.o: defs.h ctrlsel.h
-ctrlfnt.o: defs.h ctrlfnt.h
+xfiles.o:  util.h widget.h icons/file.xpm icons/folder.xpm
+widget.o:  util.h widget.h ctrlsel.h ctrlfnt.h winicon.data icons/x.xpm
+ctrlsel.o: ctrlsel.h
+ctrlfnt.o: ctrlfnt.h
 
 tags: ${SRCS}
 	ctags ${SRCS}
