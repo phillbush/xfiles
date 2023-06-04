@@ -40,7 +40,6 @@
 .Fa "cont char *text"
 .Fa "int nbytes"
 .Fc
-.Fc
 .Ft int
 .Fo ctrlfnt_height
 .Fa "CtrlFontSet *fontset"
@@ -128,10 +127,10 @@ using
 .Fa src
 as source color.
 It returns
-.Ic RETURN_FAILURE
-(-1) if the text could not be drawn, or
-.Ic RETURN_SUCCESS
-(0) otherwise.
+.Ic -1
+if the text could not be drawn, or
+.Ic 0
+otherwise.
 .Pp
 The
 .Fn ctrlfnt_width
@@ -162,5 +161,5 @@ function terminates the fontconfig library.
 .Sh EXAMPLES
 [...]
 .Sh SEE ALSO
-.Xr X 1 ,
-.Xr Xft 3
+.Xr Xft 3 ,
+.Xr X 7

@@ -49,7 +49,7 @@ of its
 .It Fl X Ar resources
 Specify additional resources to be added on top of the resources from X's resource database.
 If not specified, defaults to the value of the
-.Iv RESOURCES_DATA
+.Ev RESOURCES_DATA
 environment variable, or (if that variable is not set) to the empty string.
 .El
 .Pp
@@ -76,7 +76,8 @@ or popping up a terminal dialog.
 .Nm xfiles
 source comes with an example
 .Nm xfilesctl
-script.  But users are encouraged to create their own script satisfying their own needs.
+script.
+But users are encouraged to create their own script satisfying their own needs.
 .Pp
 The commands passed to it are as follows:
 .Bl -tag -width Ds
@@ -296,8 +297,8 @@ Shift (forcing a move operation); or
 Control + Shift (forcing a symbolik linking operation);
 .El
 .Ss Mouse button 2, 4, and 5
-The second, fourth and fifth buttons (the middle button click, scroll up and scroll down)
-are used for scrolling.  No modifier applies to those buttons.
+The second, fourth and fifth buttons (the middle button click, scroll up and scroll down) are used for scrolling.
+No modifier applies to those buttons.
 The second button pops up the scroller.
 The scroller is a small widget that replaces the scrollbar in
 .Nm ;
@@ -578,7 +579,7 @@ if possible.
 .El
 .Sh ENVIRONMENT
 The following environment variables affect the execution of
-.Nm Ns .
+.Nm .
 .Bl -tag -width Ds
 .It Ev CACHEDIR
 Path to a cache directory where the
@@ -621,6 +622,6 @@ Note that this string contains the number in decimal notation,
 not in hexadecimal (as is usually exchanged by a few X applications).
 .El
 .Sh SEE ALSO
-.Xr X 7 ,
 .Xr dmenu 1 ,
-.Xr xmenu 1
+.Xr xmenu 1 ,
+.Xr X 7
