@@ -107,7 +107,7 @@ openxftfontset(Display *display, const char *fontspec, double fontsize)
 		fontset->fonts[0] = openxftfont(display, "", fontsize);
 		if (fontset->fonts[0] == NULL)
 			goto error;
-		return fontset;
+		goto done;
 	}
 	for (t = strtok_r(s, ",", &last);
 	     t != NULL;
@@ -119,6 +119,7 @@ openxftfontset(Display *display, const char *fontspec, double fontsize)
 	}
 	if (fontset->nmemb == 0)
 		goto error;
+done:
 	free(s);
 	return fontset;
 error:

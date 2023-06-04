@@ -648,6 +648,7 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 		argv[i + 1] = fm->entries[fm->selitems[i]][ITEM_PATH];
 	argv[nitems + 1] = NULL;
 	forkexec(argv, path, false);
+	free(argv);
 }
 
 static void
