@@ -537,7 +537,7 @@ request(CtrlSelContext *context)
 			context->window,
 			context->time
 		);
-	} else {
+	} else if (context->ntargets > 1) {
 		multiple = XInternAtom(context->display, MULTIPLE, False);
 		atom_pair = XInternAtom(context->display, ATOM_PAIR, False);
 		size = 2 * context->ntargets;
@@ -1414,7 +1414,7 @@ ctrlsel_dndown(
 	Window lastwin, winbelow;
 	Atom lastaction, action, version;
 	long d[NCLIENTMSG_DATA];
-	int sendposition, retval, status, inside, accept;
+	int sendposition, retval, status, inside;
 	int x, y, w, h;
 
 	*context_ret = NULL;
@@ -1440,7 +1440,6 @@ ctrlsel_dndown(
 	if (context == NULL)
 		return CTRLSEL_ERROR;
 	d[0] = window;
-	accept = 1;
 	sendposition = 1;
 	x = y = w = h = 0;
 	retval = CTRLSEL_ERROR;
@@ -1582,12 +1581,11 @@ ctrlsel_dndown(
 		case ClientMessage:
 			if ((Window)event.xclient.data.l[0] != lastwin)
 				break;
-			accept = (event.xclient.data.l[1] & 0x01);
 			sendposition = (event.xclient.data.l[1] & 0x02);
-			if (!accept)
-				XDefineCursor(display, window, getcursor(cursors, CURSOR_NODROP));
-			else
+			if (event.xclient.data.l[1] & 0x01)
 				XDefineCursor(display, window, cursor);
+			else
+				XDefineCursor(display, window, getcursor(cursors, CURSOR_NODROP));
 			x = event.xclient.data.l[2] >> 16;
 			y = event.xclient.data.l[2] & 0xFFF;
 			w = event.xclient.data.l[3] >> 16;

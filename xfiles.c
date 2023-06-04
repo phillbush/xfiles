@@ -569,11 +569,11 @@ error:
 static void
 forkexec(char *const argv[], char *path, int doublefork)
 {
-	pid_t pid1, pid2;
+	pid_t pid;
 	int fd;
 
-	if ((pid1 = efork()) == 0) {
-		if (!doublefork || (pid2 = efork()) == 0) {
+	if ((pid = efork()) == 0) {
+		if (!doublefork || efork() == 0) {
 			if (path != NULL && wchdir(path) == RETURN_FAILURE)
 				exit(EXIT_FAILURE);
 			fd = open(DEV_NULL, O_RDWR);
@@ -587,7 +587,7 @@ forkexec(char *const argv[], char *path, int doublefork)
 			exit(EXIT_SUCCESS);
 		}
 	}
-	waitpid(pid1, NULL, 0);
+	waitpid(pid, NULL, 0);
 }
 
 static void
@@ -610,7 +610,6 @@ runcontext(struct FM *fm, char *cmd, int nselitems)
 	int i;
 	char **argv;
 
-	i = 0;
 	argv = emalloc((nselitems + 3) * sizeof(*argv));
 	argv[0] = CONTEXTCMD;
 	argv[1] = cmd;

@@ -33,6 +33,9 @@ ctrlfnt.o: ctrlfnt.h
 tags: ${SRCS}
 	ctags ${SRCS}
 
+lint: ${SRCS}
+	clang-tidy ${SRCS} -- -std=c99 ${DEFS} ${INCS} ${CPPFLAGS}
+
 clean:
 	rm -f ${OBJS} ${PROG} ${PROG:=.core} tags
 
@@ -54,4 +57,4 @@ uninstall-script:
 	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT1}
 	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT2}
 
-.PHONY: all tags clean install uninstall
+.PHONY: all tags clean install uninstall lint

@@ -950,7 +950,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 			maxw + 2, 1
 		);
 	}
-	if (widget->issel[index]) {
+	if (widget->issel != NULL && widget->issel[index]) {
 		XRenderFillRectangle(
 			widget->display,
 			PictOpOverReverse,
@@ -1169,16 +1169,18 @@ settitle(Widget *widget)
 		(unsigned char *)title,
 		strlen(title)
 	);
-	XChangeProperty(
-		widget->display,
-		widget->window,
-		widget->atoms[_CONTROL_CWD],
-		widget->atoms[UTF8_STRING],
-		8,
-		PropModeReplace,
-		(unsigned char *)widget->title,
-		strlen(widget->title)
-	);
+	if (widget->title != NULL) {
+		XChangeProperty(
+			widget->display,
+			widget->window,
+			widget->atoms[_CONTROL_CWD],
+			widget->atoms[UTF8_STRING],
+			8,
+			PropModeReplace,
+			(unsigned char *)widget->title,
+			strlen(widget->title)
+		);
+	}
 }
 
 static int
@@ -1693,8 +1695,8 @@ pixelstocolrow(Widget *widget, int visrow, int x, int y, int *col, int *row)
 static int
 rectselect(Widget *widget, int srcrow, int srcydiff, int x0, int y0, int x1, int y1)
 {
-	int row, col, tmp, i;
-	int sel, changed;
+	int sel, row, col, tmp, i;
+	int changed = false;
 	int col0, col1, row0, row1;
 
 	/* normalize source and destination points to geometry of icon area */
@@ -3242,16 +3244,16 @@ widget_set(Widget *widget, const char *title, char **items[], size_t nitems, Scr
 		widget->thumbs[i] = NULL;
 		widget->selbufsiz += strlen(items[i][ITEM_PATH]) + 1; /* +1 for '\n' */
 	}
-	if ((widget->selbuf = malloc(widget->selbufsiz)) == NULL) {
+	if (widget->selbufsiz > 0 && (widget->selbuf = malloc(widget->selbufsiz)) == NULL) {
 		warn("malloc");
 		goto error;
 	}
 	widget->uribufsiz = widget->selbufsiz + (nitems * 8);         /* 8 for "file://\r" */
-	if ((widget->uribuf = malloc(widget->uribufsiz)) == NULL) {
+	if (widget->uribufsiz > 0 && (widget->uribuf = malloc(widget->uribufsiz)) == NULL) {
 		warn("malloc");
 		goto error;
 	}
-	if ((widget->dndbuf = malloc(widget->uribufsiz)) == NULL) {
+	if (widget->uribufsiz > 0 && (widget->dndbuf = malloc(widget->uribufsiz)) == NULL) {
 		warn("malloc");
 		goto error;
 	}
