@@ -34,7 +34,8 @@ tags: ${SRCS}
 	ctags ${SRCS}
 
 lint: ${SRCS}
-	clang-tidy ${SRCS} -- -std=c99 ${DEFS} ${INCS} ${CPPFLAGS}
+	-mandoc -T lint -W warning ${MAN} ctrlfnt.3 ctrlsel.3
+	-clang-tidy ${SRCS} -- -std=c99 ${DEFS} ${INCS} ${CPPFLAGS}
 
 clean:
 	rm -f ${OBJS} ${PROG} ${PROG:=.core} tags
@@ -50,11 +51,11 @@ install-script:
 	install -m 755 examples/${SCRIPT2} ${DESTDIR}${PREFIX}/bin/${SCRIPT2}
 
 uninstall:
-	rm ${DESTDIR}${PREFIX}/bin/${PROG}
-	rm ${DESTDIR}${MANPREFIX}/man1/${MAN}
+	-rm ${DESTDIR}${PREFIX}/bin/${PROG}
+	-rm ${DESTDIR}${MANPREFIX}/man1/${MAN}
 
 uninstall-script:
-	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT1}
-	rm ${DESTDIR}${PREFIX}/bin/${SCRIPT2}
+	-rm ${DESTDIR}${PREFIX}/bin/${SCRIPT1}
+	-rm ${DESTDIR}${PREFIX}/bin/${SCRIPT2}
 
 .PHONY: all tags clean install uninstall lint
