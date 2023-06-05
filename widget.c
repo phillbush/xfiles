@@ -30,6 +30,7 @@
 #include "winicon.data"         /* window icon, for the window manager */
 
 #define ATOMS                                   \
+	X(TEXT, NULL)                           \
 	X(TEXT_URI_LIST, "text/uri-list")       \
 	X(UTF8_STRING, NULL)                    \
 	X(WM_PROTOCOLS, NULL)                   \
@@ -542,14 +543,20 @@ loadxdb(Widget *widget, const char *str)
 static void
 drawstatusbar(Widget *widget)
 {
-	size_t namelen, statuslen;
-	int statuswid;
+	size_t statuslen, scrolllen;
+	int countwid, statuswid, scrollwid, rightwid;
 	char *status;
+	char countstr[64];    /* enough for writing number of files */
+	char scrollstr[8];    /* enough for writing the percentage */
+	int scrollpct;
 
 	if (!widget->status_enable)
 		return;
+
 	etlock(&widget->lock);
 	widget->redraw = true;
+
+	/* clear previous content */
 	XRenderFillRectangle(
 		widget->display,
 		PictOpSrc,
@@ -557,10 +564,16 @@ drawstatusbar(Widget *widget)
 		&widget->colors[SELECT_NOT][COLOR_BG].chans,
 		0, 0, widget->winw, STATUSBAR_HEIGHT(widget)
 	);
-	if (widget->highlight < 1)
-		goto done;
-	namelen = strlen(widget->items[widget->highlight][ITEM_NAME]);
-	ctrlfnt_draw(
+
+	/* draw item counter */
+	(void)snprintf(
+		countstr,
+		LEN(countstr),
+		"[%d/%d]",
+		widget->highlight > 0 ? widget->highlight : 0,
+		widget->nitems - 1      /* -1 because the first item ".." is not counted */
+	);
+	countwid = ctrlfnt_draw(
 		widget->fontset,
 		widget->layers[LAYER_STATUSBAR].pict,
 		widget->colors[SELECT_NOT][COLOR_FG].pict,
@@ -570,39 +583,87 @@ drawstatusbar(Widget *widget)
 			.width = widget->w,
 			.height = widget->fonth,
 		},
-		widget->items[widget->highlight][ITEM_NAME],
-		namelen
+		countstr,
+		strlen(countstr)
 	);
-	status = getitemstatus(widget, widget->highlight);
-	statuslen = strlen(status);
-	statuswid = ctrlfnt_width(
-		widget->fontset,
-		status,
-		statuslen
-	);
-	statuswid += STATUSBAR_MARGIN(widget) * 2;
+	countwid += STATUSBAR_MARGIN(widget);
+
+	/* draw name of highlighted item */
+	if (widget->highlight > 0) {
+		ctrlfnt_draw(
+			widget->fontset,
+			widget->layers[LAYER_STATUSBAR].pict,
+			widget->colors[SELECT_NOT][COLOR_FG].pict,
+			(XRectangle){
+				.x = STATUSBAR_MARGIN(widget) + countwid,
+				.y = STATUSBAR_MARGIN(widget),
+				.width = widget->w,
+				.height = widget->fonth,
+			},
+			widget->items[widget->highlight][ITEM_NAME],
+			strlen(widget->items[widget->highlight][ITEM_NAME])
+		);
+	}
+
+	/* get percentage */
+	scrollpct = 100 * ((double)(widget->row + 1) / widget->nscreens);
+	scrollpct = min(scrollpct, 100);
+	(void)snprintf(scrollstr, LEN(scrollstr), "[%d%%]", scrollpct);
+	scrolllen = strlen(scrollstr);
+	scrollwid = ctrlfnt_width(widget->fontset, scrollstr, scrolllen);
+	rightwid = STATUSBAR_MARGIN(widget) * 2 + scrollwid;
+
+	/* get metadata */
+	if (widget->highlight > 0) {
+		status = getitemstatus(widget, widget->highlight);
+		statuslen = strlen(status);
+		statuswid = ctrlfnt_width(widget->fontset, status, statuslen);
+		rightwid += STATUSBAR_MARGIN(widget) + statuswid;
+	}
+
+	/* clear content below right side of statusbar */
 	XRenderFillRectangle(
 		widget->display,
 		PictOpSrc,
 		widget->layers[LAYER_STATUSBAR].pict,
 		&widget->colors[SELECT_NOT][COLOR_BG].chans,
-		widget->winw - statuswid, 0,
-		statuswid, STATUSBAR_HEIGHT(widget)
+		widget->winw - rightwid, 0,
+		rightwid,
+		STATUSBAR_HEIGHT(widget)
 	);
+
+	/* draw percentage */
 	ctrlfnt_draw(
 		widget->fontset,
 		widget->layers[LAYER_STATUSBAR].pict,
 		widget->colors[SELECT_NOT][COLOR_FG].pict,
 		(XRectangle){
-			.x = widget->winw - statuswid + STATUSBAR_MARGIN(widget),
+			.x = widget->winw - scrollwid - STATUSBAR_MARGIN(widget),
 			.y = STATUSBAR_MARGIN(widget),
-			.width = statuswid,
+			.width = scrollwid,
 			.height = widget->fonth,
 		},
-		status,
-		statuslen
+		scrollstr,
+		scrolllen
 	);
-done:
+
+	/* draw metadata for highlighted item */
+	if (widget->highlight > 0) {
+		ctrlfnt_draw(
+			widget->fontset,
+			widget->layers[LAYER_STATUSBAR].pict,
+			widget->colors[SELECT_NOT][COLOR_FG].pict,
+			(XRectangle){
+				.x = widget->winw - rightwid + STATUSBAR_MARGIN(widget),
+				.y = STATUSBAR_MARGIN(widget),
+				.width = statuswid,
+				.height = widget->fonth,
+			},
+			status,
+			statuslen
+		);
+	}
+
 	etunlock(&widget->lock);
 }
 
@@ -1139,48 +1200,55 @@ commitdraw(Widget *widget)
 static void
 settitle(Widget *widget)
 {
-	char title[1028];       /* enough for a window title */
-	char nitems[64];        /* enough for writing number of files */
-	int scrollpct;          /* scroll percentage */
+	struct {
+		Atom prop, type;
+	} titleprops[] = {
+		/*
+		 * There are two properties for the window title (aka
+		 * window name): the newer UTF8-aware _NET_WM_NAME;
+		 * and the older WM_NAME.
+		 */
+		{
+			.prop = widget->atoms[_NET_WM_NAME],
+			.type = widget->atoms[UTF8_STRING],
+		},
+		{
+			.prop = XA_WM_NAME,
+			.type = widget->atoms[TEXT],
+		}
+	};
+	const char *titlesegmnt[] = {
+		/* title segments */
+		widget->title,
+		" - ",
+		widget->class
+	};
+	size_t i, j;
 
-	if (widget->row == 0 && widget->nscreens > 1)
-		scrollpct = 0;
-	else
-		scrollpct = 100 * ((double)(widget->row + 1) / widget->nscreens);
-	(void)snprintf(nitems, LEN(nitems), "%d items", widget->nitems - 1);
-	if (widget->title != NULL) {
-		(void)snprintf(
-			title, LEN(title),
-			"%s (%s) - %s (%d%%)",
-			widget->title,
-			nitems,
-			widget->class,
-			scrollpct
-		);
+	for (i = 0; i < LEN(titleprops); i++) {
+		for (j = 0; j < LEN(titlesegmnt); j++) {
+			XChangeProperty(
+				widget->display,
+				widget->window,
+				titleprops[i].prop,
+				titleprops[i].type,
+				8,
+				j == 0 ? PropModeReplace : PropModeAppend,
+				(unsigned char *)titlesegmnt[j],
+				strlen(titlesegmnt[j])
+			);
+		}
 	}
-	XmbSetWMProperties(widget->display, widget->window, title, title, NULL, 0, NULL, NULL, NULL);
 	XChangeProperty(
 		widget->display,
 		widget->window,
-		widget->atoms[_NET_WM_NAME],
+		widget->atoms[_CONTROL_CWD],
 		widget->atoms[UTF8_STRING],
 		8,
 		PropModeReplace,
-		(unsigned char *)title,
-		strlen(title)
+		(unsigned char *)widget->title,
+		strlen(widget->title)
 	);
-	if (widget->title != NULL) {
-		XChangeProperty(
-			widget->display,
-			widget->window,
-			widget->atoms[_CONTROL_CWD],
-			widget->atoms[UTF8_STRING],
-			8,
-			PropModeReplace,
-			(unsigned char *)widget->title,
-			strlen(widget->title)
-		);
-	}
 }
 
 static int
@@ -1269,7 +1337,7 @@ scroll(Widget *widget, int y)
 		drawscroller(widget, newhand);
 	}
 	if (prevrow != newrow) {
-		settitle(widget);
+		drawstatusbar(widget);
 		return true;
 	}
 	return false;
@@ -1838,7 +1906,7 @@ scrollerset(Widget *widget, int pos)
 	setrow(widget, newrow);
 	drawscroller(widget, pos);
 	if (prevrow != newrow) {
-		settitle(widget);
+		drawstatusbar(widget);
 		drawitems(widget);
 	}
 }
