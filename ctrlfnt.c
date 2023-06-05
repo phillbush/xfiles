@@ -338,6 +338,7 @@ drawxftstring(CtrlFontSet *fontset, Picture picture, Picture src,
 	size_t nwritten = 0;
 	size_t n = 0;
 	int x = rect.x;
+	int w = 0;
 
 	if (nbytes == 0)
 		return 0;
@@ -358,7 +359,7 @@ drawxftstring(CtrlFontSet *fontset, Picture picture, Picture src,
 			font,
 			picture,
 			0, 0,
-			x,
+			x + w,
 			rect.y + rect.height / 2
 			       + font->ascent / 2
 			       - font->descent / 2,
@@ -373,13 +374,13 @@ drawxftstring(CtrlFontSet *fontset, Picture picture, Picture src,
 			n,
 			&extents
 		);
-		x += extents.width;
+		w += extents.width;
 		nwritten += n;
 	}
-	return 0;
+	return w;
 }
 
-static void
+static int
 drawxmbstring(CtrlFontSet *fontset, Pixmap pix, GC gc, XRectangle rect,
               const char *text, int nbytes)
 {
@@ -395,9 +396,10 @@ drawxmbstring(CtrlFontSet *fontset, Pixmap pix, GC gc, XRectangle rect,
 		text,
 		nbytes
 	);
+	return box.width;
 }
 
-static void
+static int
 drawxstring(CtrlFontSet *fontset, Pixmap pix, GC gc, XRectangle rect,
             const char *text, int nbytes)
 {
@@ -417,6 +419,7 @@ drawxstring(CtrlFontSet *fontset, Pixmap pix, GC gc, XRectangle rect,
 		glyphs,
 		nglyphs
 	);
+	return XTextWidth16(fontset->xlfd_font, glyphs, nglyphs);
 }
 
 static int
@@ -426,6 +429,7 @@ drawx(CtrlFontSet *fontset, Picture picture, Picture src,
 	Pixmap pix = None;
 	Picture mask = None;
 	GC gc = NULL;
+	int retval;
 
 	pix = XCreatePixmap(
 		fontset->display,
@@ -461,9 +465,11 @@ drawx(CtrlFontSet *fontset, Picture picture, Picture src,
 	);
 	XSetForeground(fontset->display, gc, 1);
 	if (fontset->xlfd_font != NULL)
-		drawxstring(fontset, pix, gc, rect, text, nbytes);
+		retval = drawxstring(fontset, pix, gc, rect, text, nbytes);
 	else if (fontset->xlfd_fontset != NULL)
-		drawxmbstring(fontset, pix, gc, rect, text, nbytes);
+		retval = drawxmbstring(fontset, pix, gc, rect, text, nbytes);
+	else
+		goto error;
 	XRenderComposite(
 		fontset->display,
 		PictOpOver,
@@ -478,7 +484,7 @@ drawx(CtrlFontSet *fontset, Picture picture, Picture src,
 	XFreeGC(fontset->display, gc);
 	XFreePixmap(fontset->display, pix);
 	XRenderFreePicture(fontset->display, mask);
-	return 0;
+	return retval;
 error:
 	if (gc != NULL)
 		XFreeGC(fontset->display, gc);

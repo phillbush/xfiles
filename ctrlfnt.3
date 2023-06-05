@@ -126,11 +126,9 @@ within the given
 using
 .Fa src
 as source color.
-It returns
+It returns the width of the drawn text, or
 .Ic -1
-if the text could not be drawn, or
-.Ic 0
-otherwise.
+if the text could not be drawn because of any error.
 .Pp
 The
 .Fn ctrlfnt_width
@@ -141,7 +139,13 @@ of
 if drawn by
 .Fn ctrlfnt_draw
 using the given
-.Fa fontset .
+.Fa fontset ,
+or
+.Ic -1
+if the width could not be computed.
+(This function returns the same as
+.Fn ctrlfnt_draw
+without drawing anything).
 .Pp
 The
 .Fn ctrlfnt_height
@@ -157,7 +161,18 @@ The
 .Fn ctrlfnt_term
 function terminates the fontconfig library.
 .Sh RETURN VALUES
-[...]
+The
+.Fn ctrlfnt_open
+function returns NULL on error.
+The
+.Fn ctrlfnt_draw ,
+.Fn ctrlfnt_width ,
+and
+.Fn ctrlfnt_height ,
+functions return a value less than zero on error.
+.Pp
+If an error occurs, the functions write a string describing the error into standard output with
+.Xr warnx 3 .
 .Sh EXAMPLES
 [...]
 .Sh SEE ALSO
