@@ -2534,10 +2534,17 @@ scrollmode(Widget *widget, int x, int y)
 			}
 			break;
 		case ButtonRelease:
-			if (left)
+			if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
+				if (scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
+					drawitems(widget);
+				widget->redraw = true;
+			} else if (left) {
 				goto done;
+			}
 			break;
 		case ButtonPress:
+			if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)
+				break;
 			if (ev.xbutton.button != Button1)
 				goto done;
 			if (ev.xbutton.window == widget->window)
@@ -2940,7 +2947,7 @@ initwindow(Widget *widget, struct Options *options)
 		widget,
 		widget->window,
 		(XRectangle){.width = SCROLLER_SIZE, .height = SCROLLER_SIZE},
-		ButtonPressMask | PointerMotionMask
+		ButtonReleaseMask | ButtonPressMask | PointerMotionMask
 	);
 	if (widget->scroller == None) {
 		warnx("could not create window");
