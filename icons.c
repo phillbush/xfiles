@@ -26,9 +26,11 @@
 #include "icons/folder-home.xpm"
 #include "icons/folder-image.xpm"
 #include "icons/folder-link.xpm"
+#include "icons/folder-mail.xpm"
 #include "icons/folder-meme.xpm"
 #include "icons/folder-mount.xpm"
 #include "icons/folder-music.xpm"
+#include "icons/folder-trash.xpm"
 #include "icons/folder-up.xpm"
 #include "icons/folder-video.xpm"
 #include "icons/folder.xpm"
@@ -56,9 +58,11 @@
 	X(images_dir,           folder_image_xpm    )\
 	X(config_dir,           folder_gear_xpm     )\
 	X(home_dir,             folder_home_xpm     )\
+	X(mail_dir,             folder_mail_xpm     )\
 	X(meme_dir,             folder_meme_xpm     )\
 	X(mount_dir,            folder_mount_xpm    )\
 	X(music_dir,            folder_music_xpm    )\
+	X(trash_dir,            folder_trash_xpm    )\
 	X(videos_dir,           folder_video_xpm    )\
 	X(link_dir,             folder_link_xpm     )\
 	X(dir,                  folder_xpm          )\
