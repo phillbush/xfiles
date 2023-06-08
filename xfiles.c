@@ -933,7 +933,7 @@ main(int argc, char *argv[])
 		path = *argv;
 	initthumbnailer(&fm);
 	if ((fm.widget = widget_create(APPCLASS, name, saveargc, saveargv, resources)) == NULL)
-		errx(EXIT_FAILURE, "could not initialize X widget");
+		exit(EXIT_FAILURE);
 #if __OpenBSD__
 	if (pledge("stdio rpath proc exec", NULL) == RETURN_FAILURE)
 		err(EXIT_FAILURE, "pledge");

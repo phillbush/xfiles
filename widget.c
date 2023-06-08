@@ -219,7 +219,7 @@ struct Selection {
 };
 
 struct Widget {
-	int start;
+	bool start, isset;
 	int redraw;
 
 	/* X11 stuff */
@@ -1476,6 +1476,8 @@ cleanwidget(Widget *widget)
 	struct Selection *sel;
 	void *tmp;
 
+	if (!widget->isset)
+		return;
 	thumb = widget->thumbhead;
 	while (thumb != NULL) {
 		tmp = thumb;
@@ -3280,6 +3282,7 @@ widget_set(Widget *widget, const char *title, char **items[], size_t nitems, Scr
 {
 	size_t i;
 
+	widget->isset = true;
 	XUndefineCursor(widget->display, widget->window);
 	cleanwidget(widget);
 	widget->items = items;
