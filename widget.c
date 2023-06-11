@@ -559,9 +559,9 @@ drawstatusbar(Widget *widget)
 	/* clear previous content */
 	XRenderFillRectangle(
 		widget->display,
-		PictOpSrc,
+		PictOpClear,
 		widget->layers[LAYER_STATUSBAR].pict,
-		&widget->colors[SELECT_NOT][COLOR_BG].chans,
+		&(XRenderColor){ 0 },
 		0, 0, widget->winw, STATUSBAR_HEIGHT(widget)
 	);
 
@@ -624,9 +624,9 @@ drawstatusbar(Widget *widget)
 	/* clear content below right side of statusbar */
 	XRenderFillRectangle(
 		widget->display,
-		PictOpSrc,
+		PictOpClear,
 		widget->layers[LAYER_STATUSBAR].pict,
-		&widget->colors[SELECT_NOT][COLOR_BG].chans,
+		&(XRenderColor){ 0 },
 		widget->winw - rightwid, 0,
 		rightwid,
 		STATUSBAR_HEIGHT(widget)
@@ -1131,7 +1131,7 @@ commitdraw(Widget *widget)
 		PictOpClear,
 		widget->layers[LAYER_CANVAS].pict,
 		&(XRenderColor){ 0 },
-		0, 0, widget->w, widget->h
+		0, 0, widget->winw, widget->winh
 	);
 	XRenderComposite(
 		widget->display,
