@@ -2160,62 +2160,31 @@ static void
 setwinicon(Widget *widget)
 {
 	size_t i;
-	unsigned long size[2];
-	unsigned long data[64*64];
-	XImage *ximage, *shape;
-	int status;
 
-	for (i = 0; i < 1; i++) {
-		ximage = NULL;
-		shape = NULL;
-		status = XpmCreateImageFromData(
+	for (i = 0; i < nwin_icons; i++) {
+		(void)XChangeProperty(
 			widget->display,
-			win_icons[i].xpm,
-			&ximage,
-			&shape,
-			&(XpmAttributes){
-				.valuemask = XpmDepth,
-				.depth = 32
-			}
+			widget->window,
+			widget->atoms[_NET_WM_ICON],
+			XA_CARDINAL,
+			32,
+			(i == 0) ? PropModeReplace : PropModeAppend,
+			(unsigned char *)(unsigned long []){
+				win_icons[i].size,
+				win_icons[i].size,
+			},
+			2
 		);
-		if (status == XpmSuccess) {
-			size[0] = size[1] = win_icons[i].size;
-			for (i = 0; i < size[0] * size[1]; i++) {
-				data[i] = shape->data[i/8] >> (i % 8) & 0x01 ? 0xFF : 0x00;
-				data[i] <<= 8;
-				data[i] |= ((unsigned char *)ximage->data)[i * 4 + 2];
-				data[i] <<= 8;
-				data[i] |= ((unsigned char *)ximage->data)[i * 4 + 1];
-				data[i] <<= 8;
-				data[i] |= ((unsigned char *)ximage->data)[i * 4 + 0];
-			}
-			(void)XChangeProperty(
-				widget->display,
-				widget->window,
-				widget->atoms[_NET_WM_ICON],
-				XA_CARDINAL,
-				32,
-				(i == 0) ? PropModeReplace : PropModeAppend,
-				(unsigned char *)size,
-				2
-			);
-			(void)XChangeProperty(
-				widget->display,
-				widget->window,
-				widget->atoms[_NET_WM_ICON],
-				XA_CARDINAL,
-				32,
-				PropModeAppend,
-				(unsigned char *)data,
-				size[0] * size[1]
-			);
-		}
-		if (ximage != NULL) {
-			XDestroyImage(ximage);
-		}
-		if (shape != NULL) {
-			XDestroyImage(shape);
-		}
+		(void)XChangeProperty(
+			widget->display,
+			widget->window,
+			widget->atoms[_NET_WM_ICON],
+			XA_CARDINAL,
+			32,
+			PropModeAppend,
+			(unsigned char *)win_icons[i].data,
+			win_icons[i].size * win_icons[i].size
+		);
 	}
 }
 

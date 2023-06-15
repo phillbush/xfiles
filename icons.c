@@ -40,9 +40,9 @@
 #include "icons/folder.xpm"
 
 /* icons for the window (used by the pager or window manager) */
-#include "icons/winicon16x16.xpm"
-#include "icons/winicon32x32.xpm"
-#include "icons/winicon64x64.xpm"
+#include "icons/winicon16x16.abgr"
+#include "icons/winicon32x32.abgr"
+#include "icons/winicon64x64.abgr"
 
 #define TYPES                                        \
 	X(executable,           file_app_xpm        )\
@@ -129,9 +129,9 @@
 	X(NULL,           file            )
 
 #define WINICONS                           \
-	X(16,             winicon16x16_xpm)\
-	X(32,             winicon32x32_xpm)\
-	X(64,             winicon64x64_xpm)
+	X(16,             winicon16x16)\
+	X(32,             winicon32x32)\
+	X(64,             winicon64x64)
 
 enum {
 #define X(type, xpm) type,
@@ -153,7 +153,7 @@ struct IconPatt icon_patts[] = {
 };
 
 struct WinIcon win_icons[] = {
-#define X(s, x) { .size = s, .xpm = x },
+#define X(s, d) { .size = s, .data = d },
 	WINICONS
 #undef  X
 };
