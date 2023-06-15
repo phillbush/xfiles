@@ -15,6 +15,7 @@
 
 #include "util.h"
 #include "widget.h"
+#include "icons.h"
 
 /* actions for the controller command */
 #define DROPCOPY        "drop-copy"
@@ -36,7 +37,7 @@
 #define STATUS_BUFSIZE  1024
 
 struct FileType {
-	char *patt, *type;
+	char *patt, *name;
 };
 
 struct Cwd {
@@ -48,7 +49,7 @@ struct Cwd {
 
 struct FM {
 	Widget *widget;
-	char ***entries;
+	Item *entries;
 	int *selitems;          /* array of indices to selected items */
 	int capacity;           /* capacity of entries */
 	int nentries;           /* number of entries */
@@ -59,9 +60,8 @@ struct FM {
 	struct Cwd *last;       /* last working directories */
 	struct timespec time;   /* ctime of current directory */
 
-	char *filetypebuf;
-	struct FileType *filetypes;
-	size_t nfiletypes;
+	struct IconPatt *userpatts;
+	size_t nuserpatts;
 
 	uid_t uid;
 	gid_t gid;
@@ -127,10 +127,9 @@ freeentries(struct FM *fm)
 	int i;
 
 	for (i = 0; i < fm->nentries; i++) {
-		free(fm->entries[i][ITEM_NAME]);
-		free(fm->entries[i][ITEM_PATH]);
-		free(fm->entries[i][ITEM_STATUS]);
-		free(fm->entries[i]);
+		free(fm->entries[i].name);
+		free(fm->entries[i].fullname);
+		free(fm->entries[i].status);
 	}
 }
 
@@ -236,11 +235,11 @@ done:
 }
 
 static int
-isdir(char **entry)
+isdir(Item *entry)
 {
 	char *s;
 
-	s = strrchr(entry[ITEM_PATH], '/');
+	s = strrchr(entry->fullname, '/');
 	return s != NULL && s[1] == '\0';
 }
 
@@ -248,14 +247,14 @@ static int
 entrycmp(const void *ap, const void *bp)
 {
 	int aisdir, bisdir;
-	char **a, **b;
+	Item *a, *b;
 
-	a = *(char ***)ap;
-	b = *(char ***)bp;
+	a = (Item *)ap;
+	b = (Item *)bp;
 	/* dotdot (parent directory) first */
-	if (strcmp(a[ITEM_NAME], "..") == 0)
+	if (strcmp(a->name, "..") == 0)
 		return -1;
-	if (strcmp(b[ITEM_NAME], "..") == 0)
+	if (strcmp(b->name, "..") == 0)
 		return 1;
 
 	/* directories first */
@@ -267,11 +266,11 @@ entrycmp(const void *ap, const void *bp)
 		return 1;
 
 	/* dotentries (hidden entries) first */
-	if (a[ITEM_NAME][0] == '.' && b[ITEM_NAME][0] != '.')
+	if (a->name[0] == '.' && b->name[0] != '.')
 		return -1;
-	if (b[ITEM_NAME][0] == '.' && a[ITEM_NAME][0] != '.')
+	if (b->name[0] == '.' && a->name[0] != '.')
 		return 1;
-	return strcoll(a[ITEM_NAME], b[ITEM_NAME]);
+	return strcoll(a->name, b->name);
 }
 
 static int
@@ -330,19 +329,21 @@ timespeclt(struct timespec *tsp, struct timespec *usp)
 }
 
 static int
-checkicon(struct FM *fm, char **entry, char *patt)
+checkicon(struct FM *fm, Item *entry, char *patt)
 {
 	int flags;
 	char *s;
 
+	if (patt == NULL)
+		return false;
 	if (patt[0] == '~' || strchr(patt, '/') != NULL) {
 		flags = FNM_CASEFOLD | FNM_PATHNAME | FNM_LEADING_DIR;
-		s = entry[ITEM_PATH];
+		s = entry->fullname;
 	} else if (isdir(entry)) {
 		return false;
 	} else {
 		flags = FNM_CASEFOLD;
-		s = entry[ITEM_NAME];
+		s = entry->name;
 	}
 	if (s == NULL)
 		return false;
@@ -357,36 +358,30 @@ checkicon(struct FM *fm, char **entry, char *patt)
 	return false;
 }
 
-static char *
-geticon(struct FM *fm, char **entry)
+static size_t
+geticon(struct FM *fm, Item *entry)
 {
-	extern size_t defdirtype, defupdirtype;
-	extern char *deffiletypes[];
-	extern struct { char *patt; int type; } deffilepatts[];
 	size_t i;
-	char *patt;
 
-	if (strcmp(entry[ITEM_NAME], "..") == 0)
-		return deffiletypes[defupdirtype];
-	for (i = 0; i < fm->nfiletypes; i++) {
-		patt = fm->filetypes[i].patt;
-		if (checkicon(fm, entry, patt)) {
-			return fm->filetypes[i].type;
-		}
-	}
-	for (i = 0; deffilepatts[i].patt != NULL; i++) {
-		patt = deffilepatts[i].patt;
-		if (checkicon(fm, entry, patt)) {
-			return deffiletypes[deffilepatts[i].type];
-		}
-	}
+	/* parent directory is a special case */
+	if (strcmp(entry->name, "..") == 0)
+		return icon_for_updir;
+	/* first check user-defined matches */
+	for (i = 0; i < fm->nuserpatts; i++)
+		if (checkicon(fm, entry, fm->userpatts[i].patt))
+			return fm->userpatts[i].index;
+	/* then check hardcoded icon matches */
+	for (i = 0; i < nicon_patts; i++)
+		if (checkicon(fm, entry, icon_patts[i].patt))
+			return icon_patts[i].index;
+	/* just return directory or regular file then */
 	if (isdir(entry))
-		return deffiletypes[defdirtype];
-	return deffiletypes[deffilepatts[i].type];
+		return icon_for_dir;
+	return icon_for_file;
 }
 
 static int
-thumbexists(char **entry, char *mime)
+thumbexists(Item *entry, char *mime)
 {
 	struct stat sb;
 	struct timespec origt, mimet;
@@ -396,13 +391,13 @@ thumbexists(char **entry, char *mime)
 	if (stat(mime, &sb) == -1)
 		goto forkthumbnailer;
 	mimet = sb.st_mtim;
-	if (stat(entry[ITEM_PATH], &sb) == -1)
+	if (stat(entry->fullname, &sb) == -1)
 		goto forkthumbnailer;
 	origt = sb.st_mtim;
 	if (timespeclt(&origt, &mimet))
 		return true;
 forkthumbnailer:
-	pid = forkthumb(entry[ITEM_PATH], mime);
+	pid = forkthumb(entry->fullname, mime);
 	if (waitpid(pid, &status, 0) == -1)
 		return false;
 	return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
@@ -419,13 +414,13 @@ thumbnailer(void *arg)
 	for (i = 0; i < fm->nentries; i++) {
 		if (thumbexit(fm))
 			break;
-		if (fm->entries[i][ITEM_PATH] == NULL)
+		if (fm->entries[i].fullname == NULL)
 			continue;
-		if (strncmp(fm->entries[i][ITEM_PATH], fm->thumbnaildir, fm->thumbnaildirlen) == 0)
+		if (strncmp(fm->entries[i].fullname, fm->thumbnaildir, fm->thumbnaildirlen) == 0)
 			continue;
-		if (setthumbpath(fm, fm->entries[i][ITEM_PATH], path) == RETURN_FAILURE)
+		if (setthumbpath(fm, fm->entries[i].fullname, path) == RETURN_FAILURE)
 			continue;
-		if (thumbexists(fm->entries[i], path)) {
+		if (thumbexists(&fm->entries[i], path)) {
 			widget_thumb(fm->widget, path, i);
 		}
 	}
@@ -479,18 +474,17 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 		fm->capacity = fm->nentries;
 	}
 	for (i = 0; i < fm->nentries; i++) {
-		fm->entries[i] = emalloc(sizeof(*fm->entries[i]) * ITEM_LAST);
 		isdir = false;
 		if (stat(array[i]->d_name, &sb) == -1) {
 			warn("%s", array[i]->d_name);
-			fm->entries[i][ITEM_STATUS] = NULL;
+			fm->entries[i].status = NULL;
 		} else {
 			isdir = S_ISDIR(sb.st_mode);
-			fm->entries[i][ITEM_STATUS] = statusfmt(&sb);
+			fm->entries[i].status = statusfmt(&sb);
 		}
-		fm->entries[i][ITEM_NAME] = estrdup(array[i]->d_name);
-		fm->entries[i][ITEM_PATH] = fullpath(cwd->path, array[i]->d_name, isdir);
-		fm->entries[i][ITEM_TYPE] = geticon(fm, fm->entries[i]);
+		fm->entries[i].name = estrdup(array[i]->d_name);
+		fm->entries[i].fullname = fullpath(cwd->path, array[i]->d_name, isdir);
+		fm->entries[i].icon = geticon(fm, &fm->entries[i]);
 		free(array[i]);
 	}
 	free(array);
@@ -614,7 +608,7 @@ runcontext(struct FM *fm, char *cmd, int nselitems)
 	argv[0] = CONTEXTCMD;
 	argv[1] = cmd;
 	for (i = 0; i < nselitems; i++)
-		argv[i+2] = fm->entries[fm->selitems[i]][ITEM_PATH];
+		argv[i+2] = fm->entries[fm->selitems[i]].fullname;
 	argv[i+2] = NULL;
 	forkexec(argv, NULL, false);
 	free(argv);
@@ -633,7 +627,7 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 	 * fm->selitems[0] is the path where the files have been dropped
 	 * into.  The other items are the files being dropped.
 	 */
-	path = fm->entries[fm->selitems[0]][ITEM_PATH];
+	path = fm->entries[fm->selitems[0]].fullname;
 	if ((argv = malloc((nitems + 2) * sizeof(*argv))) == NULL)
 		return;
 	argv[0] = CONTEXTCMD;
@@ -644,7 +638,7 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 	default:              argv[1] = DROPASK;  break;
 	}
 	for (i = 1; i < nitems; i++)
-		argv[i + 1] = fm->entries[fm->selitems[i]][ITEM_PATH];
+		argv[i + 1] = fm->entries[fm->selitems[i]].fullname;
 	argv[nitems + 1] = NULL;
 	forkexec(argv, path, false);
 	free(argv);
@@ -799,66 +793,80 @@ done:
 }
 
 static void
-initfiletypes(struct FM *fm)
+inituserpatts(struct FM *fm)
 {
-	size_t i, ntypes;
-	char *s, *t;
+	size_t i, j, ntypes;
+	char *s, *type, *patt, *buf;
 
-	fm->nfiletypes = 0;
-	fm->filetypes = NULL;
-	fm->filetypebuf = NULL;
-	if ((fm->filetypebuf = widget_gettypes(fm->widget)) == NULL)
+	fm->nuserpatts = 0;
+	fm->userpatts = NULL;
+	buf = NULL;
+	if ((buf = widget_gettypes(fm->widget)) == NULL)
 		return;
 	ntypes = 1;
-	for (s = fm->filetypebuf; *s != '\0'; s++)
+	for (s = buf; *s != '\0'; s++)
 		if (*s == ':' || *s == '\n')
 			ntypes++;
-	fm->filetypes = calloc(ntypes, sizeof(*fm->filetypes));
-	if (fm->filetypes == NULL) {
+	fm->userpatts = calloc(ntypes, sizeof(*fm->userpatts));
+	if (fm->userpatts == NULL) {
 		warn("could not set file types");
 		goto error;
 	}
 	i = 0;
-	for (s = fm->filetypebuf; *s != '\0'; s++) {
-		t = NULL;
+	for (s = buf; *s != '\0'; s++) {
+		type = NULL;
 		while (*s == ' ' || *s == '\t')
 			s++;
-		fm->filetypes[i].patt = s;
+		patt = s;
+		fm->userpatts[i].patt = NULL;
 		while (*s != '\0' && *s != ':' && *s != '\n') {
 			if (*s == '=')
-				t = s;
+				type = s;
 			s++;
 		}
 		*s = '\0';
-		if (t == NULL || t + 1 == s)
+		if (type == NULL || type + 1 == s)
 			continue;
-		*t = '\0';
-		t++;
-		fm->filetypes[i].type = t;
-		t[strcspn(t, " \t")] = '\0';
+		*type = '\0';
+		type++;
+		type[strcspn(type, " \t")] = '\0';
+		for (j = 0; j < nicon_types; j++) {
+			if (strcmp(type, icon_types[j].name) == 0) {
+				fm->userpatts[i].index = j;
+				fm->userpatts[i].patt = strdup(patt);
+				if (fm->userpatts[i].patt == NULL) {
+					warn("strdup");
+				}
+			}
+		}
 		i++;
 	}
-	fm->nfiletypes = i;
+	fm->nuserpatts = i;
+	free(buf);
 	return;
 error:
-	free(fm->filetypes);
-	free(fm->filetypebuf);
-	fm->filetypes = NULL;
-	fm->filetypebuf = NULL;
-	fm->nfiletypes = 0;
+	for (i = 0; i < fm->nuserpatts; i++)
+		free(fm->userpatts[i].patt);
+	free(fm->userpatts);
+	free(buf);
+	fm->nuserpatts = 0;
+	fm->userpatts = NULL;
 	return;
 }
 
 static void
 freefm(struct FM *fm)
 {
+	size_t i;
+
 	clearcwd(fm->hist);
 	freeentries(fm);
 	free(fm->entries);
 	free(fm->selitems);
 	free(fm->thumbnaildir);
-	free(fm->filetypebuf);
-	free(fm->filetypes);
+	for (i = 0; i < fm->nuserpatts; i++)
+		free(fm->userpatts[i].patt);
+	free(fm->userpatts);
 }
 
 int
@@ -938,7 +946,7 @@ main(int argc, char *argv[])
 	if (pledge("stdio rpath proc exec", NULL) == RETURN_FAILURE)
 		err(EXIT_FAILURE, "pledge");
 #endif
-	initfiletypes(&fm);
+	inituserpatts(&fm);
 	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)
 		goto error;
 	fm.last = fm.cwd;
@@ -985,13 +993,13 @@ main(int argc, char *argv[])
 				break;
 			if (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries)
 				break;
-			if (isdir(fm.entries[fm.selitems[0]])) {
-				if (changedir(&fm, fm.entries[fm.selitems[0]][ITEM_PATH], false) == RETURN_FAILURE) {
+			if (isdir(&fm.entries[fm.selitems[0]])) {
+				if (changedir(&fm, fm.entries[fm.selitems[0]].fullname, false) == RETURN_FAILURE) {
 					exitval = EXIT_FAILURE;
 					goto done;
 				}
 			} else {
-				fileopen(&fm, fm.entries[fm.selitems[0]][ITEM_PATH]);
+				fileopen(&fm, fm.entries[fm.selitems[0]].fullname);
 			}
 			break;
 		case WIDGET_DROPASK:
@@ -1003,9 +1011,9 @@ main(int argc, char *argv[])
 				if (nitems > 0 && (fm.selitems[0] < 0 || fm.selitems[0] >= fm.nentries))
 					path = NULL;
 				else
-					path = fm.entries[fm.selitems[0]][ITEM_PATH];
+					path = fm.entries[fm.selitems[0]].fullname;
 				runexdrop(event, text, path);
-			} else if (nitems > 1 && isdir(fm.entries[fm.selitems[0]])) {
+			} else if (nitems > 1 && isdir(&fm.entries[fm.selitems[0]])) {
 				/* drag-and-drop in the same window */
 				runindrop(&fm, event, nitems);
 			}

@@ -5,6 +5,9 @@ MAN  = ${PROG:=.1}
 SCRIPT1 = xfilesctl
 SCRIPT2 = xfilesthumb
 ICONS = \
+	icons/winicon16x16.xpm \
+	icons/winicon32x32.xpm \
+	icons/winicon64x64.xpm \
 	icons/file-app.xpm \
 	icons/file-archive.xpm \
 	icons/file-audio.xpm \
@@ -58,7 +61,7 @@ ${PROG}: ${OBJS}
 	${CC} -std=c99 -pedantic ${DEFS} ${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
 
 xfiles.o:  util.h widget.h icons/file.xpm icons/folder.xpm
-widget.o:  util.h widget.h ctrlsel.h ctrlfnt.h winicon.data icons/x.xpm
+widget.o:  util.h widget.h ctrlsel.h ctrlfnt.h icons/x.xpm
 ctrlsel.o: ctrlsel.h
 ctrlfnt.o: ctrlfnt.h
 icons.o: ${ICONS}
@@ -67,6 +70,7 @@ tags: ${SRCS}
 	ctags ${SRCS}
 
 lint: ${SRCS}
+	-@fgrep -e '	//' -e 'TODO' ${SRCS} || true # grep for commented out code
 	-mandoc -T lint -W warning ${MAN} ctrlfnt.3 ctrlsel.3
 	-clang-tidy ${SRCS} -- -std=c99 ${DEFS} ${INCS} ${CPPFLAGS}
 

@@ -3,6 +3,13 @@ typedef struct Scroll {
 	int row, ydiff;
 } Scroll;
 
+typedef struct Item {
+	char *name;             /* item display name */
+	char *fullname;         /* item full name */
+	char *status;           /* item statusbar info */
+	size_t icon;            /* index for the icon array */
+} Item;
+
 typedef enum {
 	WIDGET_NONE,
 	WIDGET_INTERNAL,
@@ -21,15 +28,6 @@ typedef enum {
 	WIDGET_ERROR,
 } WidgetEvent;
 
-enum {
-	/* item elements */
-	ITEM_NAME,   /* indexes the label displayed for the item */
-	ITEM_PATH,   /* indexes the path given in PRIMARY selection */
-	ITEM_STATUS, /* indexes the status displayed on titlebar when item is selected */
-	ITEM_TYPE,   /* indexes the type of icon to be displayed */
-	ITEM_LAST,
-};
-
 typedef struct Widget Widget;
 
 Widget *widget_create(
@@ -43,7 +41,7 @@ Widget *widget_create(
 int widget_set(
 	Widget *widget,
 	const char *title,
-	char **items[],
+	Item *items,
 	size_t nitems,
 	Scroll *scrl
 );

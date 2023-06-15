@@ -5,6 +5,7 @@
 #include <locale.h>
 #include <poll.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -23,11 +24,11 @@
 #include <X11/extensions/Xrender.h>
 #include <X11/extensions/shape.h>
 
+#include "icons.h"
 #include "ctrlfnt.h"
 #include "ctrlsel.h"
 #include "util.h"
 #include "widget.h"
-#include "winicon.data"         /* window icon, for the window manager */
 
 #define ATOMS                                   \
 	X(TEXT, NULL)                           \
@@ -203,7 +204,6 @@ enum Resource {
 };
 
 struct Icon {
-	const char *name;
 	Pixmap pix, mask;
 };
 
@@ -267,14 +267,9 @@ struct Widget {
 	pthread_mutex_t lock;
 
 	/*
-	 * .items is an array of arrays of strings.
-	 * For each index i, .items[i] contains (at least) three elements:
-	 * - .items[i][ITEM_NAME]   -- The label displayed for the item.
-	 * - .items[i][ITEM_PATH]   -- The path given in PRIMARY selection.
-	 * - .items[i][ITEM_STATUS] -- The status string displayed on the
-	 *                             titlebar when the item is selected.
+	 * Items to be displayed
 	 */
-	char ***items;                  /* see comment above */
+	Item *items;
 	char *selbuf, *uribuf, *dndbuf; /* buffer for selections */
 	size_t selbufsiz, uribufsiz;
 	int nitems;                     /* number of items */
@@ -390,9 +385,9 @@ getitemstatus(Widget *widget, int index)
 {
 	if (index < 0 || index >= widget->nitems)
 		return UNKNOWN_STATUS;
-	if (widget->items[widget->highlight][ITEM_STATUS] == NULL)
+	if (widget->items[widget->highlight].status == NULL)
 		return UNKNOWN_STATUS;
-	return widget->items[widget->highlight][ITEM_STATUS];
+	return widget->items[widget->highlight].status;
 }
 
 static void
@@ -600,8 +595,8 @@ drawstatusbar(Widget *widget)
 				.width = widget->w,
 				.height = widget->fonth,
 			},
-			widget->items[widget->highlight][ITEM_NAME],
-			strlen(widget->items[widget->highlight][ITEM_NAME])
+			widget->items[widget->highlight].name,
+			strlen(widget->items[widget->highlight].name)
 		);
 	}
 
@@ -825,19 +820,7 @@ setrow(Widget *widget, int row)
 static struct Icon *
 geticon(Widget *widget, int index)
 {
-	extern size_t deffiletype;
-	int i, cmp;
-
-	for (i = 0; widget->icons[i].name != NULL; i++) {
-		cmp = strcmp(
-			widget->icons[i].name,
-			widget->items[index][ITEM_TYPE]
-		);
-		if (cmp == 0) {
-			return &widget->icons[i];
-		}
-	}
-	return &widget->icons[deffiletype];
+	return &widget->icons[widget->items[index].icon];
 }
 
 static void
@@ -909,7 +892,7 @@ drawlabel(Widget *widget, int index, int x, int y)
 	else
 		sel = SELECT_NOT;
 	color = widget->colors[sel][COLOR_FG].pict;
-	text = widget->items[index][ITEM_NAME];
+	text = widget->items[index].name;
 	widget->nlines[index] = 1;
 	textx = x + widget->itemw / 2 - LABELWIDTH / 2;
 	extension = NULL;
@@ -1440,8 +1423,8 @@ ownprimary(Widget *widget, Time time)
 	i = j = 0;
 	for (sel = widget->sel; sel != NULL; sel = sel->next) {
 		if (sel->next != NULL)
-			i += snprintf(widget->selbuf + i, widget->selbufsiz - i, "%s\n", widget->items[sel->index][ITEM_PATH]);
-		j += snprintf(widget->uribuf + j, widget->uribufsiz - j, "file://%s\r\n", widget->items[sel->index][ITEM_PATH]);
+			i += snprintf(widget->selbuf + i, widget->selbufsiz - i, "%s\n", widget->items[sel->index].fullname);
+		j += snprintf(widget->uribuf + j, widget->uribufsiz - j, "file://%s\r\n", widget->items[sel->index].fullname);
 	}
 	ctrlsel_filltarget(
 		XA_STRING, XA_STRING,
@@ -1581,8 +1564,8 @@ highlight(Widget *widget, int index, int redraw)
 			widget->atoms[UTF8_STRING],
 			8,
 			PropModeReplace,
-			(unsigned char *)widget->items[widget->highlight][ITEM_NAME],
-			strlen(widget->items[widget->highlight][ITEM_NAME])
+			(unsigned char *)widget->items[widget->highlight].name,
+			strlen(widget->items[widget->highlight].name)
 		);
 		(void)XChangeProperty(
 			widget->display,
@@ -2173,6 +2156,69 @@ createwindow(Widget *widget, Window parent, XRectangle rect, long eventmask)
 	);
 }
 
+static void
+setwinicon(Widget *widget)
+{
+	size_t i;
+	unsigned long size[2];
+	unsigned long data[64*64];
+	XImage *ximage, *shape;
+	int status;
+
+	for (i = 0; i < 1; i++) {
+		ximage = NULL;
+		shape = NULL;
+		status = XpmCreateImageFromData(
+			widget->display,
+			win_icons[i].xpm,
+			&ximage,
+			&shape,
+			&(XpmAttributes){
+				.valuemask = XpmDepth,
+				.depth = 32
+			}
+		);
+		if (status == XpmSuccess) {
+			size[0] = size[1] = win_icons[i].size;
+			for (i = 0; i < size[0] * size[1]; i++) {
+				data[i] = shape->data[i/8] >> (i % 8) & 0x01 ? 0xFF : 0x00;
+				data[i] <<= 8;
+				data[i] |= ((unsigned char *)ximage->data)[i * 4 + 2];
+				data[i] <<= 8;
+				data[i] |= ((unsigned char *)ximage->data)[i * 4 + 1];
+				data[i] <<= 8;
+				data[i] |= ((unsigned char *)ximage->data)[i * 4 + 0];
+			}
+			(void)XChangeProperty(
+				widget->display,
+				widget->window,
+				widget->atoms[_NET_WM_ICON],
+				XA_CARDINAL,
+				32,
+				(i == 0) ? PropModeReplace : PropModeAppend,
+				(unsigned char *)size,
+				2
+			);
+			(void)XChangeProperty(
+				widget->display,
+				widget->window,
+				widget->atoms[_NET_WM_ICON],
+				XA_CARDINAL,
+				32,
+				PropModeAppend,
+				(unsigned char *)data,
+				size[0] * size[1]
+			);
+		}
+		if (ximage != NULL) {
+			XDestroyImage(ximage);
+		}
+		if (shape != NULL) {
+			XDestroyImage(shape);
+		}
+	}
+}
+
 /*
  * event filters
  */
@@ -2656,7 +2702,7 @@ dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 	dragwin = createdragwin(widget, clicki);
 	i = 0;
 	for (sel = widget->sel; sel != NULL; sel = sel->next)
-		i += snprintf(widget->dndbuf + i, widget->uribufsiz - i, "file://%s\r\n", widget->items[sel->index][ITEM_PATH]);
+		i += snprintf(widget->dndbuf + i, widget->uribufsiz - i, "file://%s\r\n", widget->items[sel->index].fullname);
 	ctrlsel_filltarget(
 		widget->atoms[TEXT_URI_LIST],
 		widget->atoms[TEXT_URI_LIST],
@@ -3003,16 +3049,6 @@ initwindow(Widget *widget, struct Options *options)
 	(void)XChangeProperty(
 		widget->display,
 		widget->window,
-		widget->atoms[_NET_WM_ICON],
-		XA_CARDINAL,
-		32,
-		PropModeReplace,
-		(unsigned char *)winicon_data,
-		winicon_size
-	);
-	(void)XChangeProperty(
-		widget->display,
-		widget->window,
 		widget->atoms[_NET_WM_PID],
 		XA_CARDINAL,
 		32,
@@ -3023,6 +3059,7 @@ initwindow(Widget *widget, struct Options *options)
 	(void)snprintf(buf, LEN(buf), "%lu", (unsigned long)widget->window);
 	if (setenv("WINDOWID", buf, true) == RETURN_FAILURE)
 		warn("setenv");
+	setwinicon(widget);
 	return RETURN_SUCCESS;
 }
 
@@ -3081,30 +3118,26 @@ error:
 static int
 initicons(Widget *widget, struct Options *options)
 {
-	extern size_t ndeffileicons;
-	extern char *deffiletypes[];
-	extern struct {int type; char **xpm;} deffileicons[];
 	int success, retval, i;
 
 	(void)options;
-	widget->nicons = ndeffileicons;
+	widget->nicons = nicon_types;
 	if ((widget->icons = calloc(widget->nicons, sizeof(*widget->icons))) == NULL) {
 		warn("calloc");
 		return RETURN_FAILURE;
 	}
 	retval = RETURN_SUCCESS;
 	for (i = 0; i < widget->nicons; i++) {
-		widget->icons[i].name = deffiletypes[deffileicons[i].type];
 		widget->icons[i].pix  = None;
 		widget->icons[i].mask = None;
 		success = pixmapfromdata(
 			widget,
-			deffileicons[i].xpm,
+			icon_types[i].xpm,
 			&widget->icons[i].pix,
 			&widget->icons[i].mask
 		) != RETURN_FAILURE;
 		if (!success) {
-			warnx("%s: could not open pixmap", widget->icons[i].name);
+			warnx("%s: could not open pixmap", icon_types[i].name);
 			retval = RETURN_FAILURE;
 		}
 	}
@@ -3278,7 +3311,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 }
 
 int
-widget_set(Widget *widget, const char *title, char **items[], size_t nitems, Scroll *scrl)
+widget_set(Widget *widget, const char *title, Item items[], size_t nitems, Scroll *scrl)
 {
 	size_t i;
 
@@ -3320,7 +3353,7 @@ widget_set(Widget *widget, const char *title, char **items[], size_t nitems, Scr
 	widget->selbufsiz = 0;
 	for (i = 0; i < nitems; i++) {
 		widget->thumbs[i] = NULL;
-		widget->selbufsiz += strlen(items[i][ITEM_PATH]) + 1; /* +1 for '\n' */
+		widget->selbufsiz += strlen(items[i].fullname) + 1; /* +1 for '\n' */
 	}
 	if (widget->selbufsiz > 0 && (widget->selbuf = malloc(widget->selbufsiz)) == NULL) {
 		warn("malloc");

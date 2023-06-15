@@ -1,8 +1,10 @@
 #include <stddef.h>
 
-/*
- * First include the icon files.
- */
+#include "icons.h"
+
+#define LEN(a) (sizeof(a) / sizeof((a)[0]))
+
+/* icons for files */
 #include "icons/file-app.xpm"
 #include "icons/file-archive.xpm"
 #include "icons/file-audio.xpm"
@@ -16,6 +18,8 @@
 #include "icons/file-text.xpm"
 #include "icons/file-video.xpm"
 #include "icons/file.xpm"
+
+/* icons for directories */
 #include "icons/folder-apps.xpm"
 #include "icons/folder-book.xpm"
 #include "icons/folder-code.xpm"
@@ -35,7 +39,12 @@
 #include "icons/folder-video.xpm"
 #include "icons/folder.xpm"
 
-#define ICONS                                        \
+/* icons for the window (used by the pager or window manager) */
+#include "icons/winicon16x16.xpm"
+#include "icons/winicon32x32.xpm"
+#include "icons/winicon64x64.xpm"
+
+#define TYPES                                        \
 	X(executable,           file_app_xpm        )\
 	X(object,               file_object_xpm     )\
 	X(archive,              file_archive_xpm    )\
@@ -119,39 +128,40 @@
 	X("~/",           home_dir        )\
 	X(NULL,           file            )
 
+#define WINICONS                           \
+	X(16,             winicon16x16_xpm)\
+	X(32,             winicon32x32_xpm)\
+	X(64,             winicon64x64_xpm)
+
 enum {
 #define X(type, xpm) type,
-	ICONS
+	TYPES
 	NTYPES
 #undef  X
 };
 
-char *deffiletypes[NTYPES] = {
-#define X(type, xpm) #type,
-	ICONS
+struct IconType icon_types[NTYPES] = {
+#define X(n, p) [n] = { .name = #n, .xpm = p },
+	TYPES
 #undef  X
 };
 
-struct {
-	int type;
-	char **xpm;
-} deffileicons[NTYPES] = {
-#define X(a, b) { .type = a, .xpm = b, },
-	ICONS
-#undef  X
-};
-
-struct {
-	char *patt;
-	int type;
-} deffilepatts[] = {
-#define X(a, b) { .patt = a, .type = b, },
+struct IconPatt icon_patts[] = {
+#define X(p, i) { .patt = p, .index = i },
 	PATTERNS
 #undef  X
 };
 
-size_t ndeffileicons = NTYPES;
+struct WinIcon win_icons[] = {
+#define X(s, x) { .size = s, .xpm = x },
+	WINICONS
+#undef  X
+};
 
-size_t defdirtype = dir;
-size_t defupdirtype = up_dir;
-size_t deffiletype = file;
+size_t nicon_types = NTYPES;
+size_t nicon_patts = LEN(icon_patts);
+size_t nwin_icons  = LEN(win_icons);
+
+size_t icon_for_updir = up_dir;
+size_t icon_for_dir   = dir;
+size_t icon_for_file  = file;
