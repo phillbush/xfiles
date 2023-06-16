@@ -7,6 +7,7 @@ SCRIPT2 = xfilesthumb
 WINICONS = \
 	icons/winicon16x16.abgr \
 	icons/winicon32x32.abgr \
+	icons/winicon48x48.abgr \
 	icons/winicon64x64.abgr
 ICONS = \
 	icons/file-app.xpm \

@@ -42,6 +42,7 @@
 /* icons for the window (used by the pager or window manager) */
 #include "icons/winicon16x16.abgr"
 #include "icons/winicon32x32.abgr"
+#include "icons/winicon48x48.abgr"
 #include "icons/winicon64x64.abgr"
 
 #define TYPES                                        \
@@ -128,9 +129,10 @@
 	X("~/",           home_dir        )\
 	X(NULL,           file            )
 
-#define WINICONS                           \
+#define WINICONS                       \
 	X(16,             winicon16x16)\
 	X(32,             winicon32x32)\
+	X(48,             winicon48x48)\
 	X(64,             winicon64x64)
 
 enum {
