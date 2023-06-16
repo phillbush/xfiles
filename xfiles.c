@@ -60,6 +60,7 @@ struct FM {
 	struct Cwd *last;       /* last working directories */
 	struct timespec time;   /* ctime of current directory */
 
+	/* user-defined icon globbing patterns */
 	struct IconPatt *userpatts;
 	size_t nuserpatts;
 
@@ -328,7 +329,7 @@ timespeclt(struct timespec *tsp, struct timespec *usp)
 	     : (tsp->tv_sec < usp->tv_sec);
 }
 
-static int
+static bool
 checkicon(struct FM *fm, Item *entry, char *patt)
 {
 	int flags;
@@ -795,58 +796,50 @@ done:
 static void
 inituserpatts(struct FM *fm)
 {
-	size_t i, j, ntypes;
+	size_t i, j, npatts;
 	char *s, *type, *patt, *buf;
 
 	fm->nuserpatts = 0;
 	fm->userpatts = NULL;
 	buf = NULL;
-	if ((buf = widget_gettypes(fm->widget)) == NULL)
+	if ((buf = widget_geticons(fm->widget)) == NULL)
 		return;
-	ntypes = 1;
+	npatts = 1;
 	for (s = buf; *s != '\0'; s++)
 		if (*s == ':' || *s == '\n')
-			ntypes++;
-	fm->userpatts = calloc(ntypes, sizeof(*fm->userpatts));
+			npatts++;
+	fm->userpatts = calloc(npatts, sizeof(*fm->userpatts));
 	if (fm->userpatts == NULL) {
 		warn("could not set file types");
 		goto error;
 	}
 	i = 0;
-	for (s = buf; *s != '\0'; s++) {
-		type = NULL;
+	for (s = strtok(buf, ":\n"); s != NULL; s = strtok(NULL, ":\n")) {
 		while (*s == ' ' || *s == '\t')
 			s++;
+		type = strchr(s, '=');
 		patt = s;
-		fm->userpatts[i].patt = NULL;
-		while (*s != '\0' && *s != ':' && *s != '\n') {
-			if (*s == '=')
-				type = s;
-			s++;
-		}
-		*s = '\0';
-		if (type == NULL || type + 1 == s)
+		if (type == NULL)
 			continue;
 		*type = '\0';
 		type++;
 		type[strcspn(type, " \t")] = '\0';
 		for (j = 0; j < nicon_types; j++) {
-			if (strcmp(type, icon_types[j].name) == 0) {
-				fm->userpatts[i].index = j;
-				fm->userpatts[i].patt = strdup(patt);
-				if (fm->userpatts[i].patt == NULL) {
-					warn("strdup");
-				}
-			}
+			if (strcmp(type, icon_types[j].name) != 0)
+				continue;
+			fm->userpatts[i].index = j;
+			fm->userpatts[i].patt = strdup(patt);
+			if (fm->userpatts[i].patt == NULL)
+				warn("strdup");
+			else
+				i++;
+			break;
 		}
-		i++;
 	}
 	fm->nuserpatts = i;
 	free(buf);
 	return;
 error:
-	for (i = 0; i < fm->nuserpatts; i++)
-		free(fm->userpatts[i].patt);
 	free(fm->userpatts);
 	free(buf);
 	fm->nuserpatts = 0;

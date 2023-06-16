@@ -126,8 +126,7 @@
 	X("*.mkv",        video           )\
 	X("*.mov",        video           )\
 	X("*.ogv",        video           )\
-	X("~/",           home_dir        )\
-	X(NULL,           file            )
+	X("~/",           home_dir        )
 
 #define WINICONS                       \
 	X(16,             winicon16x16)\

@@ -756,7 +756,7 @@ calcsize(Widget *widget, int w, int h)
 	widget->ncols = max(widget->w / widget->itemw, 1);
 	widget->nrows = max(WIN_ROWS(widget) + (widget->h % widget->itemh ? 2 : 1), 1);
 	widget->x0 = max((widget->w - widget->ncols * widget->itemw) / 2, 0);
-	widget->nscreens = ALL_ROWS(widget) - WIN_ROWS(widget);
+	widget->nscreens = ALL_ROWS(widget) - WIN_ROWS(widget) + 1;
 	widget->nscreens = max(widget->nscreens, 1);
 	d = (double)widget->nscreens / SCROLLER_MIN;
 	d = (d < 1.0 ? 1.0 : d);
@@ -1237,13 +1237,11 @@ settitle(Widget *widget)
 static int
 gethandlepos(Widget *widget)
 {
-	int row;
+	int retval;
 
-	if (widget->ydiff >= widget->itemh)
-		row = widget->nscreens;
-	else
-		row = widget->row;
-	return (HANDLE_MAX_SIZE - widget->handlew) * ((double)row / widget->nscreens);
+	retval = HANDLE_MAX_SIZE - widget->handlew;
+	retval *= ((double)widget->row + 1) / widget->nscreens;
+	return retval;
 }
 
 static void
@@ -1292,6 +1290,10 @@ scroll(Widget *widget, int y)
 
 	if (y == 0)
 		return false;
+	if (y > 0 && widget->row + 1 >= widget->nscreens)
+		return false;
+	if (y < 0 && widget->row == 0 && widget->ydiff == 0)
+		return false;
 	if (ALL_ROWS(widget) + 1 < widget->nrows)
 		return false;
 	prevhand = gethandlepos(widget);
@@ -1303,16 +1305,12 @@ scroll(Widget *widget, int y)
 		widget->ydiff += widget->itemh;
 		newrow--;
 	}
-	if (y > 0) {
-		if (newrow >= widget->nscreens) {
-			widget->ydiff = widget->itemh;
-			newrow = widget->nscreens - 1;
-		}
-	} else if (y < 0) {
-		if (newrow < 0) {
-			widget->ydiff = 0;
-			newrow = 0;
-		}
+	if (newrow > widget->nscreens) {
+		widget->ydiff = 0;
+		newrow = widget->nscreens - 1;
+	} else if (newrow < 0) {
+		widget->ydiff = 0;
+		newrow = 0;
 	}
 	setrow(widget, newrow);
 	newhand = gethandlepos(widget);
@@ -1881,8 +1879,8 @@ scrollerset(Widget *widget, int pos)
 	newrow = pos * widget->nscreens / maxpos;
 	newrow = max(newrow, 0);
 	newrow = min(newrow, widget->nscreens);
-	if (newrow == widget->nscreens) {
-		widget->ydiff = widget->itemh;
+	if (newrow >= widget->nscreens) {
+		widget->ydiff = 0;
 		newrow = widget->nscreens - 1;
 	} else {
 		widget->ydiff = 0;
@@ -2257,7 +2255,7 @@ hjkl:
 		if (ksym == XK_End) {
 			index = widget->nitems - 1;
 			widget->ydiff = 0;
-			setrow(widget, widget->nscreens);
+			setrow(widget, widget->nscreens - 1);
 			goto draw;
 		}
 		if (widget->highlight == -1) {
@@ -3301,7 +3299,7 @@ widget_set(Widget *widget, const char *title, Item items[], size_t nitems, Scrol
 	(void)calcsize(widget, -1, -1);
 	if (scrl != NULL && widget->row >= widget->nscreens) {
 		widget->ydiff = 0;
-		setrow(widget, widget->nscreens);
+		setrow(widget, widget->nscreens - 1);
 	}
 	if ((widget->issel = calloc(widget->nitems, sizeof(*widget->issel))) == NULL) {
 		warn("calloc");
@@ -3355,7 +3353,7 @@ widget_map(Widget *widget)
 }
 
 char *
-widget_gettypes(Widget *widget)
+widget_geticons(Widget *widget)
 {
 	XrmDatabase xdb;
 	char *str, *value, *p;

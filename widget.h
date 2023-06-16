@@ -47,7 +47,7 @@ int widget_set(
 );
 
 /* get value of icons resource into allocated string */
-char *widget_gettypes(Widget *widget);
+char *widget_geticons(Widget *widget);
 
 void widget_map(Widget *widget);
 
