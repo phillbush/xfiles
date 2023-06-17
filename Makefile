@@ -56,6 +56,9 @@ DEFS = -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE -D_BSD_SOURCE -D_DEFAULT_SOURCE
 INCS = -I${LOCALINC} -I${X11INC} -I/usr/include/freetype2 -I${X11INC}/freetype2
 LIBS = -L${LOCALLIB} -L${X11LIB} -lfontconfig -lXft -lX11 -lXext -lXcursor -lXrender -lXpm -lpthread
 
+bindir = ${DESTDIR}${PREFIX}/bin
+mandir = ${DESTDIR}${MANPREFIX}/man1
+
 all: ${PROG}
 
 ${PROG}: ${OBJS}
@@ -97,21 +100,21 @@ clean:
 	rm -f ${OBJS} ${PROG} ${PROG:=.core} tags
 
 install: all
-	install -d ${DESTDIR}${PREFIX}/bin
-	install -d ${DESTDIR}${MANPREFIX}/man1
-	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
-	install -m 644 ${MAN} ${DESTDIR}${MANPREFIX}/man1/${MAN}
+	mkdir -p ${bindir}
+	mkdir -p ${mandir}
+	install -m 755 ${PROG} ${bindir}/${PROG}
+	install -m 644 ${MAN} ${mandir}/${MAN}
 
 install-script:
-	install -m 755 examples/${SCRIPT1} ${DESTDIR}${PREFIX}/bin/${SCRIPT1}
-	install -m 755 examples/${SCRIPT2} ${DESTDIR}${PREFIX}/bin/${SCRIPT2}
+	install -m 755 examples/${SCRIPT1} ${bindir}/${SCRIPT1}
+	install -m 755 examples/${SCRIPT2} ${bindir}/${SCRIPT2}
 
 uninstall:
-	-rm ${DESTDIR}${PREFIX}/bin/${PROG}
-	-rm ${DESTDIR}${MANPREFIX}/man1/${MAN}
+	-rm ${bindir}/${PROG}
+	-rm ${mandir}/${MAN}
 
 uninstall-script:
-	-rm ${DESTDIR}${PREFIX}/bin/${SCRIPT1}
-	-rm ${DESTDIR}${PREFIX}/bin/${SCRIPT2}
+	-rm ${bindir}/${SCRIPT1}
+	-rm ${bindir}/${SCRIPT2}
 
 .PHONY: all tags clean install uninstall lint
