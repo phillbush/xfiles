@@ -572,10 +572,18 @@ Contains information about the current highlighted file
 reads the following properties on its window:
 .Bl -tag -width Ds
 .It Ic "_CONTROL_GOTO"
-When this property is changed,
+When this property is modified,
 .Nm xfiles
-tries to change the directory to the path this property is set to,
-if possible.
+tries to change the current directory, if possible.
+If this property is set to
+.Qq Ic "-" ,
+.Nm xfiles
+goes to the previous directory in history.
+If this property is set to
+.Qq Ic "+" ,
+.Nm xfiles
+goes to the next directory in history.
+Otherwise, it goes to the directory whose path is equal to this property's value.
 .El
 .Sh ENVIRONMENT
 The following environment variables affect the execution of
