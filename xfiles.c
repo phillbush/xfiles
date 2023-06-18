@@ -648,7 +648,7 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 static void
 runexdrop(WidgetEvent event, char *text, char *path)
 {
-	size_t capacity, argc, i, j, k;
+	size_t capacity, argc, i, j;
 	char **argv, **p;
 
 	/*
@@ -672,14 +672,6 @@ runexdrop(WidgetEvent event, char *text, char *path)
 	for (i = 0; text[i] != '\0'; i++) {
 		if (strncmp(text + i, URI_PREFIX, sizeof(URI_PREFIX) - 1) == 0)
 			i += sizeof(URI_PREFIX) - 1;
-		j = i;
-		while (text[j] != '\0' && text[j] != '\n')
-			j++;
-		if (j > i && text[j-1] == '\r')
-			k = j - 1;
-		else
-			k = j;
-		text[k] = '\0';
 		if (argc + 1> capacity) {
 			capacity += INCRSIZE;
 			p = realloc(argv, capacity * sizeof(*argv));
@@ -690,7 +682,13 @@ runexdrop(WidgetEvent event, char *text, char *path)
 			argv = p;
 		}
 		argv[argc++] = text + i;
+		j = i + strcspn(text + i, "\r\n");
+		if (text[j] == '\0')
+			break;
 		i = j;
+		if (text[j] == '\r' && text[j + 1] == '\n')
+			i++;
+		text[j] = '\0';
 	}
 	argv[argc++] = NULL;
 	forkexec(argv, path, false);

@@ -286,7 +286,7 @@ getcontent(struct CtrlSelTarget *target, Display *display, Window window, Atom p
 	if (target->buffer != NULL) {
 		/* append buffer */
 		size += target->bufsize;
-		if ((q = realloc(target->buffer, size)) == NULL) {
+		if ((q = realloc(target->buffer, size + 1)) == NULL) {
 			XFree(p);
 			return CONTENT_ERROR;
 		}
@@ -296,7 +296,7 @@ getcontent(struct CtrlSelTarget *target, Display *display, Window window, Atom p
 		target->nitems += len;
 	} else {
 		/* new buffer */
-		if ((q = malloc(size)) == NULL) {
+		if ((q = malloc(size + 1)) == NULL) {
 			XFree(p);
 			return CONTENT_ERROR;
 		}
@@ -305,6 +305,7 @@ getcontent(struct CtrlSelTarget *target, Display *display, Window window, Atom p
 		target->bufsize = size;
 		target->nitems = len;
 	}
+	target->buffer[size] = '\0';
 	XFree(p);
 	return CONTENT_SUCCESS;
 }
