@@ -947,6 +947,10 @@ main(int argc, char *argv[])
 	widget_map(fm.widget);
 	text = NULL;
 	while ((event = widget_poll(fm.widget, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
+		if (event == WIDGET_GOTO && strcmp(text, "-") == 0)
+			event = WIDGET_PREV;
+		else if (event == WIDGET_GOTO && strcmp(text, "+") == 0)
+			event = WIDGET_NEXT;
 		switch (event) {
 		case WIDGET_ERROR:
 			exitval = EXIT_FAILURE;
