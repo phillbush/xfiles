@@ -250,8 +250,7 @@ struct Widget {
 	} application, resources[NRESOURCES];
 	const char **cliresources;
 
-	Atom lastprop;
-	char *lasttext;
+	char *gototext;
 
 	struct {
 		Pixmap pix;
@@ -1474,6 +1473,7 @@ cleanwidget(Widget *widget)
 	}
 	widget->sel = NULL;
 	widget->rectsel = NULL;
+	widget->gototext = NULL;
 	FREE(widget->thumbs);
 	FREE(widget->linelen);
 	FREE(widget->nlines);
@@ -2425,9 +2425,8 @@ processevent(Widget *widget, XEvent *ev)
 			widget->redraw = true;
 		} else if (ev->xproperty.window == widget->window &&
 		           ev->xproperty.atom == widget->atoms[_CONTROL_GOTO]) {
-			FREE(widget->lasttext);
-			widget->lastprop = widget->atoms[_CONTROL_GOTO];
-			widget->lasttext = gettextprop(
+			FREE(widget->gototext);
+			widget->gototext = gettextprop(
 				widget,
 				widget->window,
 				widget->atoms[_CONTROL_GOTO],
@@ -2441,27 +2440,6 @@ processevent(Widget *widget, XEvent *ev)
 done:
 	endevent(widget);
 	return WIDGET_INTERNAL;
-}
-
-static WidgetEvent
-checklastprop(Widget *widget, char **text)
-{
-	Atom prop;
-	char *str;
-
-	if (widget->lastprop != None) {
-		prop = widget->lastprop;
-		str = widget->lasttext;
-		widget->lastprop = None;
-		widget->lasttext = NULL;
-		if (prop == widget->atoms[_CONTROL_GOTO]) {
-			*text = str;
-			return WIDGET_GOTO;
-		} else {
-			FREE(str);
-		}
-	}
-	return WIDGET_NONE;
 }
 
 /*
@@ -2749,8 +2727,10 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 		default:
 			continue;
 		}
-		if ((state = checklastprop(widget, text)) != WIDGET_NONE)
-			return state;
+		if (widget->gototext != NULL) {
+			*text = widget->gototext;
+			return WIDGET_GOTO;
+		}
 		switch (ev.type) {
 		case KeyPress:
 			state = keypress(widget, &ev.xkey, selitems, nitems, text);
@@ -3394,8 +3374,7 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 		}
 	}
 	widget->start = true;
-	if ((retval = checklastprop(widget, text)) == WIDGET_NONE)
-		retval = mainmode(widget, selitems, nitems, text);
+	retval = mainmode(widget, selitems, nitems, text);
 	endevent(widget);
 	scrl->ydiff = widget->ydiff;
 	scrl->row = widget->row;
