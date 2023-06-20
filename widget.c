@@ -251,6 +251,7 @@ struct Widget {
 	const char **cliresources;
 
 	char *gototext;
+	char ksymbuf[KSYM_BUFSIZE];     /* buffer where the keysym passed to xfilesctl is held */
 
 	struct {
 		Pixmap pix;
@@ -1409,6 +1410,16 @@ disowndnd(Widget *widget)
 }
 
 static void
+releasednd(Widget *widget)
+{
+	if (widget->dropctx == NULL)
+		return;
+	FREE(widget->droptarget.buffer);
+	widget->droptarget.nitems = 0;
+	widget->droptarget.bufsize = 0;
+}
+
+static void
 ownprimary(Widget *widget, Time time)
 {
 	struct Selection *sel;
@@ -1485,6 +1496,7 @@ cleanwidget(Widget *widget)
 	FREE(widget->dndbuf);
 	disownprimary(widget);
 	disowndnd(widget);
+	releasednd(widget);
 	(void)XChangeProperty(
 		widget->display,
 		widget->window,
@@ -2341,8 +2353,7 @@ draw:
 		 * it however wants.
 		 */
 		kstr = XKeysymToString(ksym);
-		if ((*text = malloc(KSYM_BUFSIZE)) == NULL)
-			break;
+		*text = widget->ksymbuf;
 		shift = FLAG(xev->state, ShiftMask);
 		(void)snprintf(*text, KSYM_BUFSIZE, "^%s%s", shift ? "S-" : "", kstr);
 		*nitems = fillselitems(widget, selitems, -1);
@@ -3365,7 +3376,7 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 
 	*text = NULL;
 	*nitems = 0;
-	widget->droptarget.buffer = NULL;
+	releasednd(widget);
 	while (widget->start && XPending(widget->display) > 0) {
 		(void)XNextEvent(widget->display, &ev);
 		if (processevent(widget, &ev) == WIDGET_CLOSE) {

@@ -1031,9 +1031,7 @@ main(int argc, char *argv[])
 			}
 			break;
 		case WIDGET_GOTO:
-			path = text;
-			text = NULL;
-			if (changedir(&fm, path, true) == RETURN_FAILURE) {
+			if (changedir(&fm, text, true) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
@@ -1041,11 +1039,9 @@ main(int argc, char *argv[])
 		default:
 			break;
 		}
-		free(text);
 		text = NULL;
 	}
 done:
-	free(text);
 	closethumbthread(&fm);
 error:
 	freefm(&fm);
