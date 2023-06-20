@@ -1473,7 +1473,7 @@ cleanwidget(Widget *widget)
 	}
 	widget->sel = NULL;
 	widget->rectsel = NULL;
-	widget->gototext = NULL;
+	FREE(widget->gototext);
 	FREE(widget->thumbs);
 	FREE(widget->linelen);
 	FREE(widget->nlines);

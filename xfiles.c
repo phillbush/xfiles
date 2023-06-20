@@ -1031,7 +1031,9 @@ main(int argc, char *argv[])
 			}
 			break;
 		case WIDGET_GOTO:
-			if (changedir(&fm, text, true) == RETURN_FAILURE) {
+			path = text;
+			text = NULL;
+			if (changedir(&fm, path, true) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}
