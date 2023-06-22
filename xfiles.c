@@ -977,12 +977,6 @@ main(int argc, char *argv[])
 				goto done;
 			}
 			break;
-		case WIDGET_REFRESH:
-			if (changedir(&fm, fm.cwd->path, true) == RETURN_FAILURE) {
-				exitval = EXIT_FAILURE;
-				goto done;
-			}
-			break;
 		case WIDGET_OPEN:
 			if (nitems < 1)
 				break;

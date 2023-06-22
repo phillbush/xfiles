@@ -2729,10 +2729,8 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 		default:
 			break;
 		}
-		switch ((state = processevent(widget, &ev))) {
+		switch (processevent(widget, &ev)) {
 		case WIDGET_CLOSE:
-		case WIDGET_REFRESH:
-			return state;
 		case WIDGET_NONE:
 			break;
 		default:
@@ -3372,7 +3370,7 @@ WidgetEvent
 widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **text)
 {
 	XEvent ev;
-	int retval;
+	WidgetEvent retval;
 
 	*text = NULL;
 	*nitems = 0;
