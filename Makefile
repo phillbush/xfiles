@@ -2,8 +2,9 @@ PROG = xfiles
 OBJS = ${PROG:=.o} widget.o util.o icons.o ctrlsel.o ctrlfnt.o
 SRCS = ${OBJS:.o=.c}
 MAN  = ${PROG:=.1}
-SCRIPT1 = xfilesctl
-SCRIPT2 = xfilesthumb
+SCRIPTS = \
+	examples/xfilesctl \
+	examples/xfilesthumb
 WINICONS = \
 	icons/winicon16x16.abgr \
 	icons/winicon32x32.abgr \
@@ -93,6 +94,7 @@ tags: ${SRCS}
 # The source code is released after it has been linted.
 lint: ${SRCS} ${ICONS} ${WINICONS}
 	-@fgrep -e '	//' -e 'TODO' -e 'XXX' ${SRCS} || true
+	-shellcheck ${SCRIPTS}
 	-mandoc -T lint -W warning ${MAN} ctrlfnt.3 ctrlsel.3
 	-clang-tidy ${SRCS} -- -std=c99 ${DEFS} ${INCS} ${CPPFLAGS}
 
@@ -105,16 +107,8 @@ install: all
 	install -m 755 ${PROG} ${bindir}/${PROG}
 	install -m 644 ${MAN} ${mandir}/${MAN}
 
-install-script:
-	install -m 755 examples/${SCRIPT1} ${bindir}/${SCRIPT1}
-	install -m 755 examples/${SCRIPT2} ${bindir}/${SCRIPT2}
-
 uninstall:
 	-rm ${bindir}/${PROG}
 	-rm ${mandir}/${MAN}
-
-uninstall-script:
-	-rm ${bindir}/${SCRIPT1}
-	-rm ${bindir}/${SCRIPT2}
 
 .PHONY: all tags clean install uninstall lint
