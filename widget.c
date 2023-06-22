@@ -2731,6 +2731,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 		}
 		switch (processevent(widget, &ev)) {
 		case WIDGET_CLOSE:
+			return WIDGET_CLOSE;
 		case WIDGET_NONE:
 			break;
 		default:
