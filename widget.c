@@ -3391,6 +3391,28 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 	return retval;
 }
 
+WidgetEvent
+widget_wait(Widget *widget)
+{
+	XEvent ev;
+
+	while (XPending(widget->display) > 0) {
+		(void)XNextEvent(widget->display, &ev);
+		if (processevent(widget, &ev) == WIDGET_CLOSE) {
+			endevent(widget);
+			return WIDGET_CLOSE;
+		}
+	}
+	endevent(widget);
+	return WIDGET_NONE;
+}
+
+int
+widget_fd(Widget *widget)
+{
+	return widget->fd;
+}
+
 void
 widget_thumb(Widget *widget, char *path, int item)
 {

@@ -48,6 +48,10 @@ int widget_set(
 /* get value of icons resource into allocated string */
 char *widget_geticons(Widget *widget);
 
+WidgetEvent widget_wait(Widget *widget);
+
+int widget_fd(Widget *widget);
+
 void widget_map(Widget *widget);
 
 WidgetEvent widget_poll(Widget *widget, int *selitems, int *nselitems, Scroll *scrl, char **sel);
