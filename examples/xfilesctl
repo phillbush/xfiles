@@ -1,55 +1,183 @@
 #!/bin/sh
+# xfilesctl -- XFiles control script
+#
+# This file is called by xfiles(1) upon user interaction.
+#
+# When invoked, XFiles waits for this script to exit.  Therefore, if
+# this script does something that takes too much time to return, the
+# XFiles window will become unresponsive.
+#
+# If this script calls a program that may take some time, you should
+# do it asynchronously by ending the command with an ampersand (&).
 
+# set this to false to not open dialogs asking for confirmation
+ask=true
+
+# default paths
+TRASH="${TRASH:-"${XDG_DATA_HOME:-"$HOME/.local/share"}/Trash"}"
+
+# default commands
 PROMPTCMD="${PROMPTCMD:-"dmenu"}"
 MENUCMD="${MENUCMD:-"xmenu"}"
 TERMCMD="${TERMCMD:-"xterm"}"
 EDITOR="${EDITOR:-"${VISUAL:-"vi"}"}"
+OPENER="${OPENER:-"xdg-open"}"
 
+# print error message
+warn() {
+	printf '%s: %s\n' "${0##*/}" "$*" >&2
+}
+
+# print error message and exit
+err() {
+	warn "$@"
+	exit 1
+}
+
+# open xmenu (mouse-based menu) containing entries from stdin
+menu() {
+	command -- "$MENUCMD"
+}
+
+# open dmenu (keyboard-based menu) containing entries from stdin
+prompt() {
+	command -- "$PROMPTCMD" -w "$WINDOWID"
+}
+
+# open given files
+open() {
+	command -- "$OPENER" "$@" &
+}
+
+# open terminal window running given command
 term() {
-	"$TERMCMD" -e "$@"
+	command -- "$TERMCMD" "$@"
 }
 
+# open text editor on given file
+edit() {
+	term -e "$EDITOR" -- "$@"
+}
+
+# open dialog asking for confirmation ("$1" is the prompt, rest are filenames)
 dialog() {
-	term /bin/sh -c '
-		cmd="$1"
-		shift 1
+	"$ask" || return 0
+	prompt="$1"
+	shift 1
+	{
+		printf "%s\n" "$prompt"
 		printf "\t%s\n" "$@"
-		case "$cmd" in
-		("cp")
-			printf "Copy? [y/N] "
-			;;
-		("mv")
-			printf "Move? [y/N] "
-			;;
-		("ln")
-			printf "Link? [y/N] "
-			;;
-		("rm")
-			printf "Send to trash? [y/N] "
-			;;
-		esac
-		read -r arg
-		case "$arg" in
-		([Yy]*)      ;;
-		(*)     exit ;;
-		esac
-		case "$cmd" in
-		("cp")
-			cp -v "$@" .
-			;;
-		("mv")
-			mv -v "$@" .
-			;;
-		("ln")
-			ln -s "$@" .
-			;;
-		("rm")
-			trash "$@"
-			;;
-		esac
-	' xfilesctl "$@"
+	} | xmessage -buttons Yes:0,No:1 -nearmouse -file -
 }
 
+# copy files here if user confirms dialog
+copy() {
+	dialog "Copy files here?" "$@" && cp -v "$@" .
+}
+
+# move files here if user confirms dialog
+move() {
+	dialog "Move files here?" "$@" && mv -v "$@" .
+}
+
+# link files here if user confirms dialog
+link() {
+	dialog "Link files here?" "$@" && ln -s "$@" .
+}
+
+# send files to trash if user confirms dialog
+trash() {
+	case $# in (0) return ;; esac
+	dialog "Send files to trash?" "$@" || return
+	# shellcheck disable=SC2174
+	mkdir -m 700 -p -- "$TRASH/files" "$TRASH/info" || exit 1
+	for file
+	do
+		test -e "$file" || continue
+
+		# decompose file into basename, body and extension
+		basename="${file##*/}"
+		body="${basename%.*}"
+		ext="${basename##"$body"}"
+
+		# create unique target
+		unset -v i p
+		while test -e "$TRASH/files/$body$p$i$ext"
+		do
+			p="_"
+			if [ -z "$i" ]
+			then
+				i=1
+			else
+				i=$((i + 1))
+			fi
+		done
+		target="$body$p$i$ext"
+
+		# move file to trash and write trash information
+		mv -- "$file" "$TRASH/files/$target" && \
+		cat > "$TRASH/info/$target.trashinfo" <<-END
+			[Trash Info]
+			Path=$file
+			DeletionDate=$(date +"%FT%H:%M:%S")
+		END
+	done
+}
+
+# restore files from trash if user confirms dialog
+untrash() {
+	# compose dialog message
+	msg="Restore files from trash?"
+	for file
+	do
+		shift
+		basename="${file##*/}"
+		infofile="$TRASH/info/$basename.trashinfo"
+		origfile="$(sed -En '/^[[:blank:]]*Path[[:blank:]]*=/{s/.*=[[:blank:]]*//;p;q;}' < "$infofile")"
+		if test -e "$origfile"
+		then
+			warn "$basename: file already exists on original directory"
+		else
+			set -- "$file" "$origfile" "$infofile"
+			msg="$msg
+	$origfile"
+		fi
+	done
+
+	dialog "$msg" || return
+
+	while test $# -gt 0
+	do
+		file="$1"
+		origfile="$2"
+		infofile="$3"
+		shift 3
+		mv -- "$file" "$origfile" && rm -- "$infofile"
+	done
+}
+
+# rm file if user confirms dialog (if at trash, also remove info file)
+delete() {
+	dialog "Delete files permanently?" "$@" || return
+	rm -rf -- "$@"
+	case "$PWD" in
+	("$TRASH/files")
+		for file
+		do
+			rm -rf -- "$TRASH/info/${file##*/}.trashinfo"
+		done
+		;;
+	esac
+}
+
+# delete all files in trash can
+emptytrash() {
+	dialog "Empty trash?" || return
+	rm -rf "$TRASH/files/"*
+	rm -rf "$TRASH/info/"*
+}
+
+# save file paths into clipboard
 snarf() {
 	case "$#" in
 	(0)
@@ -62,6 +190,7 @@ snarf() {
 	xclip -selection clipboard -in -target "text/uri-list" &
 }
 
+# paste file whose paths are on clipboard
 paste() {
 	cmd="$1"
 	shift 1
@@ -81,84 +210,250 @@ paste() {
 				;;
 			esac
 		done
-		dialog "$cmd" "$@"
+		case "$cmd" in
+		("cp")
+			copy "$@"
+			;;
+		("mv")
+			move "$@"
+			;;
+		("ln")
+			link "$@"
+			;;
+		esac
 	}
 }
 
+# rename files in text editor
+rename() {
+	case "$#" in (0) return ;; esac
+
+	unset -v tempfile tempdir TMPDIR
+	trap '
+		test "$tempfile" && rm -f -- "$tempfile" 2>/dev/null
+		test "$tempdir" && rmdir -- "$tempdir" 2>/dev/null
+	' EXIT
+	tempfile="$(mktemp)" || exit 1
+	tempdir="$(mktemp -d -p "$PWD")" || exit 1
+
+	for file
+	do
+		file="${file#"$PWD/"}"
+		case "$file" in
+		("")
+			err "empty argument"
+			;;
+		(*[[:cntrl:]]*)
+			err "renaming files containing control characters is not supported"
+			;;
+		([[:space:]]*|*[[:space:]])
+			err "renaming files beginning or ending in space is not supported"
+			;;
+		esac
+		printf "%s\n" "$file" >> "$tempfile"
+	done
+
+	edit "$tempfile" || exit 1
+
+	mv -- "$@" "$tempdir" || exit 1
+	while read -r target
+	do
+		source="$tempdir/${1##*/}"
+		if test -z "$target"
+		then
+			trash "$source"
+		else
+			case "$target" in
+			(*/*)
+				mkdir -p "${target%/*}"
+				;;
+			esac
+			mv -- "$source" "$target"
+		fi
+		shift
+	done <"$tempfile"
+	{
+		mv -- "$tempdir/"* ./
+		rmdir -- "$tempdir"
+		rm -f -- "$tempfile"
+	} 2>/dev/null
+}
+
+# create directories named on text editor
+makedir() {
+	unset -v tempfile
+	trap 'test "$tempfile" && rm -f -- "$tempfile" 2>/dev/null' EXIT
+	tempfile="$(mktemp)" || exit 1
+	edit "$tempfile"
+	while read -r dir
+	do
+		mkdir -p "$dir"
+	done <"$tempfile"
+	rm "$tempfile"
+}
+
+# open random file in current directory
+random() {
+	set --
+	for file in *
+	do
+		test -f "$file" && set -- "$file" "$@"
+	done
+	case "$#" in
+	(0)
+		return
+		;;
+	(*)
+		shift "$(awk 'BEGIN{print int(ARGV[1]*rand())}' "$#")"
+		open "$1"
+		;;
+	esac
+}
+
+# change current directory of XFiles window
+changedir() {
+	xprop -id "$WINDOWID" -format "_CONTROL_GOTO" 8u -set "_CONTROL_GOTO" "$1"
+}
+
+# prompt for file to open or directory to go to
+urlbar() {
+	printf '%s\n' * | prompt | {
+		read -r entry
+		if test -d "$entry"
+		then
+			changedir "$entry"
+		else
+			open "$entry"
+		fi
+	}
+}
+
+# pop-up menu for file dropping
 dropmenu() {
-	case "$(
-	"$MENUCMD" <<-EOF
+	{
+		cat <<-EOF
 		copy
 		move
 		link
 		none
-	EOF
-	)" in
-	("copy")
-		dialog "cp" "$@"
-		;;
-	("move")
-		dialog "mv" "$@"
-		;;
-	("link")
-		dialog "ln" "$@"
-		;;
-	("term")
-		"$TERMCMD" &
-		;;
-	esac
+		EOF
+	} | menu | {
+		read -r option
+		case "$option" in
+		("copy")
+			copy "$@"
+			;;
+		("move")
+			move "$@"
+			;;
+		("link")
+			link "$@"
+			;;
+		("term")
+			term &
+			;;
+		esac
+	}
 }
 
+# context menu for no selection
 dirmenu() {
-	case "$(
-	"$MENUCMD" <<-EOF
-		copy
-		move
-		link
-		term
-	EOF
-	)" in
-	("copy")
-		paste "cp" "$@"
-		;;
-	("move")
-		paste "mv" "$@"
-		;;
-	("link")
-		paste "ln" "$@"
-		;;
-	("term")
-		"$TERMCMD" &
-		;;
-	esac
+	{
+		cat <<EOF
+paste
+	copy
+	move
+	link
+go up
+open
+	xfiles
+	term
+	random
+$(case "$PWD" in ("$TRASH/files") printf 'empty trash' ;; (*) printf 'trash can' ;; esac)
+EOF
+	} | menu | {
+		read -r option
+		case "$option" in
+		("go up")
+			changedir ".."
+			;;
+		("go home")
+			changedir "$HOME"
+			;;
+		("go prev")
+			changedir "-"
+			;;
+		("go next")
+			changedir "+"
+			;;
+		("copy")
+			paste "cp" "$@"
+			;;
+		("move")
+			paste "mv" "$@"
+			;;
+		("link")
+			paste "ln" "$@"
+			;;
+		("empty trash")
+			emptytrash
+			;;
+		("trash can")
+			changedir "$TRASH/files"
+			;;
+		("random")
+			random &
+			;;
+		("term")
+			term &
+			;;
+		("xfiles")
+			xfiles &
+			;;
+		esac
+	}
 }
 
+# context menu for selected files
 filemenu() {
-	case "$(
-	"$MENUCMD" <<-EOF
+	case "$PWD" in
+	("$TRASH/files")
+		cat <<-EOF
+		untrash
+		delete
+		EOF
+		;;
+	(*)
+		cat <<-EOF
 		rename
 		snarf
 		trash
 		edit
-	EOF
-	)" in
-	("rename")
-		term bulkrename "$@"
+		EOF
 		;;
-	("snarf")
-		snarf "$@"
-		;;
-	("trash")
-		dialog "rm" "$@"
-		;;
-	("edit")
-		"$TERMCMD" -e "$EDITOR" "$1" &
-		;;
-	esac
-}
-
-changedir() {
-	xprop -id "$WINDOWID" -format "_CONTROL_GOTO" 8u -set "_CONTROL_GOTO" "$1"
+	esac | menu | {
+		read -r option
+		case "$option" in
+		("rename")
+			rename "$@"
+			;;
+		("snarf")
+			snarf "$@"
+			;;
+		("delete")
+			delete "$@"
+			;;
+		("trash")
+			trash "$@"
+			;;
+		("untrash")
+			untrash "$@"
+			;;
+		("edit")
+			edit "$1" &
+			;;
+		esac
+	}
 }
 
 operation="$1"
@@ -167,37 +462,46 @@ case "$operation" in
 ("menu")
 	case "$#" in
 	(0)
+		# right click on empty area; create a menu
 		dirmenu "$@"
 		;;
 	(*)
+		# right click on files; create a menu
 		filemenu "$@"
 		;;
 	esac
 	;;
 ("drop-ask")
+	# droped something; create a menu
 	dropmenu "$@"
 	;;
 ("drop-copy")
-	dialog "cp" "$@"
+	# copy dropped files here
+	copy "$@"
 	;;
 ("drop-move")
-	dialog "mv" "$@"
+	# move dropped files here
+	move "$@"
 	;;
 ("drop-link")
-	dialog "ln" "$@"
+	# link dropped files here
+	link "$@"
 	;;
 (^BackSpace)
 	# go up
 	changedir ".."
+	;;
+(^F2)
+	# rename files on text editor
+	rename "$@"
 	;;
 (^F5|^[Rr])
 	# cd to where we are just to refresh
 	changedir "."
 	;;
 (^[LlGg])
-	# call dmenu to go somewhere
-	newdir="$("$PROMPTCMD" -w "$WINDOWID" </dev/null)" && \
-	changedir "$newdir"
+	# open URL bar to go somewhere or open something
+	urlbar
 	;;
 (^[Cc])
 	# snarf files
@@ -208,15 +512,15 @@ case "$operation" in
 	paste "cp"
 	;;
 (^Delete)
-	case "$#" in
-	(0)
-		# nothing to delete
+	case "$PWD" in
+	("$TRASH/files")
+		# delete files from trash
+		delete "$@"
 		;;
 	(*)
-		dialog "rm" "$@"
+		# send files to trash
+		trash "$@"
 		;;
 	esac
 	;;
 esac
-
-exit
