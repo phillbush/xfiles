@@ -9,6 +9,7 @@
 #include <limits.h>
 #include <pwd.h>
 #include <poll.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -56,6 +57,7 @@ struct Cwd {
 struct FM {
 	Widget *widget;
 	Item *entries;
+	jmp_buf jmpenv;
 	int widgetfd;           /* file descriptor for widget events */
 	int *selitems;          /* array of indices to selected items */
 	int capacity;           /* capacity of entries */
@@ -621,7 +623,7 @@ waitthread(void *arg)
 	pthread_exit(0);
 }
 
-static WidgetEvent
+static void
 runxfilesctl(struct FM *fm, char **argv, char *path)
 {
 	enum { FILE_WIDGET, FILE_CHILD };
@@ -663,7 +665,7 @@ runxfilesctl(struct FM *fm, char **argv, char *path)
 			break;
 		if (pollfds[FILE_CHILD].revents & POLLIN) {
 			if (read(pollfds[FILE_CHILD].fd, &byte, 1) != -1)
-				break;
+				goto done;
 			if (errno != EAGAIN)
 				err(EXIT_FAILURE, "read");
 			continue;
@@ -674,10 +676,14 @@ runxfilesctl(struct FM *fm, char **argv, char *path)
 			continue;
 		}
 	}
+	(void)pthread_kill(thrd, SIGTERM);
+done:
 	etjoin(thrd, NULL);
 	(void)close(pipefds[FILE_READ]);
 	(void)close(pipefds[FILE_WRITE]);
-	return retval;
+	if (retval == WIDGET_CLOSE) {
+		longjmp(fm->jmpenv, 1);
+	}
 }
 
 static void
@@ -1028,6 +1034,8 @@ main(int argc, char *argv[])
 	createthumbthread(&fm);
 	widget_map(fm.widget);
 	text = NULL;
+	if (setjmp(fm.jmpenv))
+		goto done;
 	while ((event = widget_poll(fm.widget, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
 		if (event == WIDGET_GOTO && strcmp(text, "-") == 0)
 			event = WIDGET_PREV;
