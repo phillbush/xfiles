@@ -9,6 +9,7 @@
 #include <limits.h>
 #include <pwd.h>
 #include <poll.h>
+#include <spawn.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
