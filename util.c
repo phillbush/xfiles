@@ -29,7 +29,7 @@ emalloc(size_t size)
 	void *p;
 
 	if ((p = malloc(size)) == NULL)
-		err(1, "malloc");
+		err(EXIT_FAILURE, "malloc");
 	return p;
 }
 
@@ -39,7 +39,7 @@ ecalloc(size_t nmemb, size_t size)
 	void *p;
 
 	if ((p = calloc(nmemb, size)) == NULL)
-		err(1, "calloc");
+		err(EXIT_FAILURE, "calloc");
 	return p;
 }
 
@@ -49,7 +49,7 @@ estrdup(const char *s)
 	char *t;
 
 	if ((t = strdup(s)) == NULL)
-		err(1, "strdup");
+		err(EXIT_FAILURE, "strdup");
 	return t;
 }
 
@@ -59,7 +59,7 @@ erealloc(void *ptr, size_t size)
 	void *p;
 
 	if ((p = realloc(ptr, size)) == NULL)
-		err(1, "realloc");
+		err(EXIT_FAILURE, "realloc");
 	return p;
 }
 
@@ -67,7 +67,7 @@ void
 egetcwd(char *path, size_t size)
 {
 	if (getcwd(path, size) == NULL) {
-		err(1, "getcwd");
+		err(EXIT_FAILURE, "getcwd");
 	}
 }
 
@@ -77,7 +77,7 @@ escandir(const char *dirname, struct dirent ***namelist, int (*select)(const str
 	int ret;
 
 	if ((ret = scandir(dirname, namelist, select, compar)) == -1)
-		err(1, "scandir");
+		err(EXIT_FAILURE, "scandir");
 	return ret;
 }
 
@@ -87,16 +87,15 @@ efork(void)
 	pid_t pid;
 
 	if ((pid = fork()) < 0)
-		err(1, "fork");
+		err(EXIT_FAILURE, "fork");
 	return pid;
 }
 
 void
 eexec(char *const argv[])
 {
-	if (execvp(argv[0], argv) == -1) {
-		err(1, "%s", argv[0]);
-	}
+	execvp(argv[0], argv);
+	err(EXIT_FAILURE, "%s", argv[0]);
 }
 
 void
@@ -106,7 +105,7 @@ etcreate(pthread_t *tid, void *(*thrfn)(void *), void *arg)
 
 	if ((errn = pthread_create(tid, NULL, thrfn, arg)) != 0) {
 		errno = errn;
-		err(1, "could not create thread");
+		err(EXIT_FAILURE, "could not create thread");
 	}
 }
 
@@ -117,7 +116,7 @@ etjoin(pthread_t tid, void **rval)
 
 	if ((errn = pthread_join(tid, rval)) != 0) {
 		errno = errn;
-		err(1, "could not join with thread");
+		err(EXIT_FAILURE, "could not join with thread");
 	}
 }
 
@@ -128,7 +127,7 @@ etlock(pthread_mutex_t *mutex)
 
 	if ((errn = pthread_mutex_lock(mutex)) != 0) {
 		errno = errn;
-		err(1, "could not lock mutex");
+		err(EXIT_FAILURE, "could not lock mutex");
 	}
 }
 
@@ -139,7 +138,7 @@ etunlock(pthread_mutex_t *mutex)
 
 	if ((errn = pthread_mutex_unlock(mutex)) != 0) {
 		errno = errn;
-		err(1, "could not unlock mutex");
+		err(EXIT_FAILURE, "could not unlock mutex");
 	}
 }
 
