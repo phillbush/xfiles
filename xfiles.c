@@ -9,7 +9,6 @@
 #include <limits.h>
 #include <pwd.h>
 #include <poll.h>
-#include <setjmp.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -38,11 +37,6 @@
 #define UNIT_LAST       7
 #define STATUS_BUFSIZE  1024
 
-struct Child {
-	pid_t   pid;
-	int     fd;
-};
-
 struct FileType {
 	char *patt, *name;
 };
@@ -57,7 +51,6 @@ struct Cwd {
 struct FM {
 	Widget *widget;
 	Item *entries;
-	jmp_buf jmpenv;
 	int widgetfd;           /* file descriptor for widget events */
 	int *selitems;          /* array of indices to selected items */
 	int capacity;           /* capacity of entries */
@@ -318,8 +311,8 @@ forkthumb(char *orig, char *thumb)
 
 	if ((pid = efork()) == 0) {
 		/* child */
-		xclose(STDOUT_FILENO);
-		xclose(STDIN_FILENO);
+		eclose(STDOUT_FILENO);
+		eclose(STDIN_FILENO);
 		eexec((char *[]){
 			THUMBNAILERCMD,
 			orig,
@@ -590,92 +583,81 @@ fileopen(struct FM *fm, char *path)
 	waitpid(pid, NULL, 0);
 }
 
-static void *
-waitthread(void *arg)
-{
-	struct Child *child = (struct Child *)arg;
-
-	while (waitpid(child->pid, NULL, 0) == -1)
-		if (errno != EINTR)
-			err(EXIT_FAILURE, "wait");
-	while (write(child->fd, (char []){0xFF}, 1) == -1)
-		if (errno != EAGAIN)
-			err(EXIT_FAILURE, "write");
-	pthread_exit(0);
-}
-
-static void
+static WidgetEvent
 runxfilesctl(struct FM *fm, char **argv, char *path)
 {
-	enum { FILE_WIDGET, FILE_CHILD };
-	enum { FILE_READ, FILE_WRITE };
-	struct Child child;
+	enum { FILE_WIDGET, FILE_CHILD };       /* indices for polling files */
+	enum { END_READ, END_WRITE };           /* indices for pipe ends */
 	struct pollfd pollfds[2];
-	pthread_t thrd;
 	int pipefds[2];
+	pid_t pid;
 	WidgetEvent retval = WIDGET_NONE;
-	unsigned char byte;
 
 	/*
-	 * Here we use a self-pipe to wait for a child process to
-	 * terminate while we handle events for the widget (like
-	 * responding to window resize or to the close button, etc).
+	 * We use a self-pipe to wait for xfilesctl to terminate while
+	 * we handle widget events (like responding to window resizing
+	 * or to activation of the close button, etc).
 	 *
-	 * The self-pipe is read and written by different threads.
-	 * The thread running waitthread() waits for the process and
-	 * writes to the pipe, while the main thread (running this
-	 * function) poll(2)s the pipe and the widget's connection.
+	 * The self-pipe is handled by two processes (parent and child).
+	 * The child spawns xfilesctl, waits for it to terminate, and
+	 * then closes write end of the pipe.  The parent process polls
+	 * both the widget socket and read end of the pipe.  When the
+	 * child exits, it closes the write end, making the read end
+	 * become widowed and deliver an EOF, at which point we know
+	 * that xfilesctl has terminated.
+	 *
+	 * Thanks @emanuele6 for this trick!
 	 */
 	if (pipe2(pipefds, O_NONBLOCK | O_CLOEXEC) == RETURN_FAILURE)
 		err(EXIT_FAILURE, "pipe2");
-	if ((child.pid = efork()) == 0) {
-		if (path != NULL && wchdir(path) == RETURN_FAILURE)
+	if ((pid = efork()) == 0) {
+		/* waiting child */
+		eclose(pipefds[END_READ]);
+		if ((pid = efork()) == 0) {
+			/* xfilesctl child */
+			if (path != NULL && wchdir(path) == RETURN_FAILURE)
+				exit(EXIT_FAILURE);
+			eexec(argv);
 			exit(EXIT_FAILURE);
-		eexec(argv);
-		exit(EXIT_FAILURE);
+		}
+		(void)ewaitpid(pid);
+		exit(EXIT_SUCCESS);
 	}
-	child.fd = pipefds[FILE_WRITE];
-	pollfds[FILE_CHILD].fd = pipefds[FILE_READ];
+	eclose(pipefds[END_WRITE]);
+	pollfds[FILE_CHILD].fd = pipefds[END_READ];
 	pollfds[FILE_WIDGET].fd = fm->widgetfd;
 	pollfds[FILE_WIDGET].events = pollfds[FILE_CHILD].events = POLLIN;
-	etcreate(&thrd, waitthread, &child);
-	while (poll(pollfds, 2, -1) != -1 || errno != EINTR) {
+	for (;;) {
+		if (poll(pollfds, LEN(pollfds), -1) == -1) {
+			if (errno == EINTR)
+				continue;
+			err(EXIT_FAILURE, "poll");
+		}
 		if (pollfds[FILE_WIDGET].revents & (POLLERR | POLLNVAL))
 			errx(EXIT_FAILURE, "%d: bad fd", pollfds[FILE_WIDGET].fd);
 		if (pollfds[FILE_CHILD].revents & (POLLERR | POLLNVAL))
 			errx(EXIT_FAILURE, "%d: bad fd", pollfds[FILE_CHILD].fd);
 		if (pollfds[FILE_WIDGET].revents & POLLHUP)
-			break;
+			pollfds[FILE_WIDGET].fd = -1;
 		if (pollfds[FILE_CHILD].revents & POLLHUP)
-			break;
-		if (pollfds[FILE_CHILD].revents & POLLIN) {
-			if (read(pollfds[FILE_CHILD].fd, &byte, 1) != -1)
-				goto done;
-			if (errno != EAGAIN)
-				err(EXIT_FAILURE, "read");
-			continue;
-		}
+			(void)ewaitpid(pid);
+			break;                  /* xfilesctl terminated */
 		if (pollfds[FILE_WIDGET].revents & POLLIN) {
-			if ((retval = widget_wait(fm->widget)) == WIDGET_CLOSE)
-				break;
-			continue;
+			if ((retval = widget_wait(fm->widget)) == WIDGET_CLOSE) {
+				break;          /* window closed */
+			}
 		}
 	}
-	(void)pthread_kill(thrd, SIGTERM);
-done:
-	etjoin(thrd, NULL);
-	xclose(pipefds[FILE_READ]);
-	xclose(pipefds[FILE_WRITE]);
-	if (retval == WIDGET_CLOSE) {
-		longjmp(fm->jmpenv, 1);
-	}
+	eclose(pipefds[END_READ]);
+	return retval;
 }
 
-static void
+static WidgetEvent
 runcontext(struct FM *fm, char *cmd, int nselitems)
 {
 	int i;
 	char **argv;
+	WidgetEvent retval;
 
 	argv = emalloc((nselitems + 3) * sizeof(*argv));
 	argv[0] = CONTEXTCMD;
@@ -683,16 +665,18 @@ runcontext(struct FM *fm, char *cmd, int nselitems)
 	for (i = 0; i < nselitems; i++)
 		argv[i+2] = fm->entries[fm->selitems[i]].fullname;
 	argv[i+2] = NULL;
-	runxfilesctl(fm, argv, NULL);
+	retval = runxfilesctl(fm, argv, NULL);
 	free(argv);
+	return retval;
 }
 
-static void
+static WidgetEvent
 runindrop(struct FM *fm, WidgetEvent event, int nitems)
 {
 	int i;
 	char **argv;
 	char *path;
+	WidgetEvent retval;
 
 	/*
 	 * Drag-and-drop in the same window.
@@ -702,7 +686,7 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 	 */
 	path = fm->entries[fm->selitems[0]].fullname;
 	if ((argv = malloc((nitems + 2) * sizeof(*argv))) == NULL)
-		return;
+		return WIDGET_NONE;
 	argv[0] = CONTEXTCMD;
 	switch (event) {
 	case WIDGET_DROPCOPY: argv[1] = DROPCOPY; break;
@@ -713,15 +697,17 @@ runindrop(struct FM *fm, WidgetEvent event, int nitems)
 	for (i = 1; i < nitems; i++)
 		argv[i + 1] = fm->entries[fm->selitems[i]].fullname;
 	argv[nitems + 1] = NULL;
-	runxfilesctl(fm, argv, path);
+	retval = runxfilesctl(fm, argv, path);
 	free(argv);
+	return retval;
 }
 
-static void
+static WidgetEvent
 runexdrop(struct FM *fm, WidgetEvent event, char *text, char *path)
 {
 	size_t capacity, argc, i, j;
 	char **argv, **p;
+	WidgetEvent retval;
 
 	/*
 	 * Drag-and-drop between different windows.
@@ -733,7 +719,7 @@ runexdrop(struct FM *fm, WidgetEvent event, char *text, char *path)
 	argc = 0;
 	capacity = INCRSIZE;
 	if ((argv = malloc(capacity * sizeof(*argv))) == NULL)
-		return;
+		return WIDGET_NONE;
 	argv[argc++] = CONTEXTCMD;
 	switch (event) {
 	case WIDGET_DROPCOPY: argv[argc++] = DROPCOPY; break;
@@ -748,8 +734,9 @@ runexdrop(struct FM *fm, WidgetEvent event, char *text, char *path)
 			capacity += INCRSIZE;
 			p = realloc(argv, capacity * sizeof(*argv));
 			if (p == NULL) {
+				warn("realloc");
 				free(argv);
-				return;
+				return WIDGET_NONE;
 			}
 			argv = p;
 		}
@@ -763,8 +750,9 @@ runexdrop(struct FM *fm, WidgetEvent event, char *text, char *path)
 		text[j] = '\0';
 	}
 	argv[argc++] = NULL;
-	runxfilesctl(fm, argv, path);
+	retval = runxfilesctl(fm, argv, path);
 	free(argv);
+	return retval;
 }
 
 static void
@@ -1019,8 +1007,6 @@ main(int argc, char *argv[])
 	createthumbthread(&fm);
 	widget_map(fm.widget);
 	text = NULL;
-	if (setjmp(fm.jmpenv))
-		goto done;
 	while ((event = widget_poll(fm.widget, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
 		if (event == WIDGET_GOTO && strcmp(text, "-") == 0)
 			event = WIDGET_PREV;
@@ -1032,7 +1018,8 @@ main(int argc, char *argv[])
 			goto done;
 			break;
 		case WIDGET_CONTEXT:
-			runcontext(&fm, MENU, nitems);
+			if (runcontext(&fm, MENU, nitems) == WIDGET_CLOSE)
+				goto done;
 			if (changedir(&fm, fm.cwd->path, false) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
@@ -1076,10 +1063,14 @@ main(int argc, char *argv[])
 					path = NULL;
 				else
 					path = fm.entries[fm.selitems[0]].fullname;
-				runexdrop(&fm, event, text, path);
+				if (runexdrop(&fm, event, text, path) == WIDGET_CLOSE) {
+					goto done;
+				}
 			} else if (nitems > 1 && isdir(&fm.entries[fm.selitems[0]])) {
 				/* drag-and-drop in the same window */
-				runindrop(&fm, event, nitems);
+				if (runindrop(&fm, event, nitems) == WIDGET_CLOSE) {
+					goto done;
+				}
 			}
 			if (changedir(&fm, fm.cwd->path, false) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
@@ -1091,7 +1082,8 @@ main(int argc, char *argv[])
 				hide = !hide;
 				force_refresh = true;
 			} else {
-				runcontext(&fm, text, nitems);
+				if (runcontext(&fm, text, nitems) == WIDGET_CLOSE)
+					goto done;
 				force_refresh = false;
 			}
 			if (changedir(&fm, fm.cwd->path, force_refresh) == RETURN_FAILURE) {

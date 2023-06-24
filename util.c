@@ -1,3 +1,5 @@
+#include <sys/wait.h>
+
 #include <err.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -142,8 +144,24 @@ etunlock(pthread_mutex_t *mutex)
 	}
 }
 
+int
+ewaitpid(pid_t pid)
+{
+	int status;
+
+	for (;;) {
+		if (waitpid(pid, &status, 0) == -1) {
+			if (errno != EINTR) {
+				err(EXIT_FAILURE, "waitpid");
+			}
+		} else if (!WIFSTOPPED(status)) {
+			return status;
+		}
+	}
+}
+
 void
-xclose(int fd)
+eclose(int fd)
 {
 	while (close(fd) == -1) {
 		if (errno != EINTR) {

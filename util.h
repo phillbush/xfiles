@@ -25,4 +25,5 @@ void etcreate(pthread_t *tid, void *(*thrfn)(void *), void *arg);
 void etjoin(pthread_t tid, void **rval);
 void etlock(pthread_mutex_t *mutex);
 void etunlock(pthread_mutex_t *mutex);
-void xclose(int fd);
+int ewaitpid(pid_t pid);
+void eclose(int fd);
