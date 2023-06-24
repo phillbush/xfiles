@@ -1,10 +1,10 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
-#include <fcntl.h>
-#include <fnmatch.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <fnmatch.h>
 #include <grp.h>
 #include <limits.h>
 #include <pwd.h>
@@ -316,7 +316,8 @@ forkthumb(char *orig, char *thumb)
 {
 	pid_t pid;
 
-	if ((pid = efork()) == 0) {     /* children */
+	if ((pid = efork()) == 0) {
+		/* child */
 		close(STDOUT_FILENO);
 		close(STDIN_FILENO);
 		eexec((char *[]){
@@ -574,14 +575,9 @@ static void
 fileopen(struct FM *fm, char *path)
 {
 	pid_t pid;
-	int fd;
 
 	if ((pid = efork()) == 0) {
 		if (efork() == 0) {
-			fd = open(DEV_NULL, O_RDWR);
-			(void)dup2(fd, STDIN_FILENO);
-			if (fd > 2)
-				(void)close(fd);
 			eexec((char *[]){
 				fm->opener,
 				path,
@@ -592,21 +588,6 @@ fileopen(struct FM *fm, char *path)
 		exit(EXIT_SUCCESS);
 	}
 	waitpid(pid, NULL, 0);
-}
-
-static void
-xexec(char *const argv[], char *path)
-{
-	int fd;
-
-	if (path != NULL && wchdir(path) == RETURN_FAILURE)
-		exit(EXIT_FAILURE);
-	fd = open(DEV_NULL, O_RDWR);
-	(void)dup2(fd, STDIN_FILENO);
-	if (fd > 2)
-		(void)close(fd);
-	eexec(argv);
-	exit(EXIT_FAILURE);
 }
 
 static void *
@@ -647,8 +628,12 @@ runxfilesctl(struct FM *fm, char **argv, char *path)
 	 */
 	if (pipe2(pipefds, O_NONBLOCK | O_CLOEXEC) == RETURN_FAILURE)
 		err(EXIT_FAILURE, "pipe2");
-	if ((child.pid = efork()) == 0)
-		xexec(argv, path);
+	if ((child.pid = efork()) == 0) {
+		if (path != NULL && wchdir(path) == RETURN_FAILURE)
+			exit(EXIT_FAILURE);
+		eexec(argv);
+		exit(EXIT_FAILURE);
+	}
 	child.fd = pipefds[FILE_WRITE];
 	pollfds[FILE_CHILD].fd = pipefds[FILE_READ];
 	pollfds[FILE_WIDGET].fd = fm->widgetfd;
