@@ -639,9 +639,10 @@ runxfilesctl(struct FM *fm, char **argv, char *path)
 			errx(EXIT_FAILURE, "%d: bad fd", pollfds[FILE_CHILD].fd);
 		if (pollfds[FILE_WIDGET].revents & POLLHUP)
 			pollfds[FILE_WIDGET].fd = -1;
-		if (pollfds[FILE_CHILD].revents & POLLHUP)
+		if (pollfds[FILE_CHILD].revents & POLLHUP) {
 			(void)ewaitpid(pid);
 			break;                  /* xfilesctl terminated */
+		}
 		if (pollfds[FILE_WIDGET].revents & POLLIN) {
 			if ((retval = widget_wait(fm->widget)) == WIDGET_CLOSE) {
 				break;          /* window closed */
