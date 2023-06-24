@@ -318,8 +318,8 @@ forkthumb(char *orig, char *thumb)
 
 	if ((pid = efork()) == 0) {
 		/* child */
-		close(STDOUT_FILENO);
-		close(STDIN_FILENO);
+		xclose(STDOUT_FILENO);
+		xclose(STDIN_FILENO);
 		eexec((char *[]){
 			THUMBNAILERCMD,
 			orig,
@@ -664,8 +664,8 @@ runxfilesctl(struct FM *fm, char **argv, char *path)
 	(void)pthread_kill(thrd, SIGTERM);
 done:
 	etjoin(thrd, NULL);
-	(void)close(pipefds[FILE_READ]);
-	(void)close(pipefds[FILE_WRITE]);
+	xclose(pipefds[FILE_READ]);
+	xclose(pipefds[FILE_WRITE]);
 	if (retval == WIDGET_CLOSE) {
 		longjmp(fm->jmpenv, 1);
 	}

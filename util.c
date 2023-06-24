@@ -142,3 +142,13 @@ etunlock(pthread_mutex_t *mutex)
 		err(1, "could not unlock mutex");
 	}
 }
+
+void
+xclose(int fd)
+{
+	while (close(fd) == -1) {
+		if (errno != EINTR) {
+			err(EXIT_FAILURE, "close");
+		}
+	}
+}
