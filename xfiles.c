@@ -608,18 +608,15 @@ runxfilesctl(struct FM *fm, char **argv, char *path)
 	 *
 	 * Thanks @emanuele6 for this trick!
 	 */
-	if (pipe2(pipefds, O_NONBLOCK | O_CLOEXEC) == RETURN_FAILURE)
+	if (pipe2(pipefds, O_CLOEXEC) == RETURN_FAILURE)
 		err(EXIT_FAILURE, "pipe2");
 	if ((pid = efork()) == 0) {
 		/* waiting child */
 		eclose(pipefds[END_READ]);
-		if ((pid = efork()) == 0) {
-			/* xfilesctl child */
-			if (path != NULL && wchdir(path) == RETURN_FAILURE)
-				exit(EXIT_FAILURE);
-			eexec(argv);
-			exit(EXIT_FAILURE);
-		}
+		if (path != NULL)
+			wchdir(path);
+		if (posix_spawnp(&pid, argv[0], NULL, NULL, argv, NULL) != 0)
+			err(EXIT_FAILURE, "posix_spawnp");
 		(void)ewaitpid(pid);
 		exit(EXIT_SUCCESS);
 	}
