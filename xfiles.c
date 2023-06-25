@@ -593,6 +593,7 @@ runxfilesctl(struct FM *fm, char **argv, char *path)
 	int pipefds[2];
 	pid_t pid;
 	WidgetEvent retval = WIDGET_NONE;
+	extern char **environ;
 
 	/*
 	 * We use a self-pipe to wait for xfilesctl to terminate while
@@ -616,7 +617,7 @@ runxfilesctl(struct FM *fm, char **argv, char *path)
 		eclose(pipefds[END_READ]);
 		if (path != NULL)
 			wchdir(path);
-		if (posix_spawnp(&pid, argv[0], NULL, NULL, argv, NULL) != 0)
+		if (posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ) != 0)
 			err(EXIT_FAILURE, "posix_spawnp");
 		(void)ewaitpid(pid);
 		exit(EXIT_SUCCESS);
