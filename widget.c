@@ -1943,7 +1943,7 @@ fillselitems(Widget *widget, int *selitems, int firstitem)
 	int nitems;
 
 	nitems = 0;
-	if (firstitem > 0)
+	if (firstitem != -1)
 		selitems[nitems++] = firstitem;
 	for (sel = widget->sel; sel != NULL; sel = sel->next) {
 		if (sel->index == firstitem)
