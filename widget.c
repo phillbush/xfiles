@@ -1937,16 +1937,16 @@ pixmapfromdata(Widget *widget, char **data, Pixmap *pix, Pixmap *mask)
 }
 
 static int
-fillselitems(Widget *widget, int *selitems, int clicked)
+fillselitems(Widget *widget, int *selitems, int firstitem)
 {
 	struct Selection *sel;
 	int nitems;
 
 	nitems = 0;
-	if (clicked != -1)
-		selitems[nitems++] = clicked;
+	if (firstitem > 0)
+		selitems[nitems++] = firstitem;
 	for (sel = widget->sel; sel != NULL; sel = sel->next) {
-		if (sel->index == clicked)
+		if (sel->index == firstitem)
 			continue;
 		selitems[nitems++] = sel->index;
 	}
@@ -2356,7 +2356,10 @@ draw:
 		*text = widget->ksymbuf;
 		shift = FLAG(xev->state, ShiftMask);
 		(void)snprintf(*text, KSYM_BUFSIZE, "^%s%s", shift ? "S-" : "", kstr);
-		*nitems = fillselitems(widget, selitems, -1);
+		if (widget->sel == NULL)
+			*nitems = fillselitems(widget, selitems, widget->highlight);
+		else
+			*nitems = fillselitems(widget, selitems, -1);
 		return WIDGET_KEYPRESS;
 	}
 	return WIDGET_NONE;
