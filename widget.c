@@ -3278,14 +3278,18 @@ widget_set(Widget *widget, const char *title, Item items[], size_t nitems, Scrol
 	widget->items = items;
 	widget->nitems = nitems;
 	if (scrl == NULL) {
+		widget->highlight = -1;
 		widget->ydiff = 0;
 		widget->row = 0;
 	} else {
+		if (scrl->highlight < widget->nitems)
+			widget->highlight = scrl->highlight;
+		else
+			widget->highlight = -1;
 		widget->ydiff = scrl->ydiff;
 		widget->row = scrl->row;
 	}
 	widget->title = title;
-	widget->highlight = -1;
 	(void)calcsize(widget, -1, -1);
 	if (scrl != NULL && widget->row >= widget->nscreens) {
 		widget->ydiff = 0;
@@ -3388,6 +3392,7 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 	endevent(widget);
 	scrl->ydiff = widget->ydiff;
 	scrl->row = widget->row;
+	scrl->highlight = widget->highlight;
 	return retval;
 }
 

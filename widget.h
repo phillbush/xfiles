@@ -1,6 +1,7 @@
 typedef struct Scroll {
 	/* scroll position */
 	int row, ydiff;
+	int highlight;
 } Scroll;
 
 typedef struct Item {

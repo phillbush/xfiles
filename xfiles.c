@@ -44,9 +44,9 @@ struct FileType {
 
 struct Cwd {
 	struct Cwd *prev, *next;
-	Scroll state;
-	char *path;
-	char *here;
+	Scroll scrl;            /* scrolling position on this directory */
+	char *path;             /* absolute path */
+	char *here;             /* display path (~/foo rather than /home/user/foo) */
 };
 
 struct FM {
@@ -842,7 +842,7 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 	fm->cwd->path = cwd.path;
 	fm->cwd->here = cwd.here;
 	fm->last = fm->cwd;
-	scrl = keepscroll ? &fm->cwd->state : NULL;
+	scrl = keepscroll ? &fm->cwd->scrl : NULL;
 	if (widget_set(fm->widget, fm->cwd->here, fm->entries, fm->nentries, scrl) == RETURN_FAILURE)
 		retval = RETURN_FAILURE;
 done:
@@ -1006,7 +1006,7 @@ main(int argc, char *argv[])
 	createthumbthread(&fm);
 	widget_map(fm.widget);
 	text = NULL;
-	while ((event = widget_poll(fm.widget, fm.selitems, &nitems, &fm.cwd->state, &text)) != WIDGET_CLOSE) {
+	while ((event = widget_poll(fm.widget, fm.selitems, &nitems, &fm.cwd->scrl, &text)) != WIDGET_CLOSE) {
 		if (event == WIDGET_GOTO && strcmp(text, "-") == 0)
 			event = WIDGET_PREV;
 		else if (event == WIDGET_GOTO && strcmp(text, "+") == 0)
