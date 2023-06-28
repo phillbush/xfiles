@@ -57,13 +57,9 @@
 	X(NORMAL_FG, "Foreground",       "foreground")        \
 	X(SELECT_BG, "ActiveBackground", "activeBackground")  \
 	X(SELECT_FG, "ActiveForeground", "activeForeground")  \
-	X(STATUSBAR, "StatusBarEnable",  "statusBarEnable")     \
-	X(BARSTATUS, "EnableStatusBar",  "enableStatusBar")     \
+	X(STATUSBAR, "StatusBarEnable",  "statusBarEnable")   \
+	X(BARSTATUS, "EnableStatusBar",  "enableStatusBar")   \
 	X(OPACITY,   "Opacity",          "opacity")
-
-#define EVENT_MASK      (StructureNotifyMask | PropertyChangeMask | KeyPressMask |\
-                         PointerMotionMask | ButtonReleaseMask | ButtonPressMask)
-#define WINDOW_MASK     (CWBackPixel | CWEventMask | CWColormap | CWBorderPixel)
 
 #define DEF_COLOR_BG    (XRenderColor){ .red = 0x0000, .green = 0x0000, .blue = 0x0000, .alpha = 0xFFFF }
 #define DEF_COLOR_FG    (XRenderColor){ .red = 0xFFFF, .green = 0xFFFF, .blue = 0xFFFF, .alpha = 0xFFFF }
@@ -227,7 +223,7 @@ struct Widget {
 	Atom atoms[NATOMS];
 	GC gc;
 	Cursor busycursor;
-	Window window, root;
+	Window window, root, child;
 	struct {
 		XRenderColor chans;
 		Pixmap pix;
@@ -730,6 +726,20 @@ loadresources(Widget *widget, const char *str)
 	XrmDestroyDatabase(xdb);
 }
 
+static void
+resizechild(Widget *widget)
+{
+	if (widget->child == None)
+		return;
+	XMoveResizeWindow(
+		widget->display,
+		widget->child,
+		0, 0,
+		widget->winw,
+		widget->winh
+	);
+}
+
 static int
 calcsize(Widget *widget, int w, int h)
 {
@@ -774,6 +784,7 @@ calcsize(Widget *widget, int w, int h)
 	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
 	resetlayer(widget, LAYER_STATUSBAR, widget->winw, STATUSBAR_HEIGHT(widget));
 	resetlayer(widget, LAYER_CANVAS, widget->winw, widget->winh);
+	resizechild(widget);
 	etunlock(&widget->lock);
 	return ret;
 }
@@ -2156,7 +2167,7 @@ createwindow(Widget *widget, Window parent, XRectangle rect, long eventmask)
 		widget->depth,
 		InputOutput,
 		widget->visual,
-		WINDOW_MASK,
+		CWBackPixel | CWEventMask | CWColormap | CWBorderPixel,
 		&(XSetWindowAttributes){
 			.border_pixel = 0,
 			.background_pixel = 0,
@@ -2196,6 +2207,22 @@ setwinicon(Widget *widget)
 			win_icons[i].size * win_icons[i].size
 		);
 	}
+}
+
+static void
+embedwindow(Widget *widget, Window window)
+{
+	XWindowAttributes wa;
+
+	if (window != None) {
+		if (window == widget->window)
+			return;
+		if (!XGetWindowAttributes(widget->display, window, &wa))
+			return;
+		if (wa.override_redirect)
+			return;
+	}
+	widget->child = window;
 }
 
 /*
@@ -2407,12 +2434,50 @@ processevent(Widget *widget, XEvent *ev)
 	}
 	widget->redraw = false;
 	switch (ev->type) {
+	case ReparentNotify:
+		embedwindow(widget, ev->xreparent.window);
+		break;
+	case FocusIn:
+		if (widget->child == None)
+			break;
+		XSetInputFocus(
+			widget->display,
+			widget->child,
+			RevertToParent,
+			CurrentTime
+		);
+		break;
+	case MapNotify:
+		if (ev->xmap.window != widget->child)
+			break;
+		resizechild(widget);
+		XSetInputFocus(
+			widget->display,
+			widget->child,
+			RevertToParent,
+			CurrentTime
+		);
+		break;
+	case UnmapNotify:
+		if (ev->xunmap.window != widget->child)
+			break;
+		embedwindow(widget, None);
+		break;
+	case DestroyNotify:
+		if (ev->xdestroywindow.window != widget->child)
+			break;
+		embedwindow(widget, None);
+		break;
 	case ClientMessage:
+		if (ev->xclient.window != widget->window)
+			break;
 		if (ev->xclient.message_type == widget->atoms[WM_PROTOCOLS] &&
 		    (Atom)ev->xclient.data.l[0] == widget->atoms[WM_DELETE_WINDOW])
 			return WIDGET_CLOSE;
 		return WIDGET_NONE;
 	case ConfigureNotify:
+		if (ev->xconfigure.window != widget->window)
+			break;
 		if (calcsize(widget, ev->xconfigure.width, ev->xconfigure.height)) {
 			if (widget->row >= widget->nscreens)
 				setrow(widget, widget->nscreens - 1);
@@ -2746,6 +2811,8 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 		}
 		switch (ev.type) {
 		case KeyPress:
+			if (ev.xkey.window != widget->window)
+				break;
 			state = keypress(widget, &ev.xkey, selitems, nitems, text);
 			if (state != WIDGET_NONE)
 				return state;
@@ -2945,7 +3012,10 @@ initwindow(Widget *widget, struct Options *options)
 		widget,
 		widget->root,
 		geometry,
-		EVENT_MASK
+		StructureNotifyMask | SubstructureNotifyMask |
+		PropertyChangeMask | FocusChangeMask |
+		KeyPressMask | KeyReleaseMask |
+		PointerMotionMask | ButtonReleaseMask | ButtonPressMask
 	);
 	if (widget->window == None) {
 		warnx("could not create window");
