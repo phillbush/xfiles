@@ -45,7 +45,7 @@ err() {
 
 # open text editor on given file
 edit() {
-	exec xterm -into "$WINDOWID" -bw 0 -e "$EDITCMD" -- "$@"
+	exec xterm -into "$WINDOWID" -bw 0 -e "$EDITOR" -- "$@"
 }
 
 # open mouse-based menu containing entries from stdin
