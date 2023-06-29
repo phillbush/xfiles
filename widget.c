@@ -2274,8 +2274,13 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 		break;
 	case XK_Prior:
 	case XK_Next:
-		if (scroll(widget, (ksym == XK_Prior ? -1 : 1) * PAGE_STEP(widget)))
+		if (scroll(widget, (ksym == XK_Prior ? -1 : 1) * PAGE_STEP(widget))) {
+			index = widget->row * widget->ncols;
+			if (widget->ydiff != 0 && index + 1 < widget->nitems)
+				index += widget->ncols;
+			highlight(widget, index, false);
 			drawitems(widget);
+		}
 		break;
 	case XK_Home:
 	case XK_End:
