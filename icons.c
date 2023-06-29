@@ -7,6 +7,7 @@
 /* icons for files */
 #include "icons/file-app.xpm"
 #include "icons/file-archive.xpm"
+#include "icons/file-broken.xpm"
 #include "icons/file-audio.xpm"
 #include "icons/file-code.xpm"
 #include "icons/file-core.xpm"
@@ -75,58 +76,63 @@
 	X(trash_dir,            folder_trash_xpm    )\
 	X(videos_dir,           folder_video_xpm    )\
 	X(link_dir,             folder_link_xpm     )\
+	X(link_broken,          file_broken_xpm     )\
 	X(dir,                  folder_xpm          )\
 	X(file,                 file_xpm            )
 
-#define PATTERNS                           \
-	X("..",           up_dir          )\
-	X("*.zip",        archive         )\
-	X("*.tar",        archive         )\
-	X("*.gz",         archive         )\
-	X("*.bz2",        archive         )\
-	X("*.rar",        archive         )\
-	X("*.mp[23]",     audio           )\
-	X("*.m4a",        audio           )\
-	X("*m3u",         audio           )\
-	X("*.ogg",        audio           )\
-	X("*.opus",       audio           )\
-	X("*.flac",       audio           )\
-	X("*.core",       core            )\
-	X("*.xbm",        image           )\
-	X("*.xpm",        image           )\
-	X("*.p[bgp]m",    image           )\
-	X("*.png",        image           )\
-	X("*.bmp",        image           )\
-	X("*.gif",        image           )\
-	X("*.tiff",       image           )\
-	X("*.jpeg",       image           )\
-	X("*.jpg",        image           )\
-	X("*.gif",        image           )\
-	X("*.svg",        image           )\
-	X("*.[1-9]",      info            )\
-	X("README",       info            )\
-	X("README.md",    info            )\
-	X("COPYING",      info            )\
-	X("LICENSE",      info            )\
-	X("COPYRIGHT",    info            )\
-	X("[Mm]akefile",  makefile        )\
-	X("configure",    makefile        )\
-	X("configure",    makefile        )\
-	X("*.pdf",        document        )\
-	X("*.epub",       document        )\
-	X("*.txt",        document        )\
-	X("*.ps",         document        )\
-	X("*.eps",        document        )\
-	X("*.djvu",       document        )\
-	X("*.o",          object          )\
-	X("*.so",         object          )\
-	X("*.a",          object          )\
-	X("*.mp4",        video           )\
-	X("*.webm",       video           )\
-	X("*.mkv",        video           )\
-	X("*.mov",        video           )\
-	X("*.ogv",        video           )\
-	X("~/",           home_dir        )
+#define PATTERNS                                                 \
+	X("..",           up_dir,       MODE_DIR                )\
+	X("*.zip",        archive,      MODE_FILE               )\
+	X("*.tar",        archive,      MODE_FILE               )\
+	X("*.gz",         archive,      MODE_FILE               )\
+	X("*.bz2",        archive,      MODE_FILE               )\
+	X("*.rar",        archive,      MODE_FILE               )\
+	X("*.mp[23]",     audio,        MODE_FILE               )\
+	X("*.m4a",        audio,        MODE_FILE               )\
+	X("*m3u",         audio,        MODE_FILE               )\
+	X("*.ogg",        audio,        MODE_FILE               )\
+	X("*.opus",       audio,        MODE_FILE               )\
+	X("*.flac",       audio,        MODE_FILE               )\
+	X("*.core",       core,         MODE_FILE               )\
+	X("*.xbm",        image,        MODE_FILE               )\
+	X("*.xpm",        image,        MODE_FILE               )\
+	X("*.p[bgp]m",    image,        MODE_FILE               )\
+	X("*.png",        image,        MODE_FILE               )\
+	X("*.bmp",        image,        MODE_FILE               )\
+	X("*.gif",        image,        MODE_FILE               )\
+	X("*.tiff",       image,        MODE_FILE               )\
+	X("*.jpeg",       image,        MODE_FILE               )\
+	X("*.jpg",        image,        MODE_FILE               )\
+	X("*.gif",        image,        MODE_FILE               )\
+	X("*.svg",        image,        MODE_FILE               )\
+	X("*.[1-9]",      info,         MODE_FILE               )\
+	X("README",       info,         MODE_FILE               )\
+	X("README.md",    info,         MODE_FILE               )\
+	X("COPYING",      info,         MODE_FILE               )\
+	X("LICENSE",      info,         MODE_FILE               )\
+	X("COPYRIGHT",    info,         MODE_FILE               )\
+	X("[Mm]akefile",  makefile,     MODE_FILE               )\
+	X("configure",    makefile,     MODE_FILE               )\
+	X("configure",    makefile,     MODE_FILE               )\
+	X("*.pdf",        document,     MODE_FILE               )\
+	X("*.epub",       document,     MODE_FILE               )\
+	X("*.txt",        document,     MODE_FILE               )\
+	X("*.ps",         document,     MODE_FILE               )\
+	X("*.eps",        document,     MODE_FILE               )\
+	X("*.djvu",       document,     MODE_FILE               )\
+	X("*.o",          object,       MODE_FILE               )\
+	X("*.so",         object,       MODE_FILE               )\
+	X("*.a",          object,       MODE_FILE               )\
+	X("*.mp4",        video,        MODE_FILE               )\
+	X("*.webm",       video,        MODE_FILE               )\
+	X("*.mkv",        video,        MODE_FILE               )\
+	X("*.mov",        video,        MODE_FILE               )\
+	X("*.ogv",        video,        MODE_FILE               )\
+	X("*.ogv",        video,        MODE_FILE               )\
+	X("*",            executable,   MODE_FILE|MODE_EXEC     )\
+	X("*",            link_dir,     MODE_DIR|MODE_LINK      )\
+	X("*",            link_broken,  MODE_BROK|MODE_LINK     )\
+	X("~",            home_dir,     MODE_DIR                )
 
 #define WINICONS                       \
 	X(16,             winicon16x16)\
@@ -148,7 +154,7 @@ struct IconType icon_types[NTYPES] = {
 };
 
 struct IconPatt icon_patts[] = {
-#define X(p, i) { .patt = p, .index = i },
+#define X(p, i, m) { .patt = p, .index = i, .mode = m },
 	PATTERNS
 #undef  X
 };

@@ -138,13 +138,13 @@ freeentries(struct FM *fm)
 }
 
 static char *
-fullpath(char *dir, char *file, int isdir)
+fullpath(char *dir, char *file)
 {
 	char buf[PATH_MAX];
 
 	if (strcmp(dir, "/") == 0)
 		dir = "";
-	(void)snprintf(buf, sizeof(buf), "%s/%s%c", dir, file, isdir ? '/' : '\0');
+	(void)snprintf(buf, sizeof(buf), "%s/%s", dir, file);
 	return estrdup(buf);
 }
 
@@ -241,10 +241,7 @@ done:
 static int
 isdir(Item *entry)
 {
-	char *s;
-
-	s = strrchr(entry->fullname, '/');
-	return s != NULL && s[1] == '\0';
+	return (entry->mode & MODE_MASK) == MODE_DIR;
 }
 
 static int
@@ -334,33 +331,37 @@ timespeclt(struct timespec *tsp, struct timespec *usp)
 }
 
 static bool
-checkicon(struct FM *fm, Item *entry, char *patt)
+checkicon(struct FM *fm, Item *entry, struct IconPatt *icon)
 {
 	int flags;
-	char *s;
+	char *s, *t;
 
-	if (patt == NULL)
+	t = icon->patt;
+	if (t == NULL)
 		return false;
-	if (patt[0] == '~' || strchr(patt, '/') != NULL) {
-		flags = FNM_CASEFOLD | FNM_PATHNAME | FNM_LEADING_DIR;
+	if (t[0] == '~' || strchr(t, '/') != NULL) {
+		flags = FNM_CASEFOLD | FNM_PATHNAME;
 		s = entry->fullname;
-	} else if (isdir(entry)) {
-		return false;
 	} else {
 		flags = FNM_CASEFOLD;
 		s = entry->name;
 	}
 	if (s == NULL)
 		return false;
-	if (patt[0] == '~') {
+	if (t[0] == '~') {
 		if (strncmp(fm->home, s, fm->homelen) != 0)
 			return false;
-		patt++;
+		t++;
 		s += fm->homelen;
 	}
-	if (s != NULL && fnmatch(patt, s, flags) == 0)
-		return true;
-	return false;
+	return s != NULL &&
+		((icon->mode & MODE_MASK) == MODE_ANY ||
+		(icon->mode & MODE_MASK) == (entry->mode & MODE_MASK)) &&
+		(!(icon->mode & MODE_LINK) || (entry->mode & MODE_LINK)) &&
+		(!(icon->mode & MODE_EXEC) || (entry->mode & MODE_EXEC)) &&
+		(!(icon->mode & MODE_READ) || (entry->mode & MODE_READ)) &&
+		(!(icon->mode & MODE_WRITE) || (entry->mode & MODE_WRITE)) &&
+		fnmatch(t, s, flags) == 0;
 }
 
 static size_t
@@ -373,11 +374,11 @@ geticon(struct FM *fm, Item *entry)
 		return icon_for_updir;
 	/* first check user-defined matches */
 	for (i = 0; i < fm->nuserpatts; i++)
-		if (checkicon(fm, entry, fm->userpatts[i].patt))
+		if (checkicon(fm, entry, &fm->userpatts[i]))
 			return fm->userpatts[i].index;
 	/* then check hardcoded icon matches */
 	for (i = 0; i < nicon_patts; i++)
-		if (checkicon(fm, entry, icon_patts[i].patt))
+		if (checkicon(fm, entry, &icon_patts[i]))
 			return icon_patts[i].index;
 	/* just return directory or regular file then */
 	if (isdir(entry))
@@ -454,12 +455,62 @@ createthumbthread(struct FM *fm)
 	etcreate(&fm->thumbthread, thumbnailer, (void *)fm);
 }
 
+static unsigned char
+filemode(struct FM *fm, struct stat *sb, char *name)
+{
+	bool ismember;
+	struct stat lsb;
+	size_t perm_off;
+	unsigned char mask, type;
+	int i;
+
+	type = MODE_FILE;
+	mask = 0x00;
+	if (S_ISLNK(sb->st_mode)) {
+		mask |= MODE_LINK;
+		if (stat(name, &lsb) == -1) {
+			type = MODE_BROK;
+			goto done;
+		}
+		sb = &lsb;
+	}
+	switch (sb->st_mode & S_IFMT) {
+	case S_IFBLK:   type = MODE_DEV;     break;
+	case S_IFCHR:   type = MODE_DEV;     break;
+	case S_IFDIR:   type = MODE_DIR;     break;
+	case S_IFIFO:   type = MODE_FIFO;    break;
+	case S_IFSOCK:  type = MODE_SOCK;    break;
+	default:        type = MODE_FILE;    break;
+	}
+done:
+	ismember = false;
+	for (i = 0; i < fm->ngrps; i++) {
+		if (fm->grps[i] == sb->st_gid) {
+			ismember = true;
+			break;
+		}
+	}
+	if (sb->st_uid == fm->uid)
+		perm_off = 0;
+	else if (sb->st_gid == fm->gid || ismember)
+		perm_off = 3;
+	else
+		perm_off = 6;
+	if (sb->st_mode & (S_IRUSR >> perm_off))
+		mask |= MODE_READ;
+	if (sb->st_mode & (S_IWUSR >> perm_off))
+		mask |= MODE_WRITE;
+	if (sb->st_mode & (S_IXUSR >> perm_off))
+		mask |= MODE_EXEC;
+	return type | mask;
+}
+
 static int
 diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 {
 	struct dirent **array;
 	struct stat sb;
-	int isdir, i;
+	int i;
 	char buf[PATH_MAX];
 
 	if (path != NULL && wchdir(path) == RETURN_FAILURE)
@@ -479,16 +530,16 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 		fm->capacity = fm->nentries;
 	}
 	for (i = 0; i < fm->nentries; i++) {
-		isdir = false;
-		if (stat(array[i]->d_name, &sb) == -1) {
+		if (lstat(array[i]->d_name, &sb) == -1) {
 			warn("%s", array[i]->d_name);
 			fm->entries[i].status = NULL;
+			fm->entries[i].mode = 0;
 		} else {
-			isdir = S_ISDIR(sb.st_mode);
 			fm->entries[i].status = statusfmt(&sb);
+			fm->entries[i].mode = filemode(fm, &sb, array[i]->d_name);
 		}
 		fm->entries[i].name = estrdup(array[i]->d_name);
-		fm->entries[i].fullname = fullpath(cwd->path, array[i]->d_name, isdir);
+		fm->entries[i].fullname = fullpath(cwd->path, array[i]->d_name);
 		fm->entries[i].icon = geticon(fm, &fm->entries[i]);
 		free(array[i]);
 	}
@@ -855,7 +906,8 @@ static void
 inituserpatts(struct FM *fm)
 {
 	size_t i, j, npatts;
-	char *s, *type, *patt, *buf;
+	char *s, *t, *icon, *patt, *buf;
+	unsigned char type, mask;
 
 	fm->nuserpatts = 0;
 	fm->userpatts = NULL;
@@ -868,25 +920,62 @@ inituserpatts(struct FM *fm)
 			npatts++;
 	fm->userpatts = calloc(npatts, sizeof(*fm->userpatts));
 	if (fm->userpatts == NULL) {
-		warn("could not set file types");
+		warn("could not set file icons");
 		goto error;
 	}
 	i = 0;
 	for (s = strtok(buf, ":\n"); s != NULL; s = strtok(NULL, ":\n")) {
 		while (*s == ' ' || *s == '\t')
 			s++;
-		type = strchr(s, '=');
+		type = MODE_FILE;
+		mask = 0x00;
+		icon = strchr(s, '=');
 		patt = s;
-		if (type == NULL)
+		if (icon == NULL)
 			continue;
-		*type = '\0';
-		type++;
-		type[strcspn(type, " \t")] = '\0';
+		if (icon == patt)
+			continue;
+		for (t = icon - 1; t > patt; t--) {
+			switch (*t) {
+			case '-':
+				type = MODE_ANY;
+				break;
+			case '/':
+				type = MODE_DIR;
+				break;
+			case '|':
+				type = MODE_FIFO;
+				break;
+			case '=':
+				type = MODE_SOCK;
+				break;
+			case '#':
+				type = MODE_DEV;
+				break;
+			case '^':
+				type = MODE_BROK;
+				break;
+			case '@':
+				mask |= MODE_LINK;
+				break;
+			case '!':
+				mask |= MODE_EXEC;
+				break;
+			default:
+				goto loopout;
+			}
+			*t = '\0';
+		}
+loopout:
+		*icon = '\0';
+		icon++;
+		icon[strcspn(icon, " \t")] = '\0';
 		for (j = 0; j < nicon_types; j++) {
-			if (strcmp(type, icon_types[j].name) != 0)
+			if (strcmp(icon, icon_types[j].name) != 0)
 				continue;
 			fm->userpatts[i].index = j;
 			fm->userpatts[i].patt = strdup(patt);
+			fm->userpatts[i].mode = type | mask;
 			if (fm->userpatts[i].patt == NULL)
 				warn("strdup");
 			else

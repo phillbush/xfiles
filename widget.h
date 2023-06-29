@@ -5,6 +5,7 @@ typedef struct Scroll {
 } Scroll;
 
 typedef struct Item {
+	unsigned char mode;     /* entry mode */
 	char *name;             /* item display name */
 	char *fullname;         /* item full name */
 	char *status;           /* item statusbar info */
