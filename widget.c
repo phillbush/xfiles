@@ -1567,7 +1567,7 @@ highlight(Widget *widget, int index, int redraw)
 	int prevhili;
 	char *status;
 
-	if (widget->highlight == index)
+	if (widget->highlight == index || index < 0 || index >= widget->nitems)
 		return;
 	prevhili = widget->highlight;
 	widget->highlight = index;
@@ -2268,9 +2268,15 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 		*nitems = fillselitems(widget, selitems, -1);
 		return WIDGET_CONTEXT;
 	case XK_space:
-		if (widget->highlight == -1)
-			break;
-		selectitem(widget, widget->highlight, widget->issel[widget->highlight] == NULL, false);
+		if (widget->highlight != -1) {
+			selectitem(
+				widget,
+				widget->highlight,
+				widget->issel[widget->highlight] == NULL,
+				false
+			);
+		}
+		highlight(widget, widget->highlight + 1, true);
 		break;
 	case XK_Prior:
 	case XK_Next:
