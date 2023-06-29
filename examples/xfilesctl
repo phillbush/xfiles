@@ -9,6 +9,18 @@
 #
 # If this script calls a program that may take some time, you should
 # do it asynchronously by ending the command with an ampersand (&).
+#
+# This script depends on the following programs:
+# - $OPENER (defaults to xdg-open) for opening files.
+# - $EDITOR (defaults to vi) for editing text files.
+# - xmessage, for displaying dialogs.
+# - xterm, for opening the text editor.
+# - xmenu, for popping up a mouse-based menu.
+# - dmenu, for popping up a keyboard-based menu.
+# - xclip, for setting the clipboard.
+# - xprop, for setting window properties.
+# - File management core utilities (rm, mkdir, mv, cp, etc).
+# - Sed and AWK.
 
 # set this to false to not open dialogs asking for confirmation
 ask=true
@@ -17,11 +29,8 @@ ask=true
 TRASH="${TRASH:-"${XDG_DATA_HOME:-"$HOME/.local/share"}/Trash"}"
 
 # default commands
-PROMPTCMD="${PROMPTCMD:-"dmenu"}"
-MENUCMD="${MENUCMD:-"xmenu"}"
-TERMCMD="${TERMCMD:-"xterm"}"
-EDITOR="${EDITOR:-"${VISUAL:-"vi"}"}"
 OPENER="${OPENER:-"xdg-open"}"
+EDITOR="${EDITOR:-"${VISUAL:-"vi"}"}"
 
 # print error message
 warn() {
@@ -34,29 +43,34 @@ err() {
 	exit 1
 }
 
-# open xmenu (mouse-based menu) containing entries from stdin
+# open text editor on given file
+edit() {
+	exec xterm -into "$WINDOWID" -bw 0 -e "$EDITCMD" -- "$@"
+}
+
+# open mouse-based menu containing entries from stdin
 menu() {
-	command -- "$MENUCMD"
+	exec xmenu
 }
 
-# open dmenu (keyboard-based menu) containing entries from stdin
+# open keyboard-based menu containing entries from stdin
 prompt() {
-	command -- "$PROMPTCMD" -w "$WINDOWID"
+	exec dmenu -w "$WINDOWID"
 }
 
-# open given files
-open() {
-	command -- "$OPENER" "$@" &
+# open new xfiles window on current directory
+newwin() {
+	exec xfiles &
 }
 
 # open terminal window running given command
 term() {
-	command -- "$TERMCMD" "$@"
+	exec xterm &
 }
 
-# open text editor on given file
-edit() {
-	term -e "$EDITOR" -- "$@"
+# open given files (on background, so xfiles not wait)
+open() {
+	command -- "$OPENER" "$@" &
 }
 
 # open dialog asking for confirmation ("$1" is the prompt, rest are filenames)
@@ -70,19 +84,59 @@ dialog() {
 	} | xmessage -buttons Yes:0,No:1 -nearmouse -file -
 }
 
+# if $1 == /path/to/file_1.txt exists, set $uniquepath to /path/to/file_2.txt and so on
+setuniquepath() {
+	basename="${1##*/}"
+	dirname="${1%/*}"
+	body="${basename%.*}"
+	ext="${basename##"$body"}"
+
+	# create unique name
+	unset -v i p
+	while test -e "$dirname/$body$p$i$ext"
+	do
+		p="_"
+		if [ -z "$i" ]
+		then
+			i=1
+		else
+			i=$((i + 1))
+		fi
+	done
+	uniquepath="$dirname/$body$p$i$ext"
+}
+
 # copy files here if user confirms dialog
 copy() {
-	dialog "Copy files here?" "$@" && cp -v "$@" .
+	dialog "Copy files to $PWD?" "$@" && {
+		for file
+		do
+			setuniquepath "$file"
+			cp -v "$file" "$uniquepath"
+		done
+	}
 }
 
 # move files here if user confirms dialog
 move() {
-	dialog "Move files here?" "$@" && mv -v "$@" .
+	dialog "Move files to $PWD?" "$@" && {
+		for file
+		do
+			setuniquepath "$file"
+			mv -v "$file" "$uniquepath"
+		done
+	}
 }
 
 # link files here if user confirms dialog
 link() {
-	dialog "Link files here?" "$@" && ln -s "$@" .
+	dialog "Link files to $PWD?" "$@" && {
+		for file
+		do
+			setuniquepath "$file"
+			ln -s "$file" "./${uniquepath%/*}"
+		done
+	}
 }
 
 # send files to trash if user confirms dialog
@@ -95,28 +149,12 @@ trash() {
 	do
 		test -e "$file" || continue
 
-		# decompose file into basename, body and extension
-		basename="${file##*/}"
-		body="${basename%.*}"
-		ext="${basename##"$body"}"
-
-		# create unique target
-		unset -v i p
-		while test -e "$TRASH/files/$body$p$i$ext"
-		do
-			p="_"
-			if [ -z "$i" ]
-			then
-				i=1
-			else
-				i=$((i + 1))
-			fi
-		done
-		target="$body$p$i$ext"
+		# get unique target
+		setuniquepath "$TRASH/files/${file##*/}"
 
 		# move file to trash and write trash information
-		mv -- "$file" "$TRASH/files/$target" && \
-		cat > "$TRASH/info/$target.trashinfo" <<-END
+		mv -- "$file" "$uniquepath" && \
+		cat > "$TRASH/info/${uniquepath##*/}.trashinfo" <<-END
 			[Trash Info]
 			Path=$file
 			DeletionDate=$(date +"%FT%H:%M:%S")
@@ -126,6 +164,8 @@ trash() {
 
 # restore files from trash if user confirms dialog
 untrash() {
+	case $# in (0) return ;; esac
+
 	# compose dialog message
 	msg="Restore files from trash?"
 	for file
@@ -268,7 +308,15 @@ rename() {
 				mkdir -p "${target%/*}"
 				;;
 			esac
-			mv -- "$source" "$target"
+			case "$target" in
+			(/*|./*|../*)
+				;;
+			(*)
+				target="$PWD/$target"
+				;;
+			esac
+			setuniquepath "$target"
+			mv -- "$source" "$uniquepath"
 		fi
 		shift
 	done <"$tempfile"
@@ -350,7 +398,7 @@ dropmenu() {
 			link "$@"
 			;;
 		("term")
-			term &
+			term
 			;;
 		esac
 	}
@@ -402,13 +450,13 @@ EOF
 			changedir "$TRASH/files"
 			;;
 		("random")
-			random &
+			random
 			;;
 		("term")
-			term &
+			term
 			;;
 		("xfiles")
-			xfiles &
+			newwin
 			;;
 		esac
 	}
@@ -506,6 +554,10 @@ case "$operation" in
 (^[Cc])
 	# snarf files
 	snarf "$@"
+	;;
+(^[Pp])
+	# move snarfed files
+	paste "mv"
 	;;
 (^[Vv])
 	# copy snarfed files
