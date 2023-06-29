@@ -3358,7 +3358,7 @@ widget_set(Widget *widget, const char *title, Item items[], size_t nitems, Scrol
 		if (scrl->highlight < widget->nitems)
 			widget->highlight = scrl->highlight;
 		else
-			widget->highlight = -1;
+			widget->highlight = widget->nitems - 1;
 		widget->ydiff = scrl->ydiff;
 		widget->row = scrl->row;
 	}
