@@ -2215,14 +2215,35 @@ embedwindow(Widget *widget, Window window)
 	XWindowAttributes wa;
 
 	if (window != None) {
+		if (widget->child != None)
+			return;         /* we already have an embedded window */
 		if (window == widget->window)
-			return;
+			return;         /* we should not embed our own window */
 		if (!XGetWindowAttributes(widget->display, window, &wa))
-			return;
+			return;         /* we could not get info about window */
 		if (wa.override_redirect)
-			return;
+			return;         /* window doesn't want to be embedded */
 	}
 	widget->child = window;
+}
+
+static void
+closewindow(Widget *widget, Time time)
+{
+	XSendEvent(
+		widget->display,
+		widget->child,
+		False,
+		NoEventMask,
+		&(XEvent) {
+			.xclient.type = ClientMessage,
+			.xclient.window = widget->child,
+			.xclient.message_type = widget->atoms[WM_PROTOCOLS],
+			.xclient.format = 32,
+			.xclient.data.l[0] = widget->atoms[WM_DELETE_WINDOW],
+			.xclient.data.l[1] = time,
+		}
+	);
 }
 
 /*
@@ -2483,8 +2504,10 @@ processevent(Widget *widget, XEvent *ev)
 		if (ev->xclient.window != widget->window)
 			break;
 		if (ev->xclient.message_type == widget->atoms[WM_PROTOCOLS] &&
-		    (Atom)ev->xclient.data.l[0] == widget->atoms[WM_DELETE_WINDOW])
+		    (Atom)ev->xclient.data.l[0] == widget->atoms[WM_DELETE_WINDOW]) {
+			closewindow(widget, ev->xclient.data.l[1]);
 			return WIDGET_CLOSE;
+		}
 		return WIDGET_NONE;
 	case ConfigureNotify:
 		if (ev->xconfigure.window != widget->window)
