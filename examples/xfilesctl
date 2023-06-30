@@ -43,11 +43,6 @@ err() {
 	exit 1
 }
 
-# open text editor on given file
-edit() {
-	exec xterm -into "$WINDOWID" -bw 0 -e "$EDITOR" -- "$@"
-}
-
 # open mouse-based menu containing entries from stdin
 menu() {
 	exec xmenu
@@ -71,6 +66,12 @@ term() {
 # open given files (on background, so xfiles not wait)
 open() {
 	command -- "$OPENER" "$@" &
+}
+
+# open text editor on given file
+edit() {
+	# do not exec xterm here; we should keep running after it terminates
+	xterm -into "$WINDOWID" -bw 0 -e "$EDITOR" -- "$@"
 }
 
 # open dialog asking for confirmation ("$1" is the prompt, rest are filenames)
@@ -272,7 +273,8 @@ rename() {
 	trap '
 		test "$tempfile" && rm -f -- "$tempfile" 2>/dev/null
 		test "$tempdir" && rmdir -- "$tempdir" 2>/dev/null
-	' EXIT
+		exit
+	' EXIT HUP
 	tempfile="$(mktemp)" || exit 1
 	tempdir="$(mktemp -d -p "$PWD")" || exit 1
 
