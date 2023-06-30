@@ -45,22 +45,22 @@ err() {
 
 # open mouse-based menu containing entries from stdin
 menu() {
-	exec xmenu
+	xmenu
 }
 
 # open keyboard-based menu containing entries from stdin
 prompt() {
-	exec dmenu -w "$WINDOWID"
+	dmenu -w "$WINDOWID"
 }
 
 # open new xfiles window on current directory
 newwin() {
-	exec xfiles &
+	xfiles &
 }
 
 # open terminal window running given command
 term() {
-	exec xterm &
+	xterm &
 }
 
 # open given files (on background, so xfiles not wait)
@@ -70,7 +70,6 @@ open() {
 
 # open text editor on given file
 edit() {
-	# do not exec xterm here; we should keep running after it terminates
 	xterm -into "$WINDOWID" -bw 0 -e "$EDITOR" -- "$@"
 }
 
