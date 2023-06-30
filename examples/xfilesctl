@@ -111,7 +111,7 @@ copy() {
 	dialog "Copy files to $PWD?" "$@" && {
 		for file
 		do
-			setuniquepath "$file"
+			setuniquepath "$PWD/${file##*/}"
 			cp -v "$file" "$uniquepath"
 		done
 	}
@@ -122,7 +122,7 @@ move() {
 	dialog "Move files to $PWD?" "$@" && {
 		for file
 		do
-			setuniquepath "$file"
+			setuniquepath "$PWD/${file##*/}"
 			mv -v "$file" "$uniquepath"
 		done
 	}
@@ -133,8 +133,8 @@ link() {
 	dialog "Link files to $PWD?" "$@" && {
 		for file
 		do
-			setuniquepath "$file"
-			ln -s "$file" "./${uniquepath%/*}"
+			setuniquepath "$PWD/${file##*/}"
+			ln -s "$file" "$uniquepath"
 		done
 	}
 }
