@@ -507,6 +507,20 @@ filemenu() {
 
 operation="$1"
 shift 1
+for file
+do
+	shift 1
+	case "$file" in
+	("")
+		# ignore empty arguments
+		continue
+		;;
+	([!/]*)
+		file="$PWD/$file"
+		;;
+	esac
+	set -- "$file" "$@"
+done
 case "$operation" in
 ("menu")
 	case "$#" in
