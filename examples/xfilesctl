@@ -507,38 +507,6 @@ filemenu() {
 
 operation="$1"
 shift 1
-
-# canonicalize "//", "/./", and "/../" on each argument
-IFS='/'
-for file
-do
-	realpath=""
-	case "$file" in
-	([!/]*)
-		file="$PWD/$file"
-		;;
-	esac
-	for segment in $file
-	do
-		case "$segment" in
-		("")
-			# ignore
-			;;
-		(".")
-			# ignore
-			;;
-		("..")
-			realpath="${realpath%/*}"
-			;;
-		(*)
-			realpath="$realpath/$segment"
-			;;
-		esac
-	done
-	shift 1
-	set -- "$@" "$realpath"
-done
-
 case "$operation" in
 ("menu")
 	case "$#" in
