@@ -464,7 +464,6 @@ filemode(struct FM *fm, struct stat *sb, char *name)
 	unsigned char mask, type;
 	int i;
 
-	type = MODE_FILE;
 	mask = 0x00;
 	if (S_ISLNK(sb->st_mode)) {
 		mask |= MODE_LINK;
