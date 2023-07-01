@@ -519,7 +519,7 @@ do
 		file="$PWD/$file"
 		;;
 	esac
-	set -- "$file" "$@"
+	set -- "$@" "$file"
 done
 case "$operation" in
 ("menu")
