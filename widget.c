@@ -1208,7 +1208,7 @@ settitle(Widget *widget)
 		},
 		{
 			.prop = XA_WM_NAME,
-			.type = widget->atoms[TEXT],
+			.type = XA_STRING,
 		}
 	};
 	const char *titlesegmnt[] = {
