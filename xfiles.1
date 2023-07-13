@@ -197,8 +197,8 @@ These commands are used to do whatever the user wants to.
 .Nm xfilesthumb
 is a script called by
 .Nm xfiles
-to create 64x64 ppm image file called
-.Pq thumbnails .
+to create 64x64 ppm image files called
+.Qq thumbnails .
 .Nm xfilesthumb
 should usually not be called manually.
 .Nm xfilesthumb
@@ -500,7 +500,7 @@ X resource).
 .Nm xfiles
 understands the following X resources.
 They must be prefixed with either the
-.Qq "XFiles"
+.Qq Ic "XFiles"
 class or the name given with the
 .Fl N
 command-line option, followed by a period.
@@ -547,6 +547,7 @@ above for a list of supported icons.
 Text color.
 .It Ic opacity
 Background opacity as a floating point number from 0.0 to 1.0.
+Note that, for transparency to work, a compositor is required to be running.
 .It Ic statusBarEnable, enableStatusBar
 Whether a status bar listing information about the highlighted file should be displayed.
 The status bar can be enabled
