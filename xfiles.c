@@ -571,8 +571,8 @@ initthumbnailer(struct FM *fm)
 	len = strlen(str);
 	if (PATH_MAX < len + 12)        /* strlen("/thumbnails") + '\0' */
 		return;
-	mode = 0755;
-	dir_mode = 0700;
+	mode = 0700;
+	dir_mode = 0755;
 	(void)snprintf(path, PATH_MAX, "%s", str);
 	slash = strrchr(path, '\0');
 	while (--slash > path && *slash == '/')
