@@ -560,7 +560,8 @@ initthumbnailer(struct FM *fm)
 	struct stat sb;
 	mode_t mode, dir_mode;
 	size_t len;
-	int mkdir_errno, done;
+	int mkdir_errno;
+	bool done;
 	char path[PATH_MAX];
 	char *slash, *str;
 
@@ -570,8 +571,8 @@ initthumbnailer(struct FM *fm)
 	len = strlen(str);
 	if (PATH_MAX < len + 12)        /* strlen("/thumbnails") + '\0' */
 		return;
-	mode = 0777 & ~umask(0);
-	dir_mode = mode | S_IWUSR | S_IXUSR;
+	mode = 0755;
+	dir_mode = 0700;
 	(void)snprintf(path, PATH_MAX, "%s", str);
 	slash = strrchr(path, '\0');
 	while (--slash > path && *slash == '/')
@@ -584,12 +585,7 @@ initthumbnailer(struct FM *fm)
 		slash += strcspn(slash, "/");
 		done = (*slash == '\0');
 		*slash = '\0';
-		if (mkdir(path, done ? mode : dir_mode) == 0) {
-			if (mode > 0777 && chmod(path, mode) == -1) {
-				warn("%s", fm->thumbnaildir);
-				goto error;
-			}
-		} else {
+		if (mkdir(path, done ? mode : dir_mode) == -1) {
 			mkdir_errno = errno;
 			if (stat(path, &sb) == -1) {
 				errno = mkdir_errno;
