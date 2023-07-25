@@ -41,6 +41,7 @@ Widget *widget_create(
 
 int widget_set(
 	Widget *widget,
+	const char *cwd,
 	const char *title,
 	Item *items,
 	size_t nitems,

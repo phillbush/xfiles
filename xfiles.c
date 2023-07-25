@@ -894,8 +894,14 @@ changedir(struct FM *fm, const char *path, int force_refresh)
 	fm->cwd->here = cwd.here;
 	fm->last = fm->cwd;
 	scrl = keepscroll ? &fm->cwd->scrl : NULL;
-	if (widget_set(fm->widget, fm->cwd->here, fm->entries, fm->nentries, scrl) == RETURN_FAILURE)
-		retval = RETURN_FAILURE;
+	retval = widget_set(
+		fm->widget,
+		fm->cwd->path,
+		fm->cwd->here,
+		fm->entries,
+		fm->nentries,
+		scrl
+	);
 done:
 	createthumbthread(fm);
 	return retval;
@@ -1090,7 +1096,7 @@ main(int argc, char *argv[])
 	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)
 		goto error;
 	fm.last = fm.cwd;
-	if (widget_set(fm.widget, fm.cwd->here, fm.entries, fm.nentries, NULL) == RETURN_FAILURE)
+	if (widget_set(fm.widget, fm.cwd->path, fm.cwd->here, fm.entries, fm.nentries, NULL) == RETURN_FAILURE)
 		goto error;
 	createthumbthread(&fm);
 	widget_map(fm.widget);

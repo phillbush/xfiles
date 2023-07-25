@@ -1233,16 +1233,6 @@ settitle(Widget *widget)
 			);
 		}
 	}
-	XChangeProperty(
-		widget->display,
-		widget->window,
-		widget->atoms[_CONTROL_CWD],
-		widget->atoms[UTF8_STRING],
-		8,
-		PropModeReplace,
-		(unsigned char *)widget->title,
-		strlen(widget->title)
-	);
 }
 
 static int
@@ -3375,7 +3365,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 }
 
 int
-widget_set(Widget *widget, const char *title, Item items[], size_t nitems, Scroll *scrl)
+widget_set(Widget *widget, const char *cwd, const char *title, Item items[], size_t nitems, Scroll *scrl)
 {
 	size_t i;
 
@@ -3441,6 +3431,16 @@ widget_set(Widget *widget, const char *title, Item items[], size_t nitems, Scrol
 	drawitems(widget);
 	drawstatusbar(widget);
 	commitdraw(widget);
+	XChangeProperty(
+		widget->display,
+		widget->window,
+		widget->atoms[_CONTROL_CWD],
+		widget->atoms[UTF8_STRING],
+		8,
+		PropModeReplace,
+		(unsigned char *)cwd,
+		strlen(cwd)
+	);
 	return RETURN_SUCCESS;
 error:
 	cleanwidget(widget);
