@@ -2797,7 +2797,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 	int clickx = 0;
 	int clicky = 0;
 	int clicki = -1;
-	int state;
+	WidgetEvent event;
 	int x, y;
 
 	while (!XNextEvent(widget->display, &ev)) {
@@ -2837,9 +2837,9 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 		case KeyPress:
 			if (ev.xkey.window != widget->window)
 				break;
-			state = keypress(widget, &ev.xkey, selitems, nitems, text);
-			if (state != WIDGET_NONE)
-				return state;
+			event = keypress(widget, &ev.xkey, selitems, nitems, text);
+			if (event != WIDGET_NONE)
+				return event;
 			break;
 		case ButtonPress:
 			clickx = ev.xbutton.x;
@@ -2853,9 +2853,9 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 					drawitems(widget);
 				widget->redraw = true;
 			} else if (ev.xbutton.button == Button2) {
-				state = scrollmode(widget, ev.xmotion.x, ev.xmotion.y);
-				if (state != WIDGET_NONE)
-					return state;
+				event = scrollmode(widget, ev.xmotion.x, ev.xmotion.y);
+				if (event != WIDGET_NONE)
+					return event;
 			} else if (ev.xbutton.button == Button3) {
 				if (mouse3click(widget, ev.xbutton.x, ev.xbutton.y) > 0)
 					*nitems = fillselitems(widget, selitems, -1);
@@ -2885,20 +2885,18 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 		case MotionNotify:
 			if (ev.xmotion.window != widget->window)
 				break;
-			if (ev.xmotion.state != Button1Mask &&
-			    ev.xmotion.state != (Button1Mask|ShiftMask) &&
-			    ev.xmotion.state != (Button1Mask|ControlMask))
+			if (!(ev.xmotion.state & Button1Mask))
 				break;
 			if (diff(ev.xmotion.x, clickx) * diff(ev.xmotion.y, clicky) < DRAG_SQUARE)
 				break;
 			if (clicki == 0)
 				break;
 			if (clicki == -1)
-				state = selmode(widget, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
+				event = selmode(widget, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
 			else
-				state = dragmode(widget, ev.xmotion.time, clicki, selitems, nitems);
-			if (state != WIDGET_NONE)
-				return state;
+				event = dragmode(widget, ev.xmotion.time, clicki, selitems, nitems);
+			if (event != WIDGET_NONE)
+				return event;
 			break;
 		default:
 			break;
