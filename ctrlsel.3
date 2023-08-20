@@ -791,7 +791,7 @@ for (;;) {
 		continue;
 	case CTRLSEL_ERROR:
 		fprintf(stderr, "warning: could not get selection");
-		return;
+		goto error;
 	}
 }
 
@@ -807,8 +807,9 @@ done:
 	free(targets[1].buffer);
 
 /* step 4: free the selection context */
-ctrlsel_cancel(context);
-context = NULL;
+error:
+	ctrlsel_cancel(context);
+	context = NULL;
 .Ed
 .Pp
 The following is an example of the implementation of a function asking for the ownership of the primary selection with two targets.
@@ -858,7 +859,7 @@ for (;;) {
 	case CTRLSEL_INTERNAL:
 		continue;
 	case CTRLSEL_LOST:
-		return;
+		break;
 	}
 }
 
