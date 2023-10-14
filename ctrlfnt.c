@@ -10,8 +10,13 @@
 
 #include "ctrlfnt.h"
 
+struct FntPatt {
+	XftFont        *xftfont;
+	FcPattern      *pattern;
+};
+
 struct VArray {
-	XftFont       **fonts;
+	struct FntPatt *fonts;
 	size_t          capacity;
 	size_t          nmemb;
 };
@@ -29,7 +34,7 @@ struct CtrlFontSet {
 #define MAXGLYPHS 1024
 #define BETWEEN(x, a, b)    ((a) <= (x) && (x) <= (b))
 
-static XftFont *
+static struct FntPatt
 openxftfont(Display *display, const char *fontname, double fontsize)
 {
 	FcPattern *pattern = NULL;
@@ -47,8 +52,10 @@ openxftfont(Display *display, const char *fontname, double fontsize)
 	if ((font = XftFontOpenPattern(display, match)) == NULL)
 		goto error;
 	FcPatternDestroy(pattern);
-	FcPatternDestroy(match);
-	return font;
+	return (struct FntPatt){
+		.xftfont = font,
+		.pattern = match,
+	};
 error:
 	warnx("%s: could not open font", fontname);
 	if (pattern != NULL)
@@ -57,16 +64,17 @@ error:
 		FcPatternDestroy(match);
 	if (font != NULL)
 		XftFontClose(display, font);
-	return NULL;
+	return (struct FntPatt){
+		.xftfont = NULL,
+		.pattern = NULL,
+	};
 }
 
 static int
-addxftfont(struct VArray *fontset, XftFont *font)
+addxftfont(struct VArray *fontset, struct FntPatt font)
 {
-	XftFont **fonts;
+	struct FntPatt *fonts;
 
-	if (font == NULL)
-		return 0;
 	if (fontset->nmemb <= fontset->capacity) {
 		if (fontset->capacity == 0)
 			fontset->capacity = 1;
@@ -85,7 +93,7 @@ static struct VArray *
 openxftfontset(Display *display, const char *fontspec, double fontsize)
 {
 	struct VArray *fontset = NULL;
-	XftFont *font = NULL;
+	struct FntPatt font;
 	char *t, *last;
 	char *s = NULL;
 
@@ -105,14 +113,15 @@ openxftfontset(Display *display, const char *fontspec, double fontsize)
 		if (fontset->fonts == NULL)
 			goto error;
 		fontset->fonts[0] = openxftfont(display, "", fontsize);
-		if (fontset->fonts[0] == NULL)
+		if (fontset->fonts[0].xftfont == NULL)
 			goto error;
 		goto done;
 	}
 	for (t = strtok_r(s, ",", &last);
 	     t != NULL;
 	     t = strtok_r(NULL, ",", &last)) {
-		if ((font = openxftfont(display, t, fontsize)) == NULL)
+		font = openxftfont(display, t, fontsize);
+		if (font.xftfont == NULL)
 			continue;
 		if (addxftfont(fontset, font) == -1)
 			goto error;
@@ -124,8 +133,10 @@ done:
 	return fontset;
 error:
 	free(s);
-	if (font != NULL)
-		XftFontClose(display, font);
+	if (font.pattern != NULL)
+		FcPatternDestroy(font.pattern);
+	if (font.xftfont != NULL)
+		XftFontClose(display, font.xftfont);
 	if (fontset != NULL)
 		free(fontset->fonts);
 	free(fontset);
@@ -213,15 +224,14 @@ getnextutf8char(const char *s, const char **next_ret)
 	return ucode;
 }
 
-static XftFont *
+static struct FntPatt
 opennewfont(CtrlFontSet *fontset, FcChar32 glyph)
 {
-	XftFont *retfont = fontset->xft_fontset->fonts[0];
+	struct FntPatt retfont = fontset->xft_fontset->fonts[0];
 #ifndef CTRLFNT_NO_SEARCH
+	struct FntPatt font = { NULL, NULL };
 	FcCharSet *fccharset = NULL;
 	FcPattern *fcpattern = NULL;
-	FcPattern *match = NULL;
-	XftFont *font = NULL;
 	XftResult result;
 
 	if ((fccharset = FcCharSetCreate()) == NULL)
@@ -235,25 +245,32 @@ opennewfont(CtrlFontSet *fontset, FcChar32 glyph)
 	if (!FcConfigSubstitute(NULL, fcpattern, FcMatchPattern))
 		goto done;
 	FcDefaultSubstitute(fcpattern);
-	if ((match = XftFontMatch(fontset->display, fontset->screen, fcpattern, &result)) == NULL)
+	font.pattern = XftFontMatch(
+		fontset->display,
+		fontset->screen,
+		fcpattern,
+		&result
+	);
+	if (font.pattern == NULL)
 		goto done;
-	if ((font = XftFontOpenPattern(fontset->display, match)) == NULL)
+	font.xftfont = XftFontOpenPattern(fontset->display, font.pattern);
+	if (font.xftfont == NULL)
 		goto done;
-	if (XftCharExists(fontset->display, font, glyph) == FcFalse)
+	if (XftCharExists(fontset->display, font.xftfont, glyph) == FcFalse)
 		goto done;
 	if (addxftfont(fontset->xft_fontset, font) == -1)
 		goto done;
 	retfont = font;
-	font = NULL;
+	font = (struct FntPatt){ NULL, NULL };
 done:
 	if (fccharset != NULL)
 		FcCharSetDestroy(fccharset);
 	if (fcpattern != NULL)
 		FcPatternDestroy(fcpattern);
-	if (match != NULL)
-		XftPatternDestroy(match);
-	if (font != NULL)
-		XftFontClose(fontset->display, font);
+	if (font.pattern != NULL)
+		XftPatternDestroy(font.pattern);
+	if (font.xftfont != NULL)
+		XftFontClose(fontset->display, font.xftfont);
 #endif /* CTRLFNT_NO_SEARCH */
 	(void)glyph;
 	return retfont;
@@ -265,9 +282,11 @@ getfontforglyph(CtrlFontSet *fontset, FcChar32 glyph)
 	size_t i;
 
 	for (i = 0; i < fontset->xft_fontset->nmemb; i++)
-		if (XftCharExists(fontset->display, fontset->xft_fontset->fonts[i], glyph) == FcTrue)
-			return fontset->xft_fontset->fonts[i];
-	return opennewfont(fontset, glyph);
+		if (XftCharExists(fontset->display,
+		    fontset->xft_fontset->fonts[i].xftfont,
+		    glyph) == FcTrue)
+			return fontset->xft_fontset->fonts[i].xftfont;
+	return opennewfont(fontset, glyph).xftfont;
 }
 
 static size_t
@@ -652,7 +671,7 @@ ctrlfnt_height(CtrlFontSet *fontset)
 	if (fontset == NULL)
 		return 0;
 	if (fontset->xft_fontset != NULL)
-		return fontset->xft_fontset->fonts[0]->height;
+		return fontset->xft_fontset->fonts[0].xftfont->height;
 	if (fontset->xlfd_font != NULL)
 		return fontset->xlfd_font->ascent + fontset->xlfd_font->descent;
 	if (fontset->xlfd_fontset != NULL) {
@@ -676,7 +695,10 @@ ctrlfnt_free(CtrlFontSet *fontset)
 		for (i = 0; i < fontset->xft_fontset->nmemb; i++) {
 			XftFontClose(
 				fontset->display,
-				fontset->xft_fontset->fonts[i]
+				fontset->xft_fontset->fonts[i].xftfont
+			);
+			FcPatternDestroy(
+				fontset->xft_fontset->fonts[i].pattern
 			);
 		}
 		free(fontset->xft_fontset->fonts);
