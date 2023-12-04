@@ -1938,19 +1938,16 @@ pixmapfromdata(Widget *widget, char **data, Pixmap *pix, Pixmap *mask)
 }
 
 static int
-fillselitems(Widget *widget, int *selitems, int firstitem)
+fillselitems(Widget *widget, int *selitems)
 {
-	struct Selection *sel;
-	int nitems;
+	int i, nitems;
 
 	nitems = 0;
-	if (firstitem != -1)
-		selitems[nitems++] = firstitem;
-	for (sel = widget->sel; sel != NULL; sel = sel->next) {
-		if (sel->index == firstitem)
-			continue;
-		selitems[nitems++] = sel->index;
-	}
+	if (widget->issel == NULL)
+		return 0;
+	for (i = 0; i < widget->nitems; i++)
+		if (widget->issel[i] != NULL)
+			selitems[nitems++] = i;
 	return nitems;
 }
 
@@ -2273,10 +2270,12 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	case XK_Return:
 		if (widget->highlight == -1)
 			break;
-		*nitems = fillselitems(widget, selitems, widget->highlight);
+		*nitems = fillselitems(widget, selitems);
+		if (*nitems == 0)
+			return WIDGET_NONE;
 		return WIDGET_OPEN;
 	case XK_Menu:
-		*nitems = fillselitems(widget, selitems, -1);
+		*nitems = fillselitems(widget, selitems);
 		return WIDGET_CONTEXT;
 	case XK_space:
 		if (widget->highlight != -1) {
@@ -2406,9 +2405,9 @@ draw:
 		shift = FLAG(xev->state, ShiftMask);
 		(void)snprintf(*text, KSYM_BUFSIZE, "^%s%s", shift ? "S-" : "", kstr);
 		if (widget->sel == NULL)
-			*nitems = fillselitems(widget, selitems, widget->highlight);
+			*nitems = fillselitems(widget, selitems);
 		else
-			*nitems = fillselitems(widget, selitems, -1);
+			*nitems = fillselitems(widget, selitems);
 		return WIDGET_KEYPRESS;
 	}
 	return WIDGET_NONE;
@@ -2772,10 +2771,9 @@ dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 		warnx("could not perform drag-and-drop");
 	} else if (state == CTRLSEL_DROPSELF) {
 		querypointer(widget, widget->window, &x, &y, &mask);
-		clicki = getitemundercursor(widget, x, y);
-		if (clicki < 1)
+		if (getitemundercursor(widget, x, y) < 1)
 			return WIDGET_NONE;
-		*nitems = fillselitems(widget, selitems, clicki);
+		*nitems = fillselitems(widget, selitems);
 		if (FLAG(mask, ControlMask|ShiftMask))
 			return WIDGET_DROPLINK;
 		if (FLAG(mask, ShiftMask))
@@ -2858,7 +2856,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 					return event;
 			} else if (ev.xbutton.button == Button3) {
 				if (mouse3click(widget, ev.xbutton.x, ev.xbutton.y) > 0)
-					*nitems = fillselitems(widget, selitems, -1);
+					*nitems = fillselitems(widget, selitems);
 				widget->redraw = true;
 				XUngrabPointer(widget->display, ev.xbutton.time);
 				XFlush(widget->display);
@@ -2880,7 +2878,12 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 				lasttime = ev.xbutton.time;
 				break;
 			}
-			*nitems = fillselitems(widget, selitems, widget->highlight);
+			if (widget->highlight > 0) {
+				selitems[0] = widget->highlight;
+				*nitems = 1;
+			} else {
+				*nitems = fillselitems(widget, selitems);
+			}
 			return WIDGET_OPEN;
 		case MotionNotify:
 			if (ev.xmotion.window != widget->window)
