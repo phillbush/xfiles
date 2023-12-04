@@ -93,7 +93,7 @@ static struct VArray *
 openxftfontset(Display *display, const char *fontspec, double fontsize)
 {
 	struct VArray *fontset = NULL;
-	struct FntPatt font;
+	struct FntPatt font = { 0 };
 	char *t, *last;
 	char *s = NULL;
 
