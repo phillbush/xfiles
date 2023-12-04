@@ -2416,6 +2416,7 @@ draw:
 static WidgetEvent
 processevent(Widget *widget, XEvent *ev)
 {
+	int newrow;
 	char *str;
 
 	if (widget->selctx != NULL) {
@@ -2502,8 +2503,13 @@ processevent(Widget *widget, XEvent *ev)
 		if (ev->xconfigure.window != widget->window)
 			break;
 		if (calcsize(widget, ev->xconfigure.width, ev->xconfigure.height)) {
-			if (widget->row >= widget->nscreens)
-				setrow(widget, widget->nscreens - 1);
+			if (widget->highlight < 0) {
+				setrow(widget, 0);
+			} else {
+				newrow = widget->highlight / widget->ncols;
+				newrow = min(newrow, widget->nscreens - 1);
+				setrow(widget, newrow);
+			}
 			drawitems(widget);
 		}
 		drawstatusbar(widget);
