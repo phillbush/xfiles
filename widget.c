@@ -2270,9 +2270,8 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	case XK_Return:
 		if (widget->highlight == -1)
 			break;
-		*nitems = fillselitems(widget, selitems);
-		if (*nitems == 0)
-			return WIDGET_NONE;
+		selitems[0] = widget->highlight;
+		*nitems = 1;
 		return WIDGET_OPEN;
 	case XK_Menu:
 		*nitems = fillselitems(widget, selitems);
@@ -2405,7 +2404,7 @@ draw:
 		shift = FLAG(xev->state, ShiftMask);
 		(void)snprintf(*text, KSYM_BUFSIZE, "^%s%s", shift ? "S-" : "", kstr);
 		if (widget->sel == NULL)
-			*nitems = fillselitems(widget, selitems);
+			*nitems = 0;
 		else
 			*nitems = fillselitems(widget, selitems);
 		return WIDGET_KEYPRESS;
@@ -2884,7 +2883,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 				lasttime = ev.xbutton.time;
 				break;
 			}
-			if (widget->highlight > 0) {
+			if (widget->highlight >= 0) {
 				selitems[0] = widget->highlight;
 				*nitems = 1;
 			} else {
