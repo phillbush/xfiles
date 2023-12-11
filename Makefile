@@ -43,30 +43,50 @@ ICONS = \
 	icons/folder-video.xpm \
 	icons/folder.xpm
 
-PREFIX ?= /usr/local
-MANPREFIX ?= ${PREFIX}/share/man
-LOCALINC ?= /usr/local/include
-LOCALLIB ?= /usr/local/lib
-X11INC ?= /usr/X11R6/include
-X11LIB ?= /usr/X11R6/lib
+PROG_CPPFLAGS = \
+	-D_POSIX_C_SOURCE=200809L -D_BSD_SOURCE -D_DEFAULT_SOURCE \
+	-I/usr/local/include -I/usr/X11R6/include \
+	-I/usr/include/freetype2 -I/usr/X11R6/include/freetype2 \
+	${CPPFLAGS}
+
+PROG_CFLAGS = \
+	-std=c99 -pedantic \
+	${PROG_CPPFLAGS} \
+	${CFLAGS}
+
+PROG_LDFLAGS = \
+	-L/usr/local/lib -L/usr/X11R6/lib \
+	-lfontconfig -lXft -lX11 -lXext -lXcursor -lXrender -lXpm -lpthread \
+	${LDFLAGS} ${LDLIBS}
+
+PROG_DEBUG = \
+	-g -Og -Wall -Wextra -Wpedantic
+#	-Wdouble-promotion -Wconversion
 
 .SUFFIXES: .c .o .abgr .xpm
-
-# Add -DCTRLFNT_NO_SEARCH to disable fallback font search at runtime
-DEFS = -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE -D_BSD_SOURCE -D_DEFAULT_SOURCE
-INCS = -I${LOCALINC} -I${X11INC} -I/usr/include/freetype2 -I${X11INC}/freetype2
-LIBS = -L${LOCALLIB} -L${X11LIB} -lfontconfig -lXft -lX11 -lXext -lXcursor -lXrender -lXpm -lpthread
-
-bindir = ${DESTDIR}${PREFIX}/bin
-mandir = ${DESTDIR}${MANPREFIX}/man1
 
 all: ${PROG}
 
 ${PROG}: ${OBJS}
-	${CC} -o $@ ${OBJS} ${LIBS} ${LDFLAGS}
+	${CC} -o $@ ${OBJS} ${PROG_LDFLAGS}
 
 .c.o:
-	${CC} -std=c99 -pedantic ${DEFS} ${INCS} ${CFLAGS} ${CPPFLAGS} -c $<
+	${CC} ${PROG_CFLAGS} -o $@ -c $<
+
+xfiles.o:  util.h widget.h icons/file.xpm icons/folder.xpm
+widget.o:  util.h widget.h ctrlsel.h ctrlfnt.h icons/x.xpm
+ctrlsel.o: ctrlsel.h
+ctrlfnt.o: ctrlfnt.h
+icons.o:   ${ICONS} ${WINICONS}
+
+tags: ${SRCS}
+	ctags ${SRCS}
+
+# Run "make all" with explicit debugging flags
+all-debug:
+	@${MAKE} all \
+	CFLAGS="${CFLAGS} ${PROG_DEBUG}" \
+	LDFLAGS="${LDFLAGS} ${PROG_DEBUG}"
 
 # Convert XPM images into ARGB raw images.  Requires Imagemagick and
 # hexdump.  You need not run this.  The source code is released with
@@ -80,35 +100,17 @@ ${PROG}: ${OBJS}
 		printf '};\n' ; \
 	} >$@
 
-xfiles.o:  util.h widget.h icons/file.xpm icons/folder.xpm
-widget.o:  util.h widget.h ctrlsel.h ctrlfnt.h icons/x.xpm
-ctrlsel.o: ctrlsel.h
-ctrlfnt.o: ctrlfnt.h
-icons.o: ${ICONS} ${WINICONS}
-
-tags: ${SRCS}
-	ctags ${SRCS}
-
-# Grep for commented-out code and TODO/XXX comments; lint the manual and
-# the source code.  Requires mandoc and clang.  You need not run this.
-# The source code is released after it has been linted.
-lint: ${SRCS} ${ICONS} ${WINICONS}
+# Grep for commented-out code and TODO/XXX comments; lint the manual
+# and the source code.  Requires shellcheck, mandoc, and clang.  You
+# do not need to run this target.  The source code is released after
+# it has been linted.
+lint: ${SRCS}
 	-@fgrep -e '	//' -e 'TODO' -e 'XXX' ${SRCS} || true
 	-shellcheck ${SCRIPTS}
 	-mandoc -T lint -W warning ${MAN} ctrlfnt.3 ctrlsel.3
-	-clang-tidy ${SRCS} -- -std=c99 ${DEFS} ${INCS} ${CPPFLAGS}
+	-clang-tidy ${SRCS} -- -std=c99 ${PROG_CPPFLAGS}
 
 clean:
 	rm -f ${OBJS} ${PROG} ${PROG:=.core} tags
 
-install: all
-	mkdir -p ${bindir}
-	mkdir -p ${mandir}
-	install -m 755 ${PROG} ${bindir}/${PROG}
-	install -m 644 ${MAN} ${mandir}/${MAN}
-
-uninstall:
-	-rm ${bindir}/${PROG}
-	-rm ${mandir}/${MAN}
-
-.PHONY: all tags clean install uninstall lint
+.PHONY: all all-debug clean lint tags
