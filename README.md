@@ -69,8 +69,9 @@ XFiles does not come with any of the following features:
 * Clipboard copy:   Use `xclip` for that.
 
 ## Installation
-Run `make all` to build, and `make install` to install the binary and
-the manual into `${PREFIX}` (`/usr/local`).
+Run `make all` to build.  Then install the binary file `./xfiles` somewhere
+in your `$PATH`; and install the manual file `./xfiles.1` somewhere in your
+`$MANPATH`.
 
 ## Usage
 
