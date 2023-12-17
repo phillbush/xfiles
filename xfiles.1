@@ -145,53 +145,28 @@ The paths to the dropped files are given to
 as further arguments.
 This command is used to pop up a terminal dialog window asking whether
 to link the dropped files to the current working directory.
-.It Cm ^KEY
+.It Cm "^\)" Ns Ar KEY
 .Nm xfilesctl
 is invoked with a
-.Cm ^KEY
-command
-(where
-.Qq "KEY"
-is the name of a key symbol, such as
-.Qq "a" ,
-.Qq "F5" ,
-or
-.Qq "Delete")
-when pressing a letter, number or punctuation key with Control,
-or a plain function (F1~F13) key,
-or a plain operation key (Delete, BackSpace, etc).
+.Cm "^\)" Ns Ar KEY
+command.
+.Ar KEY
+is the name (as returned by
+.Xr XKeysymToString 3 )
+of a character key pressed with Control,
+a function key (F1~F13), or
+an operation key (Delete, BackSpace, etc).
 The paths to the selected files are given to
 .Nm xfilesctl
 as further arguments.
-These commands are used to do whatever the user wants to
-(for example: send files to trash when clicking
-.Qq "Delete" ;
-pop up a
-.Xr dmenu 1
-prompting for a directory to go to when clicking
-.Qq "Ctrl-L" ;
-reload the current directory when clicking
-.Qq "F5" ;
-etc).
-.It Cm ^S-KEY
+These commands are used to implement user-defined operations
+(see
+.Sx Extra keys
+below for examples).
+If the Shift modifier key is also pressed and no file is selected,
+the path to the highlighted file is given to
 .Nm xfilesctl
-is invoked with a
-.Cm ^S-KEY
-command
-(where
-.Qq "KEY"
-is the name of a key symbol, such as
-.Qq "a" ,
-.Qq "F5" ,
-or
-.Qq "Delete")
-when pressing a letter, number or punctuation key with Control and Shift,
-or a function (F1~F13) key with Shift,
-or an operation key (Delete, BackSpace, etc) with Shift.
-The paths to the selected files are given to
-.Nm xfilesctl
-as further arguments.
-These commands are used to do whatever the user wants to.
+instead.
 .El
 .Pp
 .Nm xfilesthumb

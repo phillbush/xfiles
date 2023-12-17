@@ -2243,7 +2243,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	KeySym ksym;
 	unsigned int state;
 	int row[2];
-	int redrawall, previtem, index, shift, newrow, n, i;
+	int redrawall, previtem, index, newrow, n, i;
 	char *kstr;
 
 	if (!XkbLookupKeySym(widget->display, xev->keycode, xev->state, &state, &ksym))
@@ -2401,12 +2401,12 @@ draw:
 		 */
 		kstr = XKeysymToString(ksym);
 		*text = widget->ksymbuf;
-		shift = FLAG(xev->state, ShiftMask);
-		(void)snprintf(*text, KSYM_BUFSIZE, "^%s%s", shift ? "S-" : "", kstr);
-		if (widget->sel == NULL)
-			*nitems = 0;
-		else
+		(void)snprintf(*text, KSYM_BUFSIZE, "^%s", kstr);
+		*nitems = 0;
+		if (widget->sel != NULL)
 			*nitems = fillselitems(widget, selitems);
+		else if ((xev->state & ShiftMask) && widget->highlight > 0)
+			selitems[(*nitems)++] = widget->highlight;
 		return WIDGET_KEYPRESS;
 	}
 	return WIDGET_NONE;
