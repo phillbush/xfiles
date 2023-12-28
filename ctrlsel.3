@@ -52,7 +52,7 @@
 .Fa "Window window"
 .Fa "Atom selection"
 .Fa "Time time"
-.Fa "int ismanager"
+.Fa "Bool ismanager"
 .Fa "struct CtrlSelTarget targets[]"
 .Fa "unsigned long ntargets"
 .Fc
@@ -82,7 +82,7 @@
 .Fo "ctrlsel_dndclose"
 .Fa "CtrlSelContext *context"
 .Fc
-.Ft int
+.Ft "CtrlSelContext *"
 .Fo "ctrlsel_dndown"
 .Fa "Display *display"
 .Fa "Window window"
@@ -90,7 +90,7 @@
 .Fa "Time time"
 .Fa "struct CtrlSelTarget targets[]"
 .Fa "unsigned long ntargets"
-.Fa "CtrlSelContext **context_ret"
+.Fa "Window *receiver_ret"
 .Fc
 .Ft int
 .Fo "ctrlsel_dndsend"
@@ -129,9 +129,7 @@ can be given, for the selection content is yet to be requested.
 Specifies the pointer to a
 .Ft CtrlSelContext
 structure containing the context of the selection request or ownership.
-.It Fa context_ret
-Returns the context for the drag-and-drop operation.
-.It Fa "display"
+.It Fa display
 Specifies the connection to the X server.
 .It Fa "event"
 Specifies the pointer to a
@@ -175,6 +173,13 @@ for the user may not have a visual response of the drag-and-drop, if the mouse c
 Specifies the number of members of the
 .Fa targets
 array.
+.It Fa receiver_ret
+Returns the window that received the drop of a drag-and-drop operation
+(or
+.Ic None
+if the operation was cancelled,
+the user dropped on a non-dndaware window,
+or an error occurred).
 .It Fa "selection"
 Specifies the atom identifying the requested selection (for
 .Fn "ctrlsel_request" ) ,
@@ -234,9 +239,13 @@ then any value (such as
 can be given, for the type is not known yet.
 .It Fa "window"
 Specifies the window requesting (for
-.Fn "ctrlsel_request" )
+.Fn "ctrlsel_request"
+and
+.Fn "ctrlsel_dndwatch" )
 or willing to own (for
-.Fn "ctrlsel_setowner" )
+.Fn "ctrlsel_setowner"
+and
+.Fn "ctrlsel_dndown" )
 the given
 .Fa "selection" .
 .El
@@ -322,7 +331,7 @@ with the
 .Fa context
 returned by it.
 .El
-.Pp
+.Ss Target-handling functions
 The
 .Fn "ctrlsel_filltarget"
 function fills in the members of the
@@ -335,7 +344,7 @@ function instead because it both provides compile-time checking of whether all t
 and also compute and defines the
 .Fn "nitems"
 member, which is derived from the other ones.
-.Pp
+.Ss Selection requesting functions
 The
 .Fn "ctrlsel_request"
 function asks the
@@ -348,15 +357,13 @@ into all the
 .Fa "targets"
 for the
 .Fa "window" .
-It returns a pointer to a
+It returns a pointer to a newly allocated
 .Ft CtrlSelContext
 to be passed to the
 .Fn "ctrlsel_receive"
 and
 .Fn "ctrlsel_cancel"
-functions (therefore, those functions must have access to the
-.Fa "targets"
-argument).
+functions.
 It returns NULL on error.
 .Pp
 The
@@ -413,7 +420,7 @@ function cancels the selection conversion represented by the
 .Fa "context" ,
 terminates any incremental transference in progress,
 and frees the context itself and any allocated buffer.
-.Pp
+.Ss Selection ownership functions
 The
 .Fn "ctrlsel_setowner"
 function asks the
@@ -431,15 +438,13 @@ If the
 is a manager selection, the
 .Fa "ismanager"
 argument must be set to nonzero.
-It returns a pointer to a
+It returns a pointer to a newly allocated
 .Ft CtrlSelContext
 to be passed to the
 .Fn "ctrlsel_send"
 and
 .Fn "ctrlsel_disown"
-functions (therefore, those functions must have access to the
-.Fa "targets"
-argument).
+functions.
 It returns NULL on error.
 .Pp
 The
@@ -470,7 +475,7 @@ function cancels the selection ownership represented by the
 .Fa "context" ,
 terminates any incremental transference in progress, and frees the context itself.
 This function does not free any buffer.
-.Pp
+.Ss Drag-and-drop request functions
 The
 .Fn "ctrlsel_dndwatch"
 function begins watching dropped content on
@@ -489,10 +494,7 @@ to be passed to the
 .Fn "ctrlsel_dndreceive"
 and
 .Fn "ctrlsel_dndclose"
-functions
-(therefore, those functions must have access to the
-.Fa "targets"
-argumnent).
+functions.
 It returns NULL on error.
 This function should be called once, at program initialization.
 .Pp
@@ -548,7 +550,7 @@ function cancels the watch for drops represented by
 .Fa context ,
 terminates any incremental transference in progress,
 and frees the context itself and any allocated buffer.
-.Pp
+.Ss Drag-and-drop ownership functions
 The
 .Fn ctrlsel_dndown
 function asks the
@@ -557,42 +559,46 @@ represented to by
 .Fa display
 to own the drag-and-drop selection for
 .Fa window ,
-so it can provide the contents of
+so it can provide the contents of all
 .Fa targets .
-This function blocks until the user drops the dragged content (by releasing a mouse button),
+This function blocks until the user drops the dragged content
+(by releasing a mouse button),
 or cancels the drag-and-drop operation (by pressing ESC).
 If the given
 .Fa miniature
 window is not
 .Ic None ,
 the window is mapped, raised and moved around to follow the user's mouse pointer.
-It saves into
-.Fa context_ret
-a pointer to
+It returns a pointer to a newly allocated
 .Ft CtrlSelContext
-with data to be passed to the
+to be passed to the
 .Fn ctrlsel_dndsend
 and
 .Fn ctrlsel_dnddisown
 functions.
-One of the following enum constants is returned:
-.Bl -tag -width Ds
-.It Ic CTRLSEL_ERROR
-The drag-and-drop selection could not be owned.
-The drag-and-drop operation is over.
-.It Ic CTRLSEL_NONE
-The content was dropped on a non-watching window.
-The drag-and-drop operation is over.
-.It Ic CTRLSEL_DROPSELF
-The content was dropped on the window that initiated the drag-and-drop operation.
-The drag-and-drop operation is over.
-.It Ic CTRLSEL_DROPOTHER
-The content was dropped on another window watching for content drops.
-The drag-and-drop operation is not over, the actual content must be sent with
-.Fn ctrlsel_dndsend
-or the drag-and-drop operation must be cancelled with
-.Fn ctrlsel_dnddisown .
-.El
+.Pp
+If the pointer
+.Fa receiver_ret
+is not
+.Ic NULL ,
+it stores in that address the window that received the drop of the drag-and-drop operation
+(or
+.Ic None
+if the operation was cancelled,
+the user dropped on a non-dndaware window,
+or an error occurred).
+Note that the receiver window can be the
+.Fa window
+that owns the drag-and-drop selection itself
+(a case known as
+.Em self-drop ,
+where the user drops something from a window into the same window).
+When a self-drop occurs, the drag-and-drop operation is over,
+because there is no need to send the content to another client
+(the current client already has access to the content);
+in this case
+.Fn ctrlsel_dndown
+returns NULL.
 .Pp
 The
 .Fn ctrlsel_dndsend

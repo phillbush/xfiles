@@ -1455,7 +1455,7 @@ ownprimary(Widget *widget, Time time)
 		widget->window,
 		XA_PRIMARY,
 		time,
-		0,
+		False,
 		widget->targets,
 		TARGET_LAST
 	);
@@ -2744,9 +2744,9 @@ static WidgetEvent
 dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 {
 	struct Selection *sel;
-	Window dragwin;
+	Window dragwin, receiver;
 	unsigned int mask;
-	int state, i, x, y;
+	int dropspot, i, x, y;
 
 	if (widget->sel == NULL)
 		return WIDGET_NONE;
@@ -2761,24 +2761,34 @@ dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 		8, (unsigned char *)widget->dndbuf, i,
 		&widget->dragtarget
 	);
-	state = ctrlsel_dndown(
+	widget->dragctx = ctrlsel_dndown(
 		widget->display,
 		widget->window,
 		dragwin,
 		lasttime,
 		&widget->dragtarget,
 		1,
-		&widget->dragctx
+		&receiver
 	);
 	if (dragwin != None)
 		XDestroyWindow(widget->display, dragwin);
-	if (state == CTRLSEL_ERROR) {
-		warnx("could not perform drag-and-drop");
-	} else if (state == CTRLSEL_DROPSELF) {
+	if (receiver == widget->window) {
+		/* user dropped into the source window itself */
 		querypointer(widget, widget->window, &x, &y, &mask);
-		if (getitemundercursor(widget, x, y) < 1)
+		if ((dropspot = getitemundercursor(widget, x, y)) < 1)
 			return WIDGET_NONE;
-		*nitems = fillselitems(widget, selitems);
+		if (widget->issel[dropspot] != NULL) {
+			/* user should not drag an item into itself */
+			return WIDGET_NONE;
+		}
+
+		/* first item must be the one below drop spot */
+		selitems[0] = dropspot;
+
+		/* other items are the ones being dropped */
+		*nitems = fillselitems(widget, &selitems[1]);
+		(*nitems)++;
+
 		if (FLAG(mask, ControlMask|ShiftMask))
 			return WIDGET_DROPLINK;
 		if (FLAG(mask, ShiftMask))
@@ -2786,7 +2796,9 @@ dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
 		if (FLAG(mask, ControlMask))
 			return WIDGET_DROPCOPY;
 		return WIDGET_DROPASK;
-	} else if (state == CTRLSEL_DROPOTHER) {
+	}
+	if (receiver != None) {
+		/* user dropped into another window */
 		return WIDGET_INTERNAL;
 	}
 	return WIDGET_NONE;

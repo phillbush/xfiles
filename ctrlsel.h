@@ -63,7 +63,7 @@ ctrlsel_setowner(
 	Window window,
 	Atom selection,
 	Time time,
-	int ismanager,
+	Bool ismanager,
 	struct CtrlSelTarget targets[],
 	unsigned long ntargets
 );
@@ -89,7 +89,7 @@ int ctrlsel_dndreceive(struct CtrlSelContext *context, XEvent *event);
 
 void ctrlsel_dndclose(struct CtrlSelContext *context);
 
-int
+CtrlSelContext *
 ctrlsel_dndown(
 	Display *display,
 	Window window,
@@ -97,7 +97,7 @@ ctrlsel_dndown(
 	Time time,
 	struct CtrlSelTarget targets[],
 	unsigned long ntargets,
-	CtrlSelContext **context
+	Window *receiver_ret
 );
 
 int ctrlsel_dndsend(struct CtrlSelContext *context, XEvent *event);

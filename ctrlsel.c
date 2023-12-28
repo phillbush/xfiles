@@ -639,7 +639,7 @@ ctrlsel_setowner(
 	Window window,
 	Atom selection,
 	Time time,
-	int ismanager,
+	Bool ismanager,
 	struct CtrlSelTarget targets[],
 	unsigned long ntargets
 ) {
@@ -1395,7 +1395,7 @@ ctrlsel_dndsend(CtrlSelContext *context, XEvent *event)
 	return ctrlsel_send(context, event);
 }
 
-int
+CtrlSelContext *
 ctrlsel_dndown(
 	Display *display,
 	Window window,
@@ -1403,7 +1403,7 @@ ctrlsel_dndown(
 	Time time,
 	struct CtrlSelTarget targets[],
 	unsigned long ntargets,
-	CtrlSelContext **context_ret
+	Window *receiver_ret
 ) {
 	CtrlSelContext *context;
 	struct PredArg arg;
@@ -1415,20 +1415,20 @@ ctrlsel_dndown(
 	Window lastwin, winbelow;
 	Atom lastaction, action, version;
 	long d[NCLIENTMSG_DATA];
-	int sendposition, retval, status, inside;
+	int sendposition, status, inside;
 	int x, y, w, h;
 
-	*context_ret = NULL;
+	*receiver_ret = None;
 	if (display == NULL || window == None)
-		return CTRLSEL_ERROR;
+		return NULL;
 	if (!XGetWindowAttributes(display, window, &wattr))
-		return CTRLSEL_ERROR;
+		return NULL;
 	if ((wattr.your_event_mask & StructureNotifyMask) == 0x00)
-		return CTRLSEL_ERROR;
+		return NULL;
 	if (wattr.map_state != IsViewable)
-		return CTRLSEL_ERROR;
+		return NULL;
 	if (!XInternAtoms(display, atomnames, XDND_ATOM_LAST, False, atoms))
-		return CTRLSEL_ERROR;
+		return NULL;
 	context = ctrlsel_setowner(
 		display,
 		window,
@@ -1439,11 +1439,10 @@ ctrlsel_dndown(
 		ntargets
 	);
 	if (context == NULL)
-		return CTRLSEL_ERROR;
+		return NULL;
 	d[0] = window;
 	sendposition = 1;
 	x = y = w = h = 0;
-	retval = CTRLSEL_ERROR;
 	lastaction = action = None;
 	lastwin = None;
 	arg = (struct PredArg){
@@ -1483,7 +1482,7 @@ ctrlsel_dndown(
 		(void)XIfEvent(display, &event, &dndpred, (XPointer)&arg);
 		switch (ctrlsel_send(context, &event)) {
 		case CTRLSEL_LOST:
-			retval = CTRLSEL_NONE;
+			*receiver_ret = None;
 			goto done;
 		case CTRLSEL_INTERNAL:
 			continue;
@@ -1495,18 +1494,18 @@ ctrlsel_dndown(
 		case KeyRelease:
 			if (event.xkey.keycode != 0 &&
 			    event.xkey.keycode == XKeysymToKeycode(display, XK_Escape)) {
-				retval = CTRLSEL_NONE;
+				*receiver_ret = None;
 				goto done;
 			}
 			break;
 		case ButtonPress:
 		case ButtonRelease:
 			if (lastwin == None) {
-				retval = CTRLSEL_NONE;
+				*receiver_ret = None;
 			} else if (lastwin == window) {
-				retval = CTRLSEL_DROPSELF;
+				*receiver_ret = window;
 			} else {
-				retval = CTRLSEL_DROPOTHER;
+				*receiver_ret = lastwin;
 				d[1] = d[3] = d[4] = 0;
 				d[2] = event.xbutton.time;
 				clientmsg(display, lastwin, atoms[XDND_DROP], d);
@@ -1599,7 +1598,7 @@ ctrlsel_dndown(
 		case DestroyNotify:
 		case UnmapNotify:
 			XPutBackEvent(display, &event);
-			retval = CTRLSEL_ERROR;
+			*receiver_ret = None;
 			goto done;
 		default:
 			break;
@@ -1612,10 +1611,9 @@ done:
 	XUngrabPointer(display, CurrentTime);
 	XUngrabKeyboard(display, CurrentTime);
 	freecursors(display, cursors);
-	if (retval != CTRLSEL_DROPOTHER) {
+	if (*receiver_ret == None || *receiver_ret == window) {
 		ctrlsel_dnddisown(context);
-		context = NULL;
+		return NULL;
 	}
-	*context_ret = context;
-	return retval;
+	return context;
 }
