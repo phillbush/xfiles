@@ -6,6 +6,8 @@ typedef struct Scroll {
 
 typedef struct Item {
 	unsigned char mode;     /* entry mode */
+	struct timespec mtime;	/* modification time */
+	size_t size;		/* file size in bytes */
 	char *name;             /* item display name */
 	char *fullname;         /* item full name */
 	char *status;           /* item statusbar info */
@@ -21,6 +23,7 @@ typedef enum {
 	WIDGET_PREV,
 	WIDGET_NEXT,
 	WIDGET_GOTO,
+	WIDGET_SORTBY,
 	WIDGET_KEYPRESS,
 	WIDGET_DROPASK,
 	WIDGET_DROPCOPY,
@@ -54,6 +57,8 @@ char *widget_geticons(Widget *widget);
 WidgetEvent widget_wait(Widget *widget);
 
 int widget_fd(Widget *widget);
+
+const char *widget_get_sortby(Widget *widget);
 
 void widget_map(Widget *widget);
 

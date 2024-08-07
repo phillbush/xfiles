@@ -532,6 +532,12 @@ or disabled
 (if set to
 .Ic false ) .
 Either option can be used (they are synonyms).
+.It Ic sortBy
+Initial sort order of files (one of
+.Qq Ic "name",
+.Qq Ic "time"
+or
+.Qq Ic "size")
 .El
 .Sh PROPERTIES
 .Nm xfiles
@@ -560,6 +566,14 @@ If this property is set to
 .Nm xfiles
 goes to the next directory in history.
 Otherwise, it goes to the directory whose path is equal to this property's value.
+.It Ic "_CONTROL_SORTBY"
+When this property is modified,
+.Nm xfiles
+sorts the directory contents according to the specified key (one of
+.Qq Ic "name",
+.Qq Ic "time"
+or
+.Qq Ic "size") .
 .El
 .Sh ENVIRONMENT
 The following environment variables affect the execution of

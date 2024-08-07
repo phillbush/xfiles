@@ -79,6 +79,12 @@ struct FM {
 	size_t thumbnaildirlen;
 
 	char *opener;
+
+	enum SortBy {
+		SORTBY_NAME = 0,
+		SORTBY_TIME,
+		SORTBY_SIZE
+	} sortby;
 };
 
 static int hide = 1;
@@ -245,13 +251,16 @@ isdir(Item *entry)
 }
 
 static int
-entrycmp(const void *ap, const void *bp)
+entrycmp(const void *ap, const void *bp, void *fmp)
 {
 	int aisdir, bisdir;
 	Item *a, *b;
+	struct FM *fm;
+	int retval = 0;
 
 	a = (Item *)ap;
 	b = (Item *)bp;
+	fm = (struct FM *)fmp;
 	/* dotdot (parent directory) first */
 	if (strcmp(a->name, "..") == 0)
 		return -1;
@@ -271,7 +280,22 @@ entrycmp(const void *ap, const void *bp)
 		return -1;
 	if (b->name[0] == '.' && a->name[0] != '.')
 		return 1;
-	return strcoll(a->name, b->name);
+
+	switch (fm->sortby) {
+	case SORTBY_NAME:
+		retval = strcoll(a->name, b->name);
+		break;
+	case SORTBY_TIME:
+		retval = difftime(a->mtime.tv_sec, b->mtime.tv_sec);
+		if (!retval)
+			retval = a->mtime.tv_nsec - b->mtime.tv_nsec;
+		break;
+	case SORTBY_SIZE:
+		retval = a->size - b->size;
+		break;
+	}
+
+	return retval;
 }
 
 static int
@@ -533,9 +557,13 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 			warn("%s", array[i]->d_name);
 			fm->entries[i].status = NULL;
 			fm->entries[i].mode = 0;
+			memset(&fm->entries[i].mtime, 0, sizeof(fm->entries[i].mtime));
+			fm->entries[i].size = 0;
 		} else {
 			fm->entries[i].status = statusfmt(&sb);
 			fm->entries[i].mode = filemode(fm, &sb, array[i]->d_name);
+			fm->entries[i].mtime = sb.st_mtim;
+			fm->entries[i].size = sb.st_size;
 		}
 		fm->entries[i].name = estrdup(array[i]->d_name);
 		fm->entries[i].fullname = fullpath(cwd->path, array[i]->d_name);
@@ -543,7 +571,7 @@ diropen(struct FM *fm, struct Cwd *cwd, const char *path)
 		free(array[i]);
 	}
 	free(array);
-	qsort(fm->entries, fm->nentries, sizeof(*fm->entries), entrycmp);
+	qsort_s(fm->entries, fm->nentries, sizeof(*fm->entries), entrycmp, fm);
 	if (strstr(cwd->path, fm->home) == cwd->path &&
 	    (cwd->path[fm->homelen] == '/' || cwd->path[fm->homelen] == '\0')) {
 		snprintf(buf, PATH_MAX, "~%s", cwd->path + fm->homelen);
@@ -903,6 +931,40 @@ done:
 	return retval;
 }
 
+static enum SortBy sortby_decode(const char *str)
+{
+	if (!str || !strcmp(str, "name"))
+		return SORTBY_NAME;
+	else if (!strcmp(str, "time"))
+		return SORTBY_TIME;
+	else if (!strcmp(str, "size"))
+		return SORTBY_SIZE;
+
+	return SORTBY_NAME;
+}
+
+static int
+sortby(struct FM *fm, const char *sortby)
+{
+	int retval;
+
+	fm->sortby = sortby_decode(sortby);
+
+	qsort_s(fm->entries, fm->nentries, sizeof(*fm->entries), entrycmp, fm);
+
+	retval = widget_set(
+		fm->widget,
+		fm->cwd->path,
+		fm->cwd->here,
+		fm->entries,
+		fm->nentries,
+		&fm->cwd->scrl
+	);
+
+	createthumbthread(fm);
+	return retval;
+}
+
 static void
 inituserpatts(struct FM *fm)
 {
@@ -1089,6 +1151,7 @@ main(int argc, char *argv[])
 		err(EXIT_FAILURE, "pledge");
 #endif
 	inituserpatts(&fm);
+	fm.sortby = sortby_decode(widget_get_sortby(fm.widget));
 	if (diropen(&fm, fm.cwd, path) == RETURN_FAILURE)
 		goto error;
 	fm.last = fm.cwd;
@@ -1183,6 +1246,12 @@ main(int argc, char *argv[])
 			break;
 		case WIDGET_GOTO:
 			if (changedir(&fm, text, true) == RETURN_FAILURE) {
+				exitval = EXIT_FAILURE;
+				goto done;
+			}
+			break;
+		case WIDGET_SORTBY:
+			if (sortby(&fm, text) == RETURN_FAILURE) {
 				exitval = EXIT_FAILURE;
 				goto done;
 			}

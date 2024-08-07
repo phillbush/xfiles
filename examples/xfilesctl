@@ -364,6 +364,11 @@ changedir() {
 	xprop -id "$WINDOWID" -format "_CONTROL_GOTO" 8u -set "_CONTROL_GOTO" "$1"
 }
 
+# change the sort order of XFiles window
+sortby() {
+	xprop -id "$WINDOWID" -format "_CONTROL_SORTBY" 8u -set "_CONTROL_SORTBY" "$1"
+}
+
 # prompt for file to open or directory to go to
 urlbar() {
 	printf '%s\n' * | prompt | {
@@ -418,6 +423,10 @@ open
 	xfiles
 	term
 	random
+sort by
+	name
+	time
+	size
 $(case "$PWD" in ("$TRASH/files") printf 'empty trash' ;; (*) printf 'trash can' ;; esac)
 EOF
 	} | menu | {
@@ -458,6 +467,9 @@ EOF
 			;;
 		("xfiles")
 			newwin
+			;;
+		("name"|"time"|"size")
+			sortby "$option"
 			;;
 		esac
 	}
