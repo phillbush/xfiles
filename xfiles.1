@@ -1,4 +1,4 @@
-.Dd March 29, 2023
+.Dd August 6, 2024
 .Dt XFILES 1
 .Os
 .Sh NAME
@@ -70,7 +70,7 @@ should usually not be called manually.
 gets a
 .Ar command
 as argument indicating the kind of interaction to perform with the user.
-Posible interactions are invoking a menu
+Possible interactions are invoking a menu
 or popping up a terminal dialog.
 .Pp
 .Nm xfiles
@@ -269,7 +269,7 @@ window, or on another window supporting the XDND protocol.
 The dragging motion can be modified by
 Control (forcing a copy operation);
 Shift (forcing a move operation); or
-Control + Shift (forcing a symbolik linking operation);
+Control + Shift (forcing a symbolic linking operation);
 .El
 .Ss Mouse button 2, 4, and 5
 The second, fourth and fifth buttons (the middle button click, scroll up and scroll down) are used for scrolling.
@@ -318,7 +318,7 @@ The eighth and ninth mouse buttons (previous and next) are used for navigating
 through the browsing history.
 .Bl -bullet -width 2
 .It
-Clicking the eigth mouse button goes to the previously open directory.
+Clicking the eighth mouse button goes to the previously open directory.
 .It
 Clicking the ninth mouse button goes to the next open directory.
 .El
@@ -434,7 +434,7 @@ in order of precedence of matching.
 .El
 .Pp
 The following icons have no associated glob patterns
-(but custom patterns can be installled with the
+(but custom patterns can be installed with the
 .Ic fileIcons
 X resource).
 .Bl -bullet -compact
@@ -609,3 +609,7 @@ not in hexadecimal (as is usually exchanged by a few X applications).
 .Xr dmenu 1 ,
 .Xr xmenu 1 ,
 .Xr X 7
+.Sh CAVEATS
+.Nm xfiles
+is a work-in-progress.
+Some features remain to be implemented.

@@ -85,8 +85,8 @@ PROG_LDFLAGS = \
 	${LDFLAGS} ${LDLIBS}
 
 DEBUG_FLAGS = \
-	-g -O0 -Wall -Wextra -Wpedantic
-#	-Wdouble-promotion -Wconversion
+	-g -O0 -DDEBUG -Wall -Wextra -Wpedantic
+#	-fsanitize=address,undefined
 
 all: ${PROG}
 ${PROG}: ${OBJS}
@@ -100,7 +100,8 @@ ${DEBUG_PROG}: ${DEBUG_OBJS}
 .c.dbg:
 	${CC} ${PROG_CFLAGS} ${DEBUG_FLAGS} -o $@ -c $<
 
-# brace expansion is a {GNU,BSD} extension; should we make this portable? (how?)
+# Brace expansion in makefile targets is a {GNU,BSD} extension.
+# Should we make this portable? (How?)
 control/selection.{dbg,o}: control/selection.h
 control/dragndrop.{dbg,o}: control/dragndrop.h control/selection.h
 control/font.{dbg,o}:      control/font.h

@@ -1,0 +1,244 @@
+            TODOs, FIXMEs, XXXs, and general notes and ideas
+
+§ Split ./examples/xfilesctl into a few scripts
+
+Splits the example file for XFiles' controlling script into a few
+scripts.  The provided example does too much file operations, some
+of which could rather be performed by a separate independent utility.
+
+The following example scripts should be created:
+• ./examples/trash: Send files to XDG trash.
+• ./examples/untrash: Send files from XDG trash to original directory.
+• ./examples/rmtrash: Clean trash.
+• ./examples/rename: Bulk file renaming.
+
+
+§ Keep item selected by name when refreshing directory
+
+When refreshing the directory (such as when a file was changed, removed
+or created), keep selected the file with the same name as the one which
+was selected before refresh (which is not necessarily the same file, as
+it may have been truncated and/or recreated).
+
+Currently, the file at the same position in the sort list is selected
+after refresh.
+
+
+§ Handle clipboard selection
+
+Handle the CLIPBOARD selection directly in <./widget.c>, and call
+xfilesctl with converted selection content when pasting from clipboard
+(Ctrl-V).
+
+Currently, the content of the CLIPBOARD selection is set and fetched by
+the xfilesctl script by calling xclip(1) or a similar utility.  It
+should just handle a list of path pre-processed by XFiles.
+
+
+§ Write progress dialog/indicator program
+
+Write program (for xfilesctl to fork) to show progress of ongoing file
+operations.
+
+
+§ Early drag-and-drop return
+
+Check the return of ctrldnd(3)'s callback function to cancel the ongoing
+drag-and-drop, so the ctrldnd_drag() and ctrldnd_getdrop() functions
+return immediately.
+
+
+§ Support XDND-based protocols
+
+Support additional protocols built on top of XDND:
+• Direct Save Protocol <https://johnlindal.wixsite.com/xdsave>.
+• Search Parameter Sharing Protocol <https://johnlindal.wixsite.com/xsearch>.
+
+
+§ Support hostnames in URI list
+
+Support drops in text/uri-list target that contains hostnames in URIs.
+Also, fetch the hostname of machine XFiles is running on.
+
+Currently, XFiles only supports URIs in "file:///path/to/file" format;
+but not in "file://example.host/path/to/file".
+
+XFiles MUST NOT include the hostname in the URIs when dragging a file
+from a XFiles window.  It must only support URIs with hostnames when
+dropping from another application.
+
+See <https://edeproject.org/spec/file-uri-spec.txt> (site does not
+exist, use Web Archive).
+
+
+§ Support malformed URIs
+
+Currently, a drop in "text/uri-list" target must be a sequence of
+"file:///path/to/file\r\n" strings.  Add support for the following
+deviations:
+• "file://example.host/path/to/file\r\n".  See <§ Support hostnames
+  in URI list> above.
+• "/path/to/file\r\n" (no scheme).
+• "file:///path/to/file\n" (no CRLF).
+• "file:///path/to/file" (no CRLF or LF delimiter).  Consider it a
+  URI list with a single URI.
+• Any combination of the above.
+
+
+§ Support XdndUriList as an alternative to text/uri-list target.
+
+Use "XdndUriList" target if provided, as an alternative to "text/uri-list"
+target.
+
+
+§ Conditionally decide the target of the drop
+
+Decide the target to get drop as AFTER we get the list of targets the
+drop is provided as.
+
+Currently, ctrldnd_getdrop() is passed an array of targets the caller
+wants the drop as.  That function requests the drop in the first target
+in the array which the drop can be converted to.  The caller has no
+opportunity to decide which target to use from the provided ones.
+
+The caller of ctrldnd_getdrop() should be able to decide the target to
+use in order to implement the feature <§ Drop whole file content?> below.
+
+
+§ Add hacking information
+
+Write on how one can understand the code and contribute to it.
+That includes:
+• Creating a <./HACKING> text file.
+• Adding a short header on each C file describing the module.
+
+
+§ Add third argument to xfilesthumb
+
+Add a third (optional) argument to xfiles thumb specifying the maximum
+width and height of the thumbnail to be generated.
+
+xfilesthumb must then be called as follows:
+
+	xfilesthumb /path/to/file /path/to/miniature.ppm 64
+
+
+§ Disentangle XFiles-specific code from widget
+
+Remove code relating to file-browsing from the <./widget.c> module.
+
+The idea is to make <.widget.c> into a generic icon-grid widget to use
+in, for example, a thumbnail listing of a image viewer, an icon theme
+viewer, etc.
+
+It would then be moved to the <./control/> directory, which I want to
+make into a utility library for my X applications.
+
+
+§ Implement support for editres protocol
+
+Implement editres protocol for exporting resources at runtime.
+
+It should be able for editres(1) (or a similar program I want to write)
+to show and edit the resources a particular instance of XFiles is using
+without needing to change X server's global resources.
+
+See also:
+• <./comm.c> at editres(1) source.
+• <./EditresCom.c> at xmu(3) source.
+• <https://flippery.org/gtk_editres>
+
+
+§ Handle X protocol errors
+
+Set an error handler callback to handle non-fatal X protocol errors.
+That should be similar to what is done at <./control/dragndrop.c>.
+
+
+§ Drag whole file content(?)
+
+(I am not sure whether this should be implemented.)
+
+When dragging, provide the content of the dragged file as an additional
+target.  This would impose the following conditions:
+• Content can only be dropped when dragging a single file.
+• Content can only be dropped when file is small enough (< 512 KB).
+• Content should be provided as a MIME type.
+• libmagic should be added as dependency to guess content's MIME type.
+
+XFiles supplies dragged files into three targets (a "target" is a format
+of data of an X selection): "text/uri-list", "STRING" and "UTF8_STRING".
+The data in all those targets is just the plain (UTF8-encoded) absolute
+paths of the dragged files, not their content (files are not even opened
+or read).  The first target is a sequence of percent-encoded URIs; and
+the other two are just sequence of plain paths.
+
+The feature <§ Conditionally decide the target of the drop> must be granted
+in order to implement this one.
+
+
+§ Drop octet stream(?)
+
+(I am not sure whether this should be implemented.)
+
+When dropping, save drop data as a new file in current directory.  Or
+prompt user whether/how to save.
+
+The following conditions must be true:
+• Drop is supplied as raw bytes ("application/octet-stream" target).
+• Drop is not supplied as a URI list ("text/uri-list" target); or it
+  lists a single unsupported URI.
+
+A URI is unsupported if it is in an unknown scheme (like "https://") or
+it is a "file://" URI on a remote host.  (We do not check for host).
+Optionally, derive filename for the saved file from URI.
+
+
+§ Demo animation(?)
+
+(I am not sure whether this should be implemented.)
+
+Replace <./demo.png> with a series of animated gifs (with predefined,
+restricted palette) demonstrating particular GUI interactions:
+• Performing rectangular selection with pointer.
+• Performing drag-and-drop (drop video from XFiles into MPV).
+• Controlling the scroller widget.
+• Spawning a context-menu.
+• Spawning a embedded XTerm window (with XEmbed).
+• Comparing a window without thumbnails and a window with thumbnails.
+
+
+§ Redo command-line interface(?)
+
+(I am not sure whether this should be implemented.)
+
+Use X11-style flags (foo -bar -baz) rather than UNIX-style flags
+(foo -r -z).
+
+
+§ Implement input translation X resources(?)
+
+(I am not sure whether this should be implemented.)
+
+Add X resources for rebind hardcoded XFiles keyboard commands, which are
+not handled by the xfilesctl(1) script.  That will use something similar
+to translation resources from Xaw(3).
+
+If implemented, I will likely remove vi HJKL hardcoded keyboard commands.
+
+
+§ Use XDG thumbnail spec(?)
+
+(I am not sure whether this should be implemented.)
+
+Use XDG specification for caching and saving thumbnails, so them can be
+shared between different file managers.  That requires using libpng(3)
+as an additional dependency.
+
+
+§ Write configure script(?)
+
+(I am not sure whether this should be implemented.)
+
+Write a <./configure> script to check host system before building.  It
+should generate a <./config.mk> file that will be included by Makefile.

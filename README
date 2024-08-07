@@ -1,0 +1,99 @@
+                       XFiles: a X11 File Manager
+                 <https://github.com/phillbush/xfiles>
+
+Features:
+• Icons representing directory entries.
+• Icon view only (list/culumn/tree/etc view is not and will not be implemented).
+• Uncluttered interface (no toolbar, sidebar, etc but grid of icons).
+• Mouse interaction with drag-and-drop and selection actions.
+• Drag-and-drop within the same XFiles window.
+• Drag-and-drop between two XFiles windows.
+• Drag-and-drop between an XFiles window and another application.
+• Scroller widget (activated on middle mouse button) replacing scrollbars.
+• XEmbed support, to incorporate other application's windows as widgets
+  (for example, dmenu can be used as an address bar).
+• File operations are delegated to a user-written script (xfilesctl).
+• Thumbnail (64x64 PPM image) generation delegated to a script (xfilesthumb).
+• Appearance (like colors and font) customizable by X resources.
+
+See ./demo.png for a illustration of XFiles in action.
+
+
+§ INSTALLATION
+
+Build XFiles with “make”.
+Copy the built binary file ./xfiles into your system's $PATH.
+Optionally, copy the manual file `./xfiles.1` in your system's $MANPATH.
+Optionally, copy the scripts in ./examples/ in your system's $PATH.
+
+Dependencies:
+• C99 compiler, for building.
+• POSIX make, for building.
+• Mandoc, for the manual.
+• POSIX C standard library and headers.
+• X11 libraries and headers (Xlib, Xcursor, Xext, Xft, Xpm, Xrender).
+• Fontconfig library and headers.
+• Pthreads library and headers.
+• (NOTE: The xfilesctl and xfilesthumb scripts may depend on other programs).
+
+
+§ QUICK-START
+
+Context menu.
+XFiles has no context menu; but it invokes “xfilesctl” at right-click.
+You can make a xfilesctl script open xmenu(1) or other pop-up menu program.
+On right-click, it is invoked as follows (%s is the paths to selected files):
+
+	xfilesctl menu %s
+
+Address bar.
+XFiles has no address bar; but it invokes “xfilesctl” at Ctrl+key presses.
+You can make a xfilesctl script open dmenu(1) or other prompt program.
+On, say, Ctrl+L, it is invoked as follows (%s is the paths to selected files):
+
+	xfilesctl ^L %s
+
+File operations.
+XFiles does no file operation; but it invokes “xfilesctl” at icon manipulation.
+You can make a xfilesctl script call cp(1) or other command on a drop action.
+On file dropping, it is invoked as follows (%s is the path to selected files):
+
+	xfilesctl drop-ask %s
+
+Thumbnails.
+XFiles does not generate thumbnails; but it invokes “xfilesthumb” to do so.
+Thumbnails must be 64x64 pixels in size, and must be in the PPM format.
+You can make a xfilesthumb script call pdftoppm(1) to create a pdf thumbnail.
+The xfilesthumb script is invoked as follows:
+
+	xfilesthumb /path/to/file /path/to/miniature.ppm
+
+Examples.
+See the ./examples/ directories for script and configuration examples:
+• ./examples/xfilesctl (example controller script).
+• ./examples/xfilesthumb (example thumbnailer script).
+• ./examples/Xresources (example X resources database).
+
+Read the manual at ./xfiles.1 for more information on usage.
+
+
+§ CONTRIBUTING
+
+If possible, send feedback (positive or negative) via email or issue tracker.
+If possible, report bugs (possibly with a fix) via email or issue tracker.
+
+Feature requests and patches adding new features are welcome.
+But it is ultimately up to author's discretion to approve them or not.
+
+Keep in mind that this is a personal project and a work in progress.
+
+Read ./TODO for a list of known bugs and features intended to be added.
+
+
+§ AUTHOR
+
+By Lucas de Sena <lucas at seninha dot org> © 2021-2024.
+
+Code and manual distributed under the MIT/X license.
+Icons are distributed under CC0/Public Domain.
+See ./LICENSE for more information.
