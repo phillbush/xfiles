@@ -1,0 +1,456 @@
+.Dd July 25, 2024
+.Dt CTRLDND 3
+.Os libcontrol
+.Sh NAME
+.Nm ctrldnd_announce ,
+.Nm ctrldnd_drag ,
+.Nm ctrldnd_getdrop
+.Nd drag-and-drop functions
+.Sh SYNOPSIS
+.In X11/Xlib.h
+.In control/dragndrop.h
+.Bd -literal
+enum ctrldnd_action {
+	CTRLDND_COPY      = 0x01,
+	CTRLDND_MOVE      = 0x02,
+	CTRLDND_LINK      = 0x04,
+	CTRLDND_ASK       = 0x08,
+	CTRLDND_PRIVATE   = 0x10,
+};
+
+#define CTRLDND_ANYACTION (~0)
+
+struct ctrldnd_drop {
+	enum ctrldnd_action action;
+	Window              window;
+	Atom                target;
+	Time                time;
+	unsigned char      *data;
+	size_t              datasize;
+	int                 x, y;
+};
+.Ed
+.Pp
+.Ft void
+.Fo ctrldnd_announce
+.Fa "Display *display"
+.Fa "Window dropsite"
+.Fc
+.Ft "struct ctrldnd_drop"
+.Fo ctrldnd_drag
+.Fa "Display *display"
+.Fa "int screen"
+.Fa "Time timestamp"
+.Fa "Window icon"
+.Fa "Atom const targets[]"
+.Fa "unsigned char const *contents[]"
+.Fa "size_t const contentlen[]"
+.Fa "size_t ntargets"
+.Fa "enum ctrldnd_action actions"
+.Fa "Time interval"
+.Fa "int (*callback)(XEvent *event, void *arg)"
+.Fa "void *arg"
+.Fc
+.Ft "struct ctrldnd_drop"
+.Fo ctrldnd_getdrop
+.Fa "XEvent *event"
+.Fa "Atom const targets[]"
+.Fa "size_t ntargets"
+.Fa "enum ctrldnd_action actions"
+.Fa "Time interval"
+.Fa "int (*callback)(XEvent *event, void *arg)"
+.Fa "void *arg"
+.Fc
+.Sh DESCRIPTION
+The ctrldnd library implements the X drag-and-drop (XDND) protocol,
+which allows the user to drag a selection and drop it onto an XDND-aware window (called the dropsite).
+.Pp
+The
+.Fn ctrldnd_announce
+function announces a given window as
+.Em XDND-aware ,
+so it can be used as a dropsite.
+The
+.Fn ctrldnd_drag
+function starts the drag-and-drop operation,
+and it only returns when the selection is dropped or the operation is cancelled.
+The
+.Fn ctrldnd_getdrop
+function checks whether the mouse pointer is being dragged over a given window,
+and if that is the case only returns when the selection is dropped
+or the mouse pointer leaves the window.
+.Pp
+The
+.Fn ctrldnd_announce
+function returns immediately.
+The
+.Fn ctrldnd_drag
+and
+.Fn ctrldnd_getdrop
+functions block until a user input (such as releasing a mouse button) triggers their return.
+.Pp
+The
+.Fa callback
+function (which the blocking functions get as argument) is called whenever an event (not XDND-related) occurs,
+so the program can handle it.
+.Pp
+The
+.Ft "struct ctrldnd_drop"
+structure (which the blocking functions return) specifies the state of the drop when the drag-and-drop operation terminates.
+.Ss Parameters
+.Bl -tag -width Ds
+.It Fa actions
+The bitmask of supported drop actions represented as
+.Ft ctrldnd_action
+enumerations.
+The additional constant
+.Dv CTRLDND_ANYACTION
+can be used if any drop action is supported.
+If its value is zero, the requested drop action is ignored, and the final drop action falls back to a default value
+.Po
+which is equal to
+.Dv CTRLDND_COPY
+.Pc .
+.It Fa arg
+Points to an object given to the
+.Fa callback
+function.
+.It Fa callback
+The function called by
+.Fn ctrldnd_drag
+when
+.Fn ctrldnd_getdrop
+to handle non-drag-and-drop events.
+.It Fa contentlen
+The array of size of each buffer in the
+.Fa contents
+array.
+It must have
+.Fa ntargets
+members.
+.It Fa contents
+The array of buffers holding the dragged selection data.
+It must have
+.Fa ntargets
+members.
+Each member must be in the format of the value at the same position in the
+.Fa targets
+array.
+.It Fa display
+Points to the context of connection to the
+.Xr Xserver 1 .
+.It Fa dropsite
+The window announced as a dropping site to other clients talking the XDND protocol.
+.It Fa event
+Points to the
+.Xr XEvent 3
+messaging the dropsite that the mouse pointer entered it during a drag-and-drop operation.
+.It Fa icon
+The window that will follow the pointer cursor while dragging; or
+.Dv None ,
+if
+.Fn ctrldnd_drag
+should create (and destroy) the icon window by itself.
+.It Fa interval
+The time in milliseconds between calls to the
+.Fa callback
+function with a synthetic motion event.
+If its value is zero, no synthetic motion event is passed to the callback function.
+.It Fa ntargets
+The number of members in the
+.Fa targets ,
+.Fa contents ,
+and
+.Fa contentlen
+arrays.
+.It Fa screen
+The number of the screen where the drag-and-drop operation is happening.
+.It Fa targets
+The array of targets into which the dragged selection can be converted to.
+It must have
+.Fa ntargets
+members.
+.It Fa timestamp
+The time of the event that triggered the drag-and-drop operation.
+.El
+.Ss Action constants
+The
+.Ft ctrldnd_action
+enumeration defines constants for actions that can be performed on dropping.
+The constants are as follows:
+.Bl -tag -width CTRLDND_PRIVATE
+.It Dv CTRLDND_MOVE
+Drop is moved.
+.It Dv CTRLDND_COPY
+Drop is copied.
+.It Dv CTRLDND_LINK
+Drop is linked.
+.It Dv CTRLDND_ASK
+User is prompted for action.
+.It Dv CTRLDND_PRIVATE
+Client-specific action.
+.El
+.Pp
+Those constants are not equal to the
+.Ft Atom Ns s
+specified by the XDND protocol to denote their respective actions.
+They are defined as bitmask constants so they can be used together in an bitwise OR.
+.Ss Drop structure
+The
+.Ft ctrldnd_drop
+structure contains the state of the drop.
+Its members are as follows
+.Bl -tag -width Ds
+.It Fa action
+The drag-and-drop action accepted by the client where the content was dropped.
+Note that this is not the
+.Ft Atom
+corresponding to the action, but a
+.Ft "enum ctrldnd_action"
+constant.
+.It Fa window
+The window where the content has been dropped (also known as
+.Em dropsite ) .
+If the drop was not accepted, or was released onto a XDND-unaware window,
+its value is
+.Dv None .
+.It Fa target
+The atom naming the target (also known as format) into which the drop has been requested.
+If the drop was not accepted, or was released onto a XDND-unaware window,
+its value is
+.Dv None .
+.It Fa time
+The time the drop occurred.
+.It Fa data
+The address to the content of the drop selection converted into
+.Fa target .
+The caller is responsible for freeing it.
+If the drop was not accepted, or was released onto a XDND-unaware window,
+or the conversion failed,
+its value is
+.Dv NULL .
+.It Fa datasize
+The size in bytes of the converted content.
+If the drop was not accepted, or was released onto a XDND-unaware window,
+or the conversion failed,
+its value is zero or negative.
+.It Fa x , y
+The coordinates of the mouse pointer at the time of the drop
+relative to the dropsite window's origin.
+.El
+.Ss Callback function
+The
+.Fa callback
+parameter is a pointer to a function which is called by the
+.Fn ctrldnd_drag
+and
+.Fn ctrldnd_getdrop
+functions (while they are blocked) to handle non-dnd X Events.
+If its value is
+.Dv NULL ,
+no callback function is called.
+.Pp
+The pointer to a
+.Xr XEvent 3
+structure describing the event to be handled is passed to the callback function.
+The display for the connection to the X server can be inferred from this structure.
+The types of events are as follows:
+.Bl -tag -width Ds
+.It Dv EnterNotify
+Passed when the mouse pointer enters the dropsite.
+.It Dv LeaveNotify
+Passed when the mouse pointer leaves the dropsite.
+.It Dv MotionNotify
+Passed whenever the mouse pointer moves on the dropsite.
+If the
+.Fa interval
+argument is greater than zero,
+a synthetic motion event is periodically generated at that much milliseconds.
+.El
+.Pp
+The opaque pointer
+.Fa arg
+is passed to the callback function, and can contain anything.
+.Pp
+The callback function should return as immediately as possible.
+It should not block or wait
+(otherwise the drag-and-drop operation will not be responsive to the user).
+.Ss Setting function
+The
+.Fn ctrldnd_announce
+function sets the necessary properties to announce
+.Fa dropsite
+as an XDND-aware window where dragged objects can be dropped into.
+.Ss Dragging function
+The
+.Fn ctrldnd_drag
+function initiates the drag-and-drop operation and waits for it to complete.
+It returns a
+.Ft ctrldnd_drop
+structure describing the state of the drop.
+See the section
+.Sx Drop structure
+above for more information.
+.Pp
+.Fn ctrldnd_drag
+uses the given
+.Fa icon
+as dragging indicator for visual feedback.
+The icon window is reparented into the root window, mapped, raised and moved around to follow the pointer cursor.
+It is up to the caller to create and destroy the icon window.
+However, if its value is
+.Dv None ,
+a default icon window is created and destroyed automatically.
+If it is supported by the cursor theme,
+the mouse cursor is changed according to whether the pointer is over a dropsite which accepts the drop,
+and according to the action that will be performed.
+.Pp
+.Fn ctrldnd_drag
+must be called with the
+.Fa ntargets
+argument equal to the number of supported drop formats.
+The parameters
+.Fa targets ,
+.Fa contents ,
+and
+.Fa contentlen
+are arrays of 
+.Fa ntargets
+members each.
+For each member, those arrays specify the format/target of the content,
+the content itself,
+and the content size in bytes.
+.Pp
+.Fn ctrldnd_drag
+blocks until the selection is dropped (by releasing a mouse button),
+or the operation is cancelled (by pressing
+.Aq Esc ) .
+The action that will be performed on dropping depends on the state of the keyboard modifiers at the time of button release,
+but only if the corresponding action constant is set on the
+.Fa actions
+bitmask.
+The modifier to action mapping is as follows:
+.Bl -tag -offset indent -width Control+Shift+Control
+.It Aq Ic Shift
+Drop is moved.
+.It Aq Ic Control
+Drop is copied.
+.It Aq Ic Shift+Control
+Drop is linked.
+.It None of above
+User is prompted for the action on drop.
+.El
+.Pp
+While dragging,
+.Fn ctrldnd_drag
+filters and responds to X events related to the drag-and-drop.
+The caller can respond to unfiltered events by providing a non
+.Dv NULL
+pointer to an event-handler
+.Fa callback
+function.
+.Ss Drop-checking function
+The
+.Fn ctrldnd_getdrop
+function checks whether a client owning the DND selection is communicating with the caller with the XDND protocol.
+It returns a
+.Ft ctrldnd_drop
+structure describing the state of the drop.
+See the section
+.Sx Drop structure
+above for more information.
+.Pp
+If the
+.Fa event
+argument is a
+.Dv ClientMessage
+event sent by the DND owner communicating that the mouse pointer entered the dropsite,
+.Fn ctrldnd_getdrop
+blocks until the communication ends.
+Otherwise, the function returns immediately.
+.Pp
+.Fn ctrldnd_getdrop
+must be called with the
+.Fa ntargets
+argument equal to the number of supported drop formats.
+The parameter
+.Fa targets
+is an array of
+.Fa ntargets
+members.
+Each member specifies the format/target of drops that can be dropped onto the dropsite.
+.Pp
+While communicating with the DND owner,
+.Fn ctrldnd_getdrop
+filters and responds to X events related to the drag-and-drop.
+The caller can respond to unfiltered events by providing a non
+.Dv NULL
+pointer to an event-handler
+.Fa callback
+function.
+.Sh SEE ALSO
+.Xr ctrlsel 3 ,
+.Xr X 7
+.Rs
+.%T Xlib - C Language X Interface
+.%U https://www.x.org/releases/current/doc/libX11/libX11/libX11.html
+.%Q X Consortium Standard
+.Re
+.Rs
+.%T Drag-and-Drop Protocol for the X Window System
+.%U https://johnlindal.wixsite.com/xdnd
+.Re
+.Sh CAVEATS
+The term
+.Em target
+can mean two things:
+.Bl -bullet -width 1n
+.It
+In general (as per X.Org specifications and documents), a
+.Em target
+is defined as the
+.Ft Atom
+specifying the format into which a client has requested the selection to be converted
+(whatever that means is up to the clients involved;
+the protocol does not constrain the semantics).
+.It
+Specifically for the XDND protocol, a
+.Em target
+is defined as the
+.Ft Window
+that supports the XDND protocol, and
+will receive the drop on a mouse release.
+.El
+.Pp
+This manual uses the word
+.Em target
+only referring to the first (general) sense.
+For the XDND-specific sense, the term
+.Em dropsite
+is used in this manual instead.
+.Pp
+This manual uses the term
+.Em drop
+to denote slightly different but intrinsically related things.
+Context dictates the correct meaning.
+.Bl -bullet -width 1n
+.It
+The content of the XDND selection.
+In particular,
+when the selection has been converted into a target requested by the dropsite
+after the end of a successful drag-and-drop operation.
+.It
+The situation when the mouse button is released on top of a dropsite
+accepting the XDND selection and the requested action.
+.El
+.Sh BUGS
+The
+.Fn ctrldnd_drag
+function lefts the
+.Fa icon
+window unmapped and reparented into root window in an arbitrary position.
+If needed, it is up to the caller to remap it, reparent it, and move it back where it was before.
+.Pp
+The same bugs for
+.Xr ctrlsel 3
+apply here.

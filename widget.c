@@ -24,9 +24,11 @@
 #include <X11/extensions/Xrender.h>
 #include <X11/extensions/shape.h>
 
+#include <control/selection.h>
+#include <control/dragndrop.h>
+#include <control/font.h>
+
 #include "icons.h"
-#include "ctrlfnt.h"
-#include "ctrlsel.h"
 #include "util.h"
 #include "widget.h"
 
@@ -257,6 +259,13 @@ struct Widget {
 	Pixmap namepix;                 /* temporary pixmap for the labels */
 	Pixmap namepict;
 
+	struct clipboard {
+		unsigned char *buf;
+		size_t size;
+		FILE *stream;
+		Bool filled;
+	} plainclip, uriclip;           /* streams for X Selection content */
+
 	/*
 	 * Lock used for synchronizing the thumbnail and the main threads.
 	 */
@@ -266,8 +275,6 @@ struct Widget {
 	 * Items to be displayed
 	 */
 	Item *items;
-	char *selbuf, *uribuf, *dndbuf; /* buffer for selections */
-	size_t selbufsiz, uribufsiz;
 	int nitems;                     /* number of items */
 	int *linelen;                   /* for each item, the lengths of its largest label line */
 	int *nlines;                    /* for each item, the number of label lines */
@@ -284,10 +291,6 @@ struct Widget {
 	 * can easily access a selection in the list, and remove it for
 	 * example, given the index of an item.
 	 */
-	struct CtrlSelTarget targets[TARGET_LAST];
-	struct CtrlSelTarget dragtarget;
-	struct CtrlSelTarget droptarget;
-	CtrlSelContext *selctx, *dragctx, *dropctx;
 	struct Selection *sel;          /* list of selections */
 	struct Selection *rectsel;      /* list of selections by rectsel */
 	struct Selection **issel;       /* array of pointers to Selections */
@@ -1297,6 +1300,7 @@ scroll(Widget *widget, int y)
 		return false;
 	if (ALL_ROWS(widget) + 1 < widget->nrows)
 		return false;
+	widget->redraw = True;
 	prevhand = gethandlepos(widget);
 	newrow = prevrow = widget->row;
 	widget->ydiff += y;
@@ -1395,70 +1399,110 @@ getitemundercursor(Widget *widget, int x, int y)
 static void
 disownprimary(Widget *widget)
 {
-	if (widget->selctx == NULL)
-		return;
-	ctrlsel_disown(widget->selctx);
-	widget->selctx = NULL;
+	widget->seltime = 0;
 }
 
 static void
-disowndnd(Widget *widget)
+writeuri(FILE *stream, unsigned char *s)
 {
-	if (widget->dragctx == NULL)
-		return;
-	ctrlsel_dnddisown(widget->dragctx);
-	widget->dragctx = NULL;
+#define UNRESERVED \
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ" \
+	"abcdefghijklmnopqrstuvwxyz" \
+	"0123456789" "-._~" "/"
+
+	(void)fprintf(stream, "file://");
+	for (; *s != '\0'; s++) {
+		if (strchr(UNRESERVED, *s) != NULL)
+			(void)fprintf(stream, "%c", *s);
+		else
+			(void)fprintf(stream, "%%%02X", *s);
+	}
+	(void)fprintf(stream, "\r\n");
+}
+
+static ssize_t
+fillclipboard(Widget *widget, unsigned char **bufp, bool uriformat)
+{
+	struct Selection *sel;
+	struct clipboard *clip;
+	char const *delim = "\n";
+	FILE *stream;
+
+	if (widget->sel == NULL)
+		return -1;
+	clip = uriformat ? &widget->uriclip : &widget->plainclip;
+	stream = clip->stream;
+	if (clip->filled)
+		goto done;
+	rewind(stream);
+	if (widget->sel != NULL && widget->sel->next == NULL) {
+		/* only one item selected; do not add trailling newline */
+		delim = "";
+	}
+	for (sel = widget->sel; sel != NULL; sel = sel->next) {
+		char *name = widget->items[sel->index].fullname;
+
+		if (!uriformat)
+			(void)fprintf(stream, "%s%s", name, delim);
+		else
+			writeuri(stream, (unsigned char *)name);
+	}
+	clip->filled = True;
+done:
+	fflush(stream);
+	*bufp = clip->buf;
+	return ferror(stream) ? -1 : ftello(stream);
+}
+
+static ssize_t
+convertcallback(void *arg, Atom target, unsigned char **pbuf)
+{
+	Widget *widget = arg;
+
+	if (widget->sel == NULL) {
+		*pbuf = (unsigned char *)"";
+		return 0;
+	}
+	if (target == XA_STRING || target == widget->atoms[UTF8_STRING])
+		return fillclipboard(widget, pbuf, False);
+	if (target == widget->atoms[TEXT_URI_LIST])
+		return fillclipboard(widget, pbuf, True);
+	return -1;
 }
 
 static void
-releasednd(Widget *widget)
+sendprimary(Widget *widget, XEvent *event)
 {
-	if (widget->dropctx == NULL)
+	int error;
+
+	if (widget->seltime == 0)
 		return;
-	FREE(widget->droptarget.buffer);
-	widget->droptarget.nitems = 0;
-	widget->droptarget.bufsize = 0;
+	error = ctrlsel_answer(
+		event, widget->seltime,
+		(Atom[]){
+			XA_STRING,
+			widget->atoms[UTF8_STRING],
+			widget->atoms[TEXT_URI_LIST]
+		}, 3,
+		convertcallback, widget
+	);
+	if (error == ENOMEM) {
+		warnx("could not send selection (no memory)");
+	}
 }
 
 static void
 ownprimary(Widget *widget, Time time)
 {
-	struct Selection *sel;
-	size_t i, j;
+	widget->seltime = ctrlsel_own(
+		widget->display, widget->window, time, XA_PRIMARY
+	);
+}
 
-	if (widget->sel == NULL)
-		return;
-	disownprimary(widget);
-	i = j = 0;
-	for (sel = widget->sel; sel != NULL; sel = sel->next) {
-		if (sel->next != NULL)
-			i += snprintf(widget->selbuf + i, widget->selbufsiz - i, "%s\n", widget->items[sel->index].fullname);
-		j += snprintf(widget->uribuf + j, widget->uribufsiz - j, "file://%s\r\n", widget->items[sel->index].fullname);
-	}
-	ctrlsel_filltarget(
-		XA_STRING, XA_STRING,
-		8, (unsigned char *)widget->selbuf, i,
-		&widget->targets[TARGET_STRING]
-	);
-	ctrlsel_filltarget(
-		widget->atoms[UTF8_STRING], widget->atoms[UTF8_STRING],
-		8, (unsigned char *)widget->selbuf, i,
-		&widget->targets[TARGET_UTF8]
-	);
-	ctrlsel_filltarget(
-		widget->atoms[TEXT_URI_LIST], widget->atoms[TEXT_URI_LIST],
-		8, (unsigned char *)widget->uribuf, j,
-		&widget->targets[TARGET_URI]
-	);
-	widget->selctx = ctrlsel_setowner(
-		widget->display,
-		widget->window,
-		XA_PRIMARY,
-		time,
-		False,
-		widget->targets,
-		TARGET_LAST
-	);
+static void
+resetclipboard(Widget *widget)
+{
+	widget->plainclip.filled = widget->uriclip.filled = False;
 }
 
 static void
@@ -1470,6 +1514,7 @@ cleanwidget(Widget *widget)
 
 	if (!widget->isset)
 		return;
+	resetclipboard(widget);
 	thumb = widget->thumbhead;
 	while (thumb != NULL) {
 		tmp = thumb;
@@ -1490,14 +1535,7 @@ cleanwidget(Widget *widget)
 	FREE(widget->linelen);
 	FREE(widget->nlines);
 	FREE(widget->issel);
-	FREE(widget->selbuf);
-	widget->selbufsiz = 0;
-	FREE(widget->uribuf);
-	widget->uribufsiz = 0;
-	FREE(widget->dndbuf);
 	disownprimary(widget);
-	disowndnd(widget);
-	releasednd(widget);
 	(void)XChangeProperty(
 		widget->display,
 		widget->window,
@@ -1516,6 +1554,7 @@ selectitem(Widget *widget, int index, int select, int rectsel)
 	struct Selection *sel;
 	struct Selection **header;
 
+	resetclipboard(widget);
 	if (widget->issel == NULL || index <= 0 || index >= widget->nitems)
 		return;
 	/*
@@ -1951,93 +1990,6 @@ fillselitems(Widget *widget, int *selitems)
 	return nitems;
 }
 
-static Window
-createdragwin(Widget *widget, int index)
-{
-	struct Icon *icon;
-	Window win;
-	GC gc;
-	unsigned long opacity;
-	Pixmap pix, mask;
-	int xroot, yroot, w, h;
-
-	if (index <= 0)
-		return None;
-	if (!querypointer(widget, widget->root, &xroot, &yroot, NULL))
-		return None;
-	w = h = THUMBSIZE;
-	if (widget->thumbs[index] != NULL) {
-		w = widget->thumbs[index]->w;
-		h = widget->thumbs[index]->h;
-	}
-	win = XCreateWindow(
-		widget->display,
-		widget->root,
-		xroot, yroot, w, h, 0,
-		widget->depth, InputOutput, widget->visual,
-		CWBackPixel | CWOverrideRedirect| CWColormap | CWBorderPixel,
-		&(XSetWindowAttributes){
-			.background_pixel = 0,
-			.border_pixel = 0,
-			.colormap = widget->colormap,
-			.override_redirect = True
-		}
-	);
-	if (win == None)
-		return None;
-	opacity = DND_OPACITY;
-	XChangeProperty(
-		widget->display, win,
-		widget->atoms[_NET_WM_WINDOW_OPACITY],
-		XA_CARDINAL, 32, PropModeReplace,
-		(unsigned char *)&opacity,
-		1
-	);
-	XChangeProperty(
-		widget->display, win,
-		widget->atoms[_NET_WM_WINDOW_TYPE],
-		XA_ATOM, 32, PropModeReplace,
-		(unsigned char *)&widget->atoms[_NET_WM_WINDOW_TYPE_DND],
-		1
-	);
-	if (widget->thumbs[index] == NULL) {
-		icon = geticon(widget, index);
-		if ((mask = XCreatePixmap(widget->display, win, w, h, CLIP_DEPTH)) == None) {
-			XDestroyWindow(widget->display, win);
-			return None;
-		}
-		if ((gc = XCreateGC(widget->display, mask, 0, NULL)) == None) {
-			XFreePixmap(widget->display, mask);
-			XDestroyWindow(widget->display, win);
-			return None;
-		}
-		XSetForeground(widget->display, gc, 0);
-		XFillRectangle(widget->display, mask, gc, 0, 0, w, h);
-		XCopyArea(widget->display, icon->mask, mask, gc, 0, 0, w, h, 0, 0);
-		XShapeCombineMask(widget->display, win, ShapeBounding, 0, 0, mask, ShapeSet);
-		XFreePixmap(widget->display, mask);
-		XFreeGC(widget->display, gc);
-		XSetWindowBackgroundPixmap(widget->display, win, icon->pix);
-	} else {
-		if ((pix = XCreatePixmap(widget->display, win, w, h, widget->depth)) == None) {
-			XDestroyWindow(widget->display, win);
-			return None;
-		}
-		XPutImage(
-			widget->display,
-			pix,
-			widget->gc,
-			widget->thumbs[index]->img,
-			0, 0, 0, 0, w, h
-		);
-		XSetWindowBackgroundPixmap(widget->display, win, pix);
-		XFreePixmap(widget->display, pix);
-	}
-	XMapRaised(widget->display, win);
-	XFlush(widget->display);
-	return win;
-}
-
 static char *
 gettextprop(Widget *widget, Window window, Atom prop, Bool delete)
 {
@@ -2162,6 +2114,62 @@ createwindow(Widget *widget, Window parent, XRectangle rect, long eventmask)
 			.event_mask = eventmask,
 		}
 	);
+}
+
+static Window
+create_dragwin(Widget *widget, int index)
+{
+	Pixmap pix, iconbg, iconmask;
+	Window dndicon;
+	struct Icon *icon;
+	unsigned int width, height;
+
+	if (index < 1)
+		return None;
+	pix = None;
+	dndicon = None;
+	if (widget->thumbs[index] != NULL) {
+		width = widget->thumbs[index]->w;
+		height = widget->thumbs[index]->h;
+		pix = XCreatePixmap(
+			widget->display, widget->window,
+			width, height, widget->depth
+		);
+		if (pix == None)
+			goto error;
+		(void)XPutImage(
+			widget->display, pix,
+			widget->gc,
+			widget->thumbs[index]->img,
+			0, 0, 0, 0, width, height
+		);
+		iconbg = pix;
+		iconmask = None;
+	} else if ((icon = geticon(widget, index)) != NULL) {
+		width = THUMBSIZE;
+		height = THUMBSIZE;
+		iconbg = icon->pix;
+		iconmask = icon->mask;
+	} else {
+		goto error;
+	}
+	dndicon = createwindow(
+		widget, widget->root,
+		(XRectangle){0, 0, width, height}, 0
+	);
+	(void)XSetWindowBackgroundPixmap(widget->display, dndicon, iconbg);
+	if (dndicon == None)
+		goto error;
+	if (iconmask == None)
+		goto error;
+	XShapeCombineMask(
+		widget->display, dndicon, ShapeBounding,
+		0, 0, iconmask, ShapeSet
+	);
+error:
+	if (pix != None)
+		XFreePixmap(widget->display, pix);
+	return dndicon;
 }
 
 static void
@@ -2418,41 +2426,6 @@ processevent(Widget *widget, XEvent *ev)
 	int newrow;
 	char *str;
 
-	if (widget->selctx != NULL) {
-		switch (ctrlsel_send(widget->selctx, ev)) {
-		case CTRLSEL_LOST:
-			unselectitems(widget);
-			disownprimary(widget);
-			goto done;
-		case CTRLSEL_INTERNAL:
-			goto done;
-		default:
-			break;
-		}
-	}
-	if (widget->dragctx != NULL) {
-		switch (ctrlsel_dndsend(widget->dragctx, ev)) {
-		case CTRLSEL_SENT:
-			widget->dragctx = NULL;
-			goto done;
-		case CTRLSEL_LOST:
-			disowndnd(widget);
-			goto done;
-		case CTRLSEL_INTERNAL:
-			goto done;
-		default:
-			break;
-		}
-	}
-	switch (ctrlsel_dndreceive(widget->dropctx, ev)) {
-	case CTRLSEL_RECEIVED:
-		FREE(widget->droptarget.buffer);
-		goto done;
-	case CTRLSEL_INTERNAL:
-		goto done;
-	default:
-		break;
-	}
 	widget->redraw = false;
 	switch (ev->type) {
 	case ReparentNotify:
@@ -2541,12 +2514,61 @@ processevent(Widget *widget, XEvent *ev)
 			);
 		}
 		break;
+	case SelectionRequest:
+		if (ev->xselectionrequest.owner != widget->window)
+			break;
+		if (ev->xselectionrequest.selection == XA_PRIMARY)
+			sendprimary(widget, ev);
+		break;
+	case SelectionClear:
+		if (ev->xselectionclear.window != widget->window)
+			break;
+		if (ev->xselectionclear.selection == XA_PRIMARY)
+			disownprimary(widget);
+		break;
 	default:
 		return WIDGET_NONE;
 	}
-done:
 	endevent(widget);
 	return WIDGET_INTERNAL;
+}
+
+static int
+dnd_event_handler(XEvent *event, void *arg)
+{
+	Widget *widget = arg;
+	int x, y;
+	static Time lasttime = 0;
+
+	switch (processevent(widget, event)) {
+	case WIDGET_CLOSE:
+		XPutBackEvent(widget->display, event);
+		return -1;
+	case WIDGET_NONE:
+		break;
+	default:
+		return 0;
+	}
+	switch (event->type) {
+	case MotionNotify:
+		x = event->xmotion.x;
+		y = event->xmotion.y;
+		highlight(widget, getitemundercursor(widget, x, y), True);
+		if (lasttime + SCROLL_TIME > event->xmotion.time)
+			break;
+		lasttime = event->xmotion.time;
+		if (y < SCROLL_STEP)
+			y = -SCROLL_STEP;
+		else if (widget->h - y < SCROLL_STEP)
+			y = +SCROLL_STEP;
+		else
+			break;
+		if (scroll(widget, y))
+			drawitems(widget);
+		break;
+	}
+	endevent(widget);
+	return 0;
 }
 
 /*
@@ -2741,67 +2763,64 @@ done:
 }
 
 static WidgetEvent
-dragmode(Widget *widget, Time lasttime, int clicki, int *selitems, int *nitems)
+dragmode(Widget *widget, Time timestamp, int index, int *selitems, int *nitems)
 {
-	struct Selection *sel;
-	Window dragwin, receiver;
-	unsigned int mask;
-	int dropspot, i, x, y;
+	struct ctrldnd_drop drop;
+	unsigned char *plainbuf, *uribuf;
+	ssize_t plainsize, urisize;
+	Window dragwin;
 
-	if (widget->sel == NULL)
+	if (index < 1 || widget->sel == NULL)
 		return WIDGET_NONE;
-	disowndnd(widget);
-	dragwin = createdragwin(widget, clicki);
-	i = 0;
-	for (sel = widget->sel; sel != NULL; sel = sel->next)
-		i += snprintf(widget->dndbuf + i, widget->uribufsiz - i, "file://%s\r\n", widget->items[sel->index].fullname);
-	ctrlsel_filltarget(
-		widget->atoms[TEXT_URI_LIST],
-		widget->atoms[TEXT_URI_LIST],
-		8, (unsigned char *)widget->dndbuf, i,
-		&widget->dragtarget
-	);
-	widget->dragctx = ctrlsel_dndown(
-		widget->display,
-		widget->window,
-		dragwin,
-		lasttime,
-		&widget->dragtarget,
-		1,
-		&receiver
+	plainsize = fillclipboard(widget, &plainbuf, False);
+	urisize = fillclipboard(widget, &uribuf, True);
+	if (plainsize < 0 || urisize < 0)
+		return WIDGET_NONE;
+	dragwin = create_dragwin(widget, index),
+	drop = ctrldnd_drag(
+		widget->display, widget->screen, timestamp, dragwin,
+		(Atom[]){
+			XA_STRING,
+			widget->atoms[UTF8_STRING],
+			widget->atoms[TEXT_URI_LIST]
+		},
+		(unsigned char const *[]){
+			plainbuf,
+			plainbuf,
+			uribuf,
+		},
+		(size_t[]){
+			plainsize,
+			plainsize,
+			urisize,
+		},
+		3, CTRLDND_ANYACTION, SCROLL_TIME,
+		dnd_event_handler, widget
 	);
 	if (dragwin != None)
 		XDestroyWindow(widget->display, dragwin);
-	if (receiver == widget->window) {
-		/* user dropped into the source window itself */
-		querypointer(widget, widget->window, &x, &y, &mask);
-		if ((dropspot = getitemundercursor(widget, x, y)) < 1)
-			return WIDGET_NONE;
-		if (widget->issel[dropspot] != NULL) {
-			/* user should not drag an item into itself */
-			return WIDGET_NONE;
-		}
-
-		/* first item must be the one below drop spot */
-		selitems[0] = dropspot;
-
-		/* other items are the ones being dropped */
-		*nitems = fillselitems(widget, &selitems[1]);
-		(*nitems)++;
-
-		if (FLAG(mask, ControlMask|ShiftMask))
-			return WIDGET_DROPLINK;
-		if (FLAG(mask, ShiftMask))
-			return WIDGET_DROPMOVE;
-		if (FLAG(mask, ControlMask))
-			return WIDGET_DROPCOPY;
-		return WIDGET_DROPASK;
+	if (drop.window != widget->window)
+		return WIDGET_NONE;
+	/* user dropped items on widget's own window */
+	index = getitemundercursor(widget, drop.x, drop.y);
+	highlight(widget, index, True);
+	if (index < 1 || index >= widget->nitems)
+		return WIDGET_NONE;
+	if (widget->issel[index] != NULL)
+		return WIDGET_NONE;     /* dont drop item on itself */
+	/*
+	 * First item is the one where user has dropped.
+	 * Following items are the ones being dropped.
+	 */
+	selitems[0] = index;
+	*nitems = fillselitems(widget, &selitems[1]);
+	(*nitems)++;
+	switch (drop.action) {
+	case CTRLDND_MOVE: return WIDGET_DROPMOVE;
+	case CTRLDND_COPY: return WIDGET_DROPCOPY;
+	case CTRLDND_LINK: return WIDGET_DROPLINK;
+	default:           return WIDGET_DROPASK;
 	}
-	if (receiver != None) {
-		/* user dropped into another window */
-		return WIDGET_INTERNAL;
-	}
-	return WIDGET_NONE;
 }
 
 static WidgetEvent
@@ -2813,29 +2832,28 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 	int clicky = 0;
 	int clicki = -1;
 	WidgetEvent event;
-	int x, y;
+	struct ctrldnd_drop drop;
 
 	while (!XNextEvent(widget->display, &ev)) {
-		switch (ctrlsel_dndreceive(widget->dropctx, &ev)) {
-		case CTRLSEL_RECEIVED:
-			if (widget->droptarget.buffer == NULL)
-				return WIDGET_INTERNAL;
-			*text = (char *)widget->droptarget.buffer;
+		drop = ctrldnd_getdrop(
+			&ev, &widget->atoms[UTF8_STRING], 1,
+			CTRLDND_ANYACTION, SCROLL_TIME,
+			dnd_event_handler, widget
+		);
+		if (drop.window == widget->window && drop.datasize > 0) {
+			*text = (char *)drop.data;
 			*nitems = 1;
-			querypointer(widget, widget->window, &x, &y, NULL);
-			selitems[0] = getitemundercursor(widget, x, y);
-			if (widget->droptarget.action == CTRLSEL_COPY)
-				return WIDGET_DROPCOPY;
-			if (widget->droptarget.action == CTRLSEL_MOVE)
-				return WIDGET_DROPMOVE;
-			if (widget->droptarget.action == CTRLSEL_LINK)
-				return WIDGET_DROPLINK;
-			return WIDGET_DROPASK;
-		case CTRLSEL_INTERNAL:
-			return WIDGET_INTERNAL;
-		default:
-			break;
+			selitems[0] = getitemundercursor(widget, drop.x, drop.y);
+			switch (drop.action) {
+			case CTRLDND_MOVE: return WIDGET_DROPMOVE;
+			case CTRLDND_COPY: return WIDGET_DROPCOPY;
+			case CTRLDND_LINK: return WIDGET_DROPLINK;
+			default:           return WIDGET_DROPASK;
+			}
 		}
+		XFree(drop.data);
+		if (drop.window != None)
+			return WIDGET_INTERNAL;
 		switch (processevent(widget, &ev)) {
 		case WIDGET_CLOSE:
 			return WIDGET_CLOSE;
@@ -3132,6 +3150,7 @@ initwindow(Widget *widget, struct Options *options)
 	if (setenv("WINDOWID", buf, true) == RETURN_FAILURE)
 		warn("setenv");
 	setwinicon(widget);
+	ctrldnd_announce(widget->display, widget->window);
 	return RETURN_SUCCESS;
 }
 
@@ -3217,25 +3236,26 @@ initicons(Widget *widget, struct Options *options)
 }
 
 static int
-initselection(Widget *widget, struct Options *options)
+initstreams(Widget *widget, struct Options *options)
 {
+	struct clipboard *clips[] = {
+		&widget->plainclip,
+		&widget->uriclip,
+	};
+
 	(void)options;
-	ctrlsel_filltarget(
-		widget->atoms[TEXT_URI_LIST],
-		widget->atoms[TEXT_URI_LIST],
-		0, NULL, 0,
-		&widget->droptarget
-	);
-	widget->dropctx = ctrlsel_dndwatch(
-		widget->display,
-		widget->window,
-		CTRLSEL_COPY | CTRLSEL_MOVE | CTRLSEL_LINK | CTRLSEL_ASK,
-		&widget->droptarget,
-		1
-	);
-	if (widget->dropctx == NULL) {
-		warnx("could not watch drag-and-drop selection");
-		return RETURN_FAILURE;
+	for (size_t i = 0; i < LEN(clips); i++) {
+		clips[i]->buf = NULL;
+		clips[i]->size = 0;
+		clips[i]->filled = False;
+		clips[i]->stream = open_memstream(
+			(char **)&clips[i]->buf,
+			&clips[i]->size
+		);
+		if (clips[i]->stream == NULL) {
+			warn("open_memstream");
+			return RETURN_FAILURE;
+		}
 	}
 	return RETURN_SUCCESS;
 }
@@ -3272,8 +3292,6 @@ widget_free(Widget *widget)
 	if (widget == NULL)
 		return;
 	cleanwidget(widget);
-	if (widget->dropctx != NULL)
-		ctrlsel_dndclose(widget->dropctx);
 	for (i = 0; i < widget->nicons; i++) {
 		if (widget->icons[i].pix != None) {
 			XFreePixmap(widget->display, widget->icons[i].pix);
@@ -3313,6 +3331,15 @@ widget_free(Widget *widget)
 		}
 	}
 	FREE(widget->icons);
+
+	if (widget->plainclip.stream != NULL)
+		fclose(widget->plainclip.stream);
+	if (widget->uriclip.stream != NULL)
+		fclose(widget->uriclip.stream);
+	if (widget->plainclip.buf != NULL)
+		free(widget->plainclip.buf);
+	if (widget->uriclip.buf != NULL)
+		free(widget->uriclip.buf);
 	if (widget->busycursor != None)
 		XFreeCursor(widget->display, widget->busycursor);
 	if (widget->fontset != NULL)
@@ -3352,7 +3379,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 		initwindow,
 		inittheme,
 		initicons,
-		initselection,
+		initstreams,
 		initmisc,
 	};
 
@@ -3385,8 +3412,6 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 int
 widget_set(Widget *widget, const char *cwd, const char *title, Item items[], size_t nitems, Scroll *scrl)
 {
-	size_t i;
-
 	widget->isset = true;
 	XUndefineCursor(widget->display, widget->window);
 	cleanwidget(widget);
@@ -3422,26 +3447,8 @@ widget_set(Widget *widget, const char *cwd, const char *title, Item items[], siz
 		warn("calloc");
 		goto error;
 	}
-	if ((widget->thumbs = malloc(nitems * sizeof(*widget->thumbs))) == NULL) {
-		warn("malloc");
-		goto error;
-	}
-	widget->selbufsiz = 0;
-	for (i = 0; i < nitems; i++) {
-		widget->thumbs[i] = NULL;
-		widget->selbufsiz += strlen(items[i].fullname) + 1; /* +1 for '\n' */
-	}
-	if (widget->selbufsiz > 0 && (widget->selbuf = malloc(widget->selbufsiz)) == NULL) {
-		warn("malloc");
-		goto error;
-	}
-	widget->uribufsiz = widget->selbufsiz + (nitems * 8);         /* 8 for "file://\r" */
-	if (widget->uribufsiz > 0 && (widget->uribuf = malloc(widget->uribufsiz)) == NULL) {
-		warn("malloc");
-		goto error;
-	}
-	if (widget->uribufsiz > 0 && (widget->dndbuf = malloc(widget->uribufsiz)) == NULL) {
-		warn("malloc");
+	if ((widget->thumbs = calloc(widget->nitems, sizeof(*widget->thumbs))) == NULL) {
+		warn("calloc");
 		goto error;
 	}
 	widget->thumbhead = NULL;
@@ -3504,7 +3511,6 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 
 	*text = NULL;
 	*nitems = 0;
-	releasednd(widget);
 	while (widget->start && XPending(widget->display) > 0) {
 		(void)XNextEvent(widget->display, &ev);
 		if (processevent(widget, &ev) == WIDGET_CLOSE) {

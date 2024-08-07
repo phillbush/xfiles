@@ -8,7 +8,7 @@
 #include <X11/extensions/Xrender.h>
 #include <fontconfig/fontconfig.h>
 
-#include "ctrlfnt.h"
+#include <control/font.h>
 
 struct FntPatt {
 	XftFont        *xftfont;
