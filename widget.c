@@ -1324,6 +1324,7 @@ scroll(Widget *widget, int y)
 	}
 	if (prevrow != newrow) {
 		drawstatusbar(widget);
+		drawitems(widget);
 		return true;
 	}
 	return false;
@@ -1890,32 +1891,6 @@ endevent(Widget *widget)
 	}
 }
 
-static int
-querypointer(Widget *widget, Window win, int *retx, int *rety, unsigned int *retmask)
-{
-	Window root, child;
-	unsigned int mask;
-	int rootx, rooty;
-	int x, y;
-	int retval;
-
-	retval = XQueryPointer(
-		widget->display,
-		win,
-		&root, &child,
-		&rootx, &rooty,
-		&x, &y,
-		&mask
-	);
-	if (retmask != NULL)
-		*retmask = mask;
-	if (retx != NULL)
-		*retx = x;
-	if (rety != NULL)
-		*rety = y;
-	return retval;
-}
-
 static void
 scrollerset(Widget *widget, int pos)
 {
@@ -2077,19 +2052,6 @@ getgeometry(Widget *widget, XRectangle *rect)
 done:
 	XrmDestroyDatabase(xdb);
 	return retval;
-}
-
-static int
-scrollerpos(Widget *widget)
-{
-	int pos;
-
-	(void)querypointer(widget, widget->scroller, NULL, &pos, NULL);
-	if (pos > SCROLLER_SIZE)
-		return pos - SCROLLER_SIZE;
-	if (pos < 0)
-		return pos;
-	return 0;
 }
 
 static Window
@@ -2301,8 +2263,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 			index = widget->row * widget->ncols;
 			if (widget->ydiff != 0 && index + 1 < widget->nitems)
 				index += widget->ncols;
-			highlight(widget, index, false);
-			drawitems(widget);
+			highlight(widget, index, True);
 		}
 		break;
 	case XK_Home:
@@ -2563,8 +2524,7 @@ dnd_event_handler(XEvent *event, void *arg)
 			y = +SCROLL_STEP;
 		else
 			break;
-		if (scroll(widget, y))
-			drawitems(widget);
+		scroll(widget, y);
 		break;
 	}
 	endevent(widget);
@@ -2615,31 +2575,43 @@ done:
 }
 
 static WidgetEvent
-scrollmode(Widget *widget, int x, int y)
+scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 {
 	XEvent ev;
-	int grabpos, pos, left;
+	int grabpos, pos, y;
 	struct timespec ts;
 
 	grabpos = widget->handlew / 2;             /* we grab the handle in its middle */
 	drawscroller(widget, gethandlepos(widget));
-	XMoveWindow(widget->display, widget->scroller, x - SCROLLER_SIZE / 2 - 1, y - SCROLLER_SIZE / 2 - 1);
+	XMoveWindow(
+		widget->display, widget->scroller,
+		clickx - SCROLLER_SIZE / 2 - 1,
+		clicky - SCROLLER_SIZE / 2 - 1
+	);
 	XMapRaised(widget->display, widget->scroller);
-	left = false;
+	if (XGrabPointer(
+		widget->display, widget->scroller, False,
+		ButtonReleaseMask | ButtonPressMask | PointerMotionMask,
+		GrabModeAsync, GrabModeAsync, None, None, lasttime
+	) != GrabSuccess)
+		goto done;
+	y = 0;
 	for (;;) {
 		if (!nextevent(widget, &ev, SCROLL_TIME)) {
-			if ((pos = scrollerpos(widget)) != 0) {
-				if (scroll(widget, pos))
-					drawitems(widget);
-				commitdraw(widget);
-			}
-			if (clock_gettime(CLOCK_MONOTONIC, &ts) != -1) {
+			if (clock_gettime(CLOCK_MONOTONIC, &ts) != -1)
 				widget->time = ts;
-			}
+			if (y >= 0 && y < SCROLLER_SIZE)
+				continue;
+			scroll(
+				widget,
+				y > SCROLLER_SIZE ? y - SCROLLER_SIZE : y
+			);
+			endevent(widget);
 			continue;
 		}
 		switch (processevent(widget, &ev)) {
 		case WIDGET_CLOSE:
+			XUnmapWindow(widget->display, widget->scroller);
 			return WIDGET_CLOSE;
 		case WIDGET_NONE:
 			break;
@@ -2647,47 +2619,61 @@ scrollmode(Widget *widget, int x, int y)
 			continue;
 		}
 		switch (ev.type) {
+		case FocusIn:
+		case FocusOut:
+			goto done;
+			break;
 		case MotionNotify:
-			if (ev.xmotion.window == widget->scroller && (ev.xmotion.state & Button1Mask)) {
+			if (ev.xmotion.window != widget->scroller)
+				break;
+			if (ev.xmotion.y < 0)
+				y = ev.xmotion.y;
+			else if (ev.xmotion.y > SCROLLER_SIZE)
+				y = ev.xmotion.y - SCROLLER_SIZE;
+			else
+				y = 0;
+			if (ev.xmotion.state & Button1Mask)
 				scrollerset(widget, ev.xmotion.y - grabpos);
-			} else if (ev.xmotion.window == widget->window &&
-			    (diff(ev.xmotion.x, x) > SCROLLER_SIZE / 2 || diff(ev.xmotion.y, y) > SCROLLER_SIZE / 2)) {
-				left = true;
-			}
 			break;
 		case ButtonRelease:
 			if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
-				if (scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
-					drawitems(widget);
+				scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP));
 				widget->redraw = true;
-			} else if (left) {
-				goto done;
+				break;
 			}
+			if (ev.xbutton.window != widget->scroller)
+				break;
+			/*
+			 * Scroller had active pointer grab.
+			 * Return if release is outside scroller.
+			 */
+			if (ev.xbutton.x < 0 || ev.xbutton.x >= SCROLLER_SIZE)
+				goto done;
+			if (ev.xbutton.y < 0 || ev.xbutton.y >= SCROLLER_SIZE)
+				goto done;
 			break;
 		case ButtonPress:
 			if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)
 				break;
 			if (ev.xbutton.button != Button1)
 				goto done;
-			if (ev.xbutton.window == widget->window)
+			if (ev.xbutton.window != widget->window)
 				goto done;
-			if (ev.xbutton.window == widget->scroller) {
-				left = true;
-				pos = gethandlepos(widget);
-				if (ev.xmotion.y < pos || ev.xmotion.y > pos + widget->handlew) {
-					/* grab handle in the middle */
-					grabpos = widget->handlew / 2;
-					scrollerset(widget, ev.xmotion.y - grabpos);
-				} else {
-					/* grab handle in position under pointer */
-					grabpos = ev.xmotion.y - pos;
-				}
+			pos = gethandlepos(widget);
+			if (ev.xbutton.y < pos || ev.xbutton.y > pos + widget->handlew) {
+				/* grab handle in the middle */
+				grabpos = widget->handlew / 2;
+				scrollerset(widget, ev.xbutton.y - grabpos);
+			} else {
+				/* grab handle in position under pointer */
+				grabpos = ev.xbutton.y - pos;
 			}
 			break;
 		}
 		endevent(widget);
 	}
 done:
+	XUngrabPointer(widget->display, lasttime);
 	XUnmapWindow(widget->display, widget->scroller);
 	return WIDGET_NONE;
 }
@@ -2697,6 +2683,8 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 {
 	XEvent ev;
 	int rectrow, rectydiff, ownsel, pos;
+	int x = clickx;
+	int y = clicky;
 
 	rectrow = widget->row;
 	rectydiff = widget->ydiff;
@@ -2705,14 +2693,7 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 		unselectitems(widget);
 	for (;;) {
 		if (!nextevent(widget, &ev, SCROLL_TIME)) {
-			(void)querypointer(
-				widget,
-				widget->window,
-				&ev.xmotion.x,
-				&ev.xmotion.y,
-				NULL
-			);
-			pos = ev.xmotion.y;
+			pos = y;
 			if (pos > widget->h)
 				pos -= widget->h;
 			else if (pos >= 0)
@@ -2721,8 +2702,7 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 				pos += SCROLL_STEP;
 			pos /= SCROLL_STEP;
 			if (pos != 0) {
-				if (scroll(widget, pos))
-					drawitems(widget);
+				scroll(widget, pos);
 				widget->redraw = true;
 				goto motion;
 			}
@@ -2744,9 +2724,11 @@ selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
 			if (ev.xmotion.time - lasttime < MOTION_TIME)
 				break;
 			lasttime = ev.xmotion.time;
+			x = ev.xmotion.x;
+			y = ev.xmotion.y;
 motion:
-			rectdraw(widget, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y);
-			if (rectselect(widget, rectrow, rectydiff, clickx, clicky, ev.xmotion.x, ev.xmotion.y))
+			rectdraw(widget, rectrow, rectydiff, clickx, clicky, x, y);
+			if (rectselect(widget, rectrow, rectydiff, clickx, clicky, x, y))
 				ownsel = true;
 			commitdraw(widget);
 			break;
@@ -2882,11 +2864,10 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			if (ev.xbutton.button == Button1) {
 				clicki = mouse1click(widget, &ev.xbutton);
 			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
-				if (scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP)))
-					drawitems(widget);
+				scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP));
 				widget->redraw = true;
 			} else if (ev.xbutton.button == Button2) {
-				event = scrollmode(widget, ev.xmotion.x, ev.xmotion.y);
+				event = scrollmode(widget, ev.xmotion.time, ev.xmotion.x, ev.xmotion.y);
 				if (event != WIDGET_NONE)
 					return event;
 			} else if (ev.xbutton.button == Button3) {
