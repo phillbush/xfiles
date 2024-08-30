@@ -57,4 +57,4 @@ struct ctrldnd_drop ctrldnd_getdrop(
 	int           (*callback)(XEvent *, void *),
 	void           *arg
 );
-#endif /* _CTRLSEL_H_ */
+#endif /* _CTRLDND_H_ */
