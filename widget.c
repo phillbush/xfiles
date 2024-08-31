@@ -45,6 +45,7 @@
 	X(_NET_WM_WINDOW_TYPE_DND, NULL)        \
 	X(_NET_WM_WINDOW_TYPE_NORMAL, NULL)     \
 	X(_NET_WM_WINDOW_OPACITY, NULL)         \
+	X(_XEMBED, NULL)                        \
 	X(_CONTROL_STATUS, NULL)                \
 	X(_CONTROL_CWD, NULL)                   \
 	X(_CONTROL_GOTO, NULL)
@@ -106,6 +107,30 @@
 
 #define STATUSBAR_HEIGHT(w) ((w)->fonth * 2)
 #define STATUSBAR_MARGIN(w) ((w)->fonth / 2)
+
+enum {
+	XEMBED_EMBEDDED_NOTIFY,
+	XEMBED_WINDOW_ACTIVATE,
+	XEMBED_WINDOW_DEACTIVATE,
+	XEMBED_REQUEST_FOCUS,
+	XEMBED_FOCUS_IN,
+	XEMBED_FOCUS_OUT,
+	XEMBED_FOCUS_NEXT,
+	XEMBED_FOCUS_PREV,
+	XEMBED_GRAB_KEY,
+	XEMBED_UNGRAB_KEY,
+	XEMBED_MODALITY_ON,
+	XEMBED_MODALITY_OFF,
+	XEMBED_REGISTER_ACCELERATOR,
+	XEMBED_UNREGISTER_ACCELERATOR,
+	XEMBED_ACTIVATE_ACCELERATOR,
+};
+
+enum {
+	XEMBED_FOCUS_CURRENT,
+	XEMBED_FOCUS_FIRST,
+	XEMBED_FOCUS_LAST,
+};
 
 enum {
 	/* size of border of rectangular selection */
@@ -378,6 +403,23 @@ struct Options {
 	int argc;
 	char **argv;
 };
+
+static int
+error_handler(Display *display, XErrorEvent *error)
+{
+	char msg[128], req[128], num[8];
+
+	if (error->error_code == BadWindow)
+		return 0;
+	(void)XGetErrorText(display, error->error_code, msg, sizeof(msg));
+	(void)snprintf(num, sizeof(num), "%d", error->request_code);
+	(void)XGetErrorDatabaseText(
+		display, "XRequest", num,
+		"unknown request", req, sizeof(req)
+	);
+	errx(EXIT_FAILURE, "xlib: %s: %s", req, msg);
+	return 0; /* unreachable */
+}
 
 static char *
 getitemstatus(Widget *widget, int index)
@@ -730,7 +772,7 @@ loadresources(Widget *widget, const char *str)
 }
 
 static void
-resizechild(Widget *widget)
+embed_resize(Widget *widget)
 {
 	if (widget->child == None)
 		return;
@@ -787,7 +829,7 @@ calcsize(Widget *widget, int w, int h)
 	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
 	resetlayer(widget, LAYER_STATUSBAR, widget->winw, STATUSBAR_HEIGHT(widget));
 	resetlayer(widget, LAYER_CANVAS, widget->winw, widget->winh);
-	resizechild(widget);
+	embed_resize(widget);
 	etunlock(&widget->lock);
 	return ret;
 }
@@ -2166,40 +2208,95 @@ setwinicon(Widget *widget)
 	}
 }
 
-static void
-embedwindow(Widget *widget, Window window)
+static Bool
+is_override(Widget *widget, Window window)
 {
-	XWindowAttributes wa;
+	XWindowAttributes wattr;
 
-	if (window != None) {
-		if (widget->child != None)
-			return;         /* we already have an embedded window */
-		if (window == widget->window)
-			return;         /* we should not embed our own window */
-		if (!XGetWindowAttributes(widget->display, window, &wa))
-			return;         /* we could not get info about window */
-		if (wa.override_redirect)
-			return;         /* window doesn't want to be embedded */
-	}
-	widget->child = window;
+	if (!XGetWindowAttributes(widget->display, window, &wattr))
+		wattr.override_redirect = False;
+	return wattr.override_redirect;
 }
 
 static void
-closewindow(Widget *widget, Time time)
+embed_message(Widget *widget, Time time, long msg, long d0, long d1, long d2)
 {
 	XSendEvent(
+		widget->display, widget->child, False, NoEventMask,
+		&(XEvent){ .xclient = {
+			.type = ClientMessage,
+			.window = widget->child,
+			.message_type = widget->atoms[_XEMBED],
+			.format = 32,
+			.data.l[0] = time,
+			.data.l[1] = msg,
+			.data.l[2] = d0,
+			.data.l[3] = d1,
+			.data.l[4] = d2,
+		}}
+	);
+}
+
+static void
+embed_focus(Widget *widget, Time time)
+{
+	Window focused;
+
+	if (widget->child == None)
+		return;
+	(void)XGetInputFocus(widget->display, &focused, (int[]){0});
+	if (focused == widget->child)
+		return;
+	if (focused != widget->window)
+		return;
+	(void)XSetInputFocus(
 		widget->display,
 		widget->child,
-		False,
-		NoEventMask,
-		&(XEvent) {
-			.xclient.type = ClientMessage,
-			.xclient.window = widget->child,
-			.xclient.message_type = widget->atoms[WM_PROTOCOLS],
-			.xclient.format = 32,
-			.xclient.data.l[0] = widget->atoms[WM_DELETE_WINDOW],
-			.xclient.data.l[1] = time,
-		}
+		RevertToParent,
+		CurrentTime
+	);
+	embed_message(widget, time, XEMBED_WINDOW_ACTIVATE, 0, 0, 0);
+	embed_message(widget, time, XEMBED_FOCUS_IN, XEMBED_FOCUS_CURRENT, 0, 0);
+}
+
+static void
+embed_unfocus(Widget *widget, Time time)
+{
+	if(widget->child == None)
+		return;
+	embed_message(widget, time, XEMBED_FOCUS_OUT, 0, 0, 0);
+}
+
+static void
+embed_set(Widget *widget, Time time, Window window)
+{
+	if (window == None)
+		return;
+	if (widget->child != None)
+		return; /* we already have an embedded window */
+	if (window == widget->window)
+		return; /* we should not embed our own window */
+	if (is_override(widget, window))
+		return; /* window doesn't want to be embedded */
+	widget->child = window;
+	XMapRaised(widget->display, widget->child);
+	embed_message(widget, time, XEMBED_EMBEDDED_NOTIFY, 0, widget->window, 0);
+	embed_focus(widget, time);
+}
+
+static void
+embed_close(Widget *widget, Time time)
+{
+	XSendEvent(
+		widget->display, widget->child, False, NoEventMask,
+		&(XEvent) { .xclient = {
+			.type = ClientMessage,
+			.window = widget->child,
+			.message_type = widget->atoms[WM_PROTOCOLS],
+			.format = 32,
+			.data.l[0] = widget->atoms[WM_DELETE_WINDOW],
+			.data.l[1] = time,
+		}}
 	);
 }
 
@@ -2389,46 +2486,49 @@ processevent(Widget *widget, XEvent *ev)
 
 	widget->redraw = false;
 	switch (ev->type) {
-	case ReparentNotify:
-		embedwindow(widget, ev->xreparent.window);
+	case MapRequest:
+		if (ev->xmaprequest.parent != widget->window)
+			break;
+		if (ev->xmaprequest.window == widget->window)
+			break;
+		embed_set(widget, CurrentTime, ev->xmaprequest.window);
 		break;
 	case FocusIn:
-		if (widget->child == None)
+		if (ev->xfocus.window != widget->window)
 			break;
-		XSetInputFocus(
-			widget->display,
-			widget->child,
-			RevertToParent,
-			CurrentTime
-		);
+		embed_focus(widget, CurrentTime);
+		break;
+	case FocusOut:
+		if (ev->xfocus.window != widget->window)
+			break;
+		if (ev->xfocus.detail == NotifyInferior)
+			break;
+		embed_unfocus(widget, CurrentTime);
 		break;
 	case MapNotify:
 		if (ev->xmap.window != widget->child)
 			break;
-		resizechild(widget);
-		XSetInputFocus(
-			widget->display,
-			widget->child,
-			RevertToParent,
-			CurrentTime
-		);
+		embed_resize(widget);
+		embed_focus(widget, CurrentTime);
 		break;
 	case UnmapNotify:
 		if (ev->xunmap.window != widget->child)
 			break;
-		embedwindow(widget, None);
+		widget->child = None;
 		break;
 	case DestroyNotify:
+		if (ev->xdestroywindow.window == widget->window)
+			return WIDGET_ERROR;
 		if (ev->xdestroywindow.window != widget->child)
 			break;
-		embedwindow(widget, None);
+		widget->child = None;
 		break;
 	case ClientMessage:
 		if (ev->xclient.window != widget->window)
 			break;
 		if (ev->xclient.message_type == widget->atoms[WM_PROTOCOLS] &&
 		    (Atom)ev->xclient.data.l[0] == widget->atoms[WM_DELETE_WINDOW]) {
-			closewindow(widget, ev->xclient.data.l[1]);
+			embed_close(widget, ev->xclient.data.l[1]);
 			return WIDGET_CLOSE;
 		}
 		return WIDGET_NONE;
@@ -2978,6 +3078,7 @@ initxconn(Widget *widget, struct Options *options)
 		widget->resources[i].class = XrmPermStringToQuark(resourceids[i].class);
 		widget->resources[i].name = XrmPermStringToQuark(resourceids[i].name);
 	}
+	(void)XSetErrorHandler(error_handler);
 	return RETURN_SUCCESS;
 }
 
@@ -3053,8 +3154,8 @@ initwindow(Widget *widget, struct Options *options)
 		widget,
 		widget->root,
 		geometry,
-		StructureNotifyMask | SubstructureNotifyMask |
-		PropertyChangeMask | FocusChangeMask |
+		SubstructureRedirectMask | SubstructureNotifyMask |
+		StructureNotifyMask | PropertyChangeMask | FocusChangeMask |
 		KeyPressMask | KeyReleaseMask |
 		PointerMotionMask | ButtonReleaseMask | ButtonPressMask
 	);
