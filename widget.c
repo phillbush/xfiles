@@ -2722,7 +2722,6 @@ scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 		case FocusIn:
 		case FocusOut:
 			goto done;
-			break;
 		case MotionNotify:
 			if (ev.xmotion.window != widget->scroller)
 				break;
@@ -2757,7 +2756,7 @@ scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 				break;
 			if (ev.xbutton.button != Button1)
 				goto done;
-			if (ev.xbutton.window != widget->window)
+			if (ev.xbutton.window != widget->scroller)
 				goto done;
 			pos = gethandlepos(widget);
 			if (ev.xbutton.y < pos || ev.xbutton.y > pos + widget->handlew) {
