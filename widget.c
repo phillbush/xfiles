@@ -783,6 +783,23 @@ embed_resize(Widget *widget)
 		widget->winw,
 		widget->winh
 	);
+	XSendEvent(
+		widget->display, widget->child, False, StructureNotifyMask,
+		&(XEvent){ .xconfigure = {
+			.type = ConfigureNotify,
+			.display = widget->display,
+			.event = widget->child,
+			.window = widget->child,
+			.x = 0,
+			.y = 0,
+			.width = widget->winw,
+			.height = widget->winh,
+			.border_width = 0,
+			.above = None,
+			.override_redirect = False,
+		}}
+	);
+	XSync(widget->display, False);
 }
 
 static int
@@ -2097,7 +2114,7 @@ done:
 }
 
 static Window
-createwindow(Widget *widget, Window parent, XRectangle rect, long eventmask)
+createwindow(Widget *widget, Window parent, XRectangle rect, long eventmask, Bool override)
 {
 	return XCreateWindow(
 		widget->display,
@@ -2110,12 +2127,14 @@ createwindow(Widget *widget, Window parent, XRectangle rect, long eventmask)
 		widget->depth,
 		InputOutput,
 		widget->visual,
-		CWBackPixel | CWEventMask | CWColormap | CWBorderPixel,
+		CWOverrideRedirect | CWEventMask | CWColormap |
+		CWBackPixel | CWBorderPixel,
 		&(XSetWindowAttributes){
 			.border_pixel = 0,
 			.background_pixel = 0,
 			.colormap = widget->colormap,
 			.event_mask = eventmask,
+			.override_redirect = override,
 		}
 	);
 }
@@ -2159,7 +2178,7 @@ create_dragwin(Widget *widget, int index)
 	}
 	dndicon = createwindow(
 		widget, widget->root,
-		(XRectangle){0, 0, width, height}, 0
+		(XRectangle){0, 0, width, height}, 0, True
 	);
 	(void)XSetWindowBackgroundPixmap(widget->display, dndicon, iconbg);
 	if (dndicon == None)
@@ -2209,11 +2228,11 @@ setwinicon(Widget *widget)
 }
 
 static Bool
-is_override(Widget *widget, Window window)
+is_override(Display *display, Window window)
 {
 	XWindowAttributes wattr;
 
-	if (!XGetWindowAttributes(widget->display, window, &wattr))
+	if (!XGetWindowAttributes(display, window, &wattr))
 		wattr.override_redirect = False;
 	return wattr.override_redirect;
 }
@@ -2225,6 +2244,7 @@ embed_message(Widget *widget, Time time, long msg, long d0, long d1, long d2)
 		widget->display, widget->child, False, NoEventMask,
 		&(XEvent){ .xclient = {
 			.type = ClientMessage,
+			.display = widget->display,
 			.window = widget->child,
 			.message_type = widget->atoms[_XEMBED],
 			.format = 32,
@@ -2276,10 +2296,21 @@ embed_set(Widget *widget, Time time, Window window)
 		return; /* we already have an embedded window */
 	if (window == widget->window)
 		return; /* we should not embed our own window */
-	if (is_override(widget, window))
-		return; /* window doesn't want to be embedded */
+	if (window == widget->scroller)
+		return;
+	/*
+	 * We do not check whether the embedded client speaks the XEmbed
+	 * protocol, because some applications (like st), does not set
+	 * the _XEMBED_INFO property to inform they are XEmbed-aware.
+	 * We just unconditionally embed any child window we get that we
+	 * have not created.
+	 */
 	widget->child = window;
+	XWithdrawWindow(widget->display, widget->child, widget->screen);
+	XReparentWindow(widget->display, widget->child, widget->window, 0, 0);
+	XSetWindowBorderWidth(widget->display, widget->child, 0);
 	XMapRaised(widget->display, widget->child);
+	XSync(widget->display, False);
 	embed_message(widget, time, XEMBED_EMBEDDED_NOTIFY, 0, widget->window, 0);
 	embed_focus(widget, time);
 }
@@ -2291,6 +2322,7 @@ embed_close(Widget *widget, Time time)
 		widget->display, widget->child, False, NoEventMask,
 		&(XEvent) { .xclient = {
 			.type = ClientMessage,
+			.display = widget->display,
 			.window = widget->child,
 			.message_type = widget->atoms[WM_PROTOCOLS],
 			.format = 32,
@@ -2486,10 +2518,24 @@ processevent(Widget *widget, XEvent *ev)
 
 	widget->redraw = false;
 	switch (ev->type) {
+	case CreateNotify:
+		if (ev->xcreatewindow.parent != widget->window)
+			break;
+		if (ev->xcreatewindow.override_redirect)
+			break;
+		embed_set(widget, CurrentTime, ev->xcreatewindow.window);
+		break;
+	case ReparentNotify:
+		if (ev->xreparent.parent != widget->window)
+			break;
+		if (ev->xreparent.override_redirect)
+			break;
+		embed_set(widget, CurrentTime, ev->xreparent.window);
+		break;
 	case MapRequest:
 		if (ev->xmaprequest.parent != widget->window)
 			break;
-		if (ev->xmaprequest.window == widget->window)
+		if (is_override(widget->display, ev->xmaprequest.window))
 			break;
 		embed_set(widget, CurrentTime, ev->xmaprequest.window);
 		break;
@@ -2525,13 +2571,13 @@ processevent(Widget *widget, XEvent *ev)
 		break;
 	case ClientMessage:
 		if (ev->xclient.window != widget->window)
-			break;
-		if (ev->xclient.message_type == widget->atoms[WM_PROTOCOLS] &&
-		    (Atom)ev->xclient.data.l[0] == widget->atoms[WM_DELETE_WINDOW]) {
-			embed_close(widget, ev->xclient.data.l[1]);
-			return WIDGET_CLOSE;
-		}
-		return WIDGET_NONE;
+			return WIDGET_NONE;
+		if (ev->xclient.message_type != widget->atoms[WM_PROTOCOLS])
+			return WIDGET_NONE;
+		if ((Atom)ev->xclient.data.l[0] != widget->atoms[WM_DELETE_WINDOW])
+			return WIDGET_NONE;
+		embed_close(widget, ev->xclient.data.l[1]);
+		return WIDGET_CLOSE;
 	case ConfigureNotify:
 		if (ev->xconfigure.window != widget->window)
 			break;
@@ -3156,7 +3202,8 @@ initwindow(Widget *widget, struct Options *options)
 		SubstructureRedirectMask | SubstructureNotifyMask |
 		StructureNotifyMask | PropertyChangeMask | FocusChangeMask |
 		KeyPressMask | KeyReleaseMask |
-		PointerMotionMask | ButtonReleaseMask | ButtonPressMask
+		PointerMotionMask | ButtonReleaseMask | ButtonPressMask,
+		False
 	);
 	if (widget->window == None) {
 		warnx("could not create window");
@@ -3166,7 +3213,8 @@ initwindow(Widget *widget, struct Options *options)
 		widget,
 		widget->window,
 		(XRectangle){.width = SCROLLER_SIZE, .height = SCROLLER_SIZE},
-		ButtonReleaseMask | ButtonPressMask | PointerMotionMask
+		ButtonReleaseMask | ButtonPressMask | PointerMotionMask,
+		True
 	);
 	if (widget->scroller == None) {
 		warnx("could not create window");
