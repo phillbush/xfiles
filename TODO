@@ -146,7 +146,7 @@ without needing to change X server's global resources.
 See also:
 • <./comm.c> at editres(1) source.
 • <./EditresCom.c> at xmu(3) source.
-• <https://flippery.org/gtk_editres>
+• <https://frippery.org/gtk_editres/index.html>
 
 
 § Handle X protocol errors
