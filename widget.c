@@ -2664,13 +2664,10 @@ dnd_event_handler(XEvent *event, void *arg)
 		if (lasttime + SCROLL_TIME > event->xmotion.time)
 			break;
 		lasttime = event->xmotion.time;
-		if (y < SCROLL_STEP)
-			y = -SCROLL_STEP;
-		else if (widget->h - y < SCROLL_STEP)
-			y = +SCROLL_STEP;
-		else
-			break;
-		scroll(widget, y);
+		if (y >= 0 && y < SCROLL_STEP)
+			scroll(widget, -SCROLL_STEP);
+		else if (y >= widget->h - SCROLL_STEP && y < widget->h)
+			scroll(widget, +SCROLL_STEP);
 		break;
 	}
 	endevent(widget);
