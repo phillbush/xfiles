@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -70,7 +69,7 @@
 #define DEF_COLOR_SELFG (XRenderColor){ .red = 0xFFFF, .green = 0xFFFF, .blue = 0xFFFF, .alpha = 0xFFFF }
 #define DEF_SIZE        (XRectangle){ .x = 0, .y = 0, .width = 600 , .height = 460 }
 #define DEF_OPACITY     0xFFFF
-#define DEF_STATUSBAR   true
+#define DEF_STATUSBAR   True
 
 #define FREE(x)         do{free(x); x = NULL;}while(0)
 
@@ -242,7 +241,7 @@ struct Selection {
 };
 
 struct Widget {
-	bool start, isset;
+	Bool start, isset, error;
 	int redraw;
 
 	/* X11 stuff */
@@ -263,7 +262,6 @@ struct Widget {
 	int screen;
 	unsigned int depth;
 	unsigned short opacity;
-	struct timespec time;
 
 	CtrlFontSet *fontset;
 
@@ -394,7 +392,7 @@ struct Widget {
 	/*
 	 * Statusbar describing highlighted item.
 	 */
-	int status_enable;
+	Bool status_enable;
 };
 
 struct Options {
@@ -590,7 +588,7 @@ drawstatusbar(Widget *widget)
 		return;
 
 	etlock(&widget->lock);
-	widget->redraw = true;
+	widget->redraw = True;
 
 	/* clear previous content */
 	XRenderFillRectangle(
@@ -713,7 +711,7 @@ loadresources(Widget *widget, const char *str)
 	char *fontname = NULL;
 	double d;
 	double fontsize = 0.0;
-	int changefont = false;
+	Bool changefont = False;
 
 	if (str == NULL)
 		return;
@@ -732,13 +730,13 @@ loadresources(Widget *widget, const char *str)
 		switch (resource) {
 		case FACE_NAME:
 			fontname = value;
-			changefont = true;
+			changefont = True;
 			break;
 		case FACE_SIZE:
 			d = strtod(value, &endp);
 			if (value[0] != '\0' && *endp == '\0' && d > 0.0 && d <= 100.0) {
 				fontsize = d;
-				changefont = true;
+				changefont = True;
 			}
 			break;
 		case NORMAL_BG:
@@ -808,10 +806,10 @@ calcsize(Widget *widget, int w, int h)
 	int ncols, nrows, ret;
 	double d;
 
-	ret = false;
+	ret = False;
 	if (widget->winw == w && widget->winh == h)
-		return false;
-	widget->redraw = true;
+		return False;
+	widget->redraw = True;
 	etlock(&widget->lock);
 	ncols = widget->ncols;
 	nrows = widget->nrows;
@@ -841,7 +839,7 @@ calcsize(Widget *widget, int w, int h)
 		widget->pixh = widget->nrows * widget->itemh;
 		resetlayer(widget, LAYER_ICONS, widget->pixw, widget->pixh);
 		resetlayer(widget, LAYER_SELALPHA, widget->pixw, widget->pixh);
-		ret = true;
+		ret = True;
 	}
 	resetlayer(widget, LAYER_RECTALPHA, widget->w, widget->h);
 	resetlayer(widget, LAYER_STATUSBAR, widget->winw, STATUSBAR_HEIGHT(widget));
@@ -1143,7 +1141,7 @@ drawitem(Widget *widget, int index)
 	);
 done:
 	etunlock(&widget->lock);
-	widget->redraw = true;
+	widget->redraw = True;
 }
 
 static void
@@ -1345,30 +1343,32 @@ drawscroller(Widget *widget, int y)
 	XClearWindow(widget->display, widget->scroller);
 }
 
-static int
+static Bool
 scroll(Widget *widget, int y)
 {
 	int prevhand, newhand;          /* position of the scroller handle */
 	int prevrow, newrow;
+	int prevdiff;
 
 	if (y == 0)
-		return false;
+		return False;
 	if (y > 0 && widget->row + 1 >= widget->nscreens)
-		return false;
+		return False;
 	if (y < 0 && widget->row == 0 && widget->ydiff == 0)
-		return false;
+		return False;
 	if (ALL_ROWS(widget) + 1 < widget->nrows)
-		return false;
+		return False;
 	widget->redraw = True;
 	prevhand = gethandlepos(widget);
+	prevdiff = widget->ydiff;
 	newrow = prevrow = widget->row;
 	widget->ydiff += y;
 	newrow += widget->ydiff / widget->itemh;
-	widget->ydiff %= widget->itemh;
 	if (widget->ydiff < 0) {
 		widget->ydiff += widget->itemh;
 		newrow--;
 	}
+	widget->ydiff %= widget->itemh;
 	if (newrow > widget->nscreens) {
 		widget->ydiff = 0;
 		newrow = widget->nscreens - 1;
@@ -1384,9 +1384,11 @@ scroll(Widget *widget, int y)
 	if (prevrow != newrow) {
 		drawstatusbar(widget);
 		drawitems(widget);
-		return true;
+		return True;
 	}
-	return false;
+	if (newrow == widget->nscreens-1)
+		return False;
+	return prevdiff != widget->ydiff;
 }
 
 static int
@@ -1481,7 +1483,7 @@ writeuri(FILE *stream, unsigned char *s)
 }
 
 static ssize_t
-fillclipboard(Widget *widget, unsigned char **bufp, bool uriformat)
+fillclipboard(Widget *widget, unsigned char **bufp, Bool uriformat)
 {
 	struct Selection *sel;
 	struct clipboard *clip;
@@ -1726,7 +1728,7 @@ selectitems(Widget *widget, int a, int b)
 		max = a;
 	}
 	for (i = min; i <= max; i++) {
-		selectitem(widget, i, true, 0);
+		selectitem(widget, i, True, 0);
 	}
 }
 
@@ -1734,7 +1736,7 @@ static void
 unselectitems(Widget *widget)
 {
 	while (widget->sel) {
-		selectitem(widget, widget->sel->index, false, 0);
+		selectitem(widget, widget->sel->index, False, 0);
 	}
 }
 
@@ -1760,7 +1762,7 @@ mouse1click(Widget *widget, XButtonPressedEvent *ev)
 	if (prevhili != -1 && ev->state & ShiftMask)
 		selectitems(widget, widget->highlight, prevhili);
 	else
-		selectitem(widget, widget->highlight, ((ev->state & ControlMask) ? widget->issel[widget->highlight] == NULL : true), false);
+		selectitem(widget, widget->highlight, ((ev->state & ControlMask) ? widget->issel[widget->highlight] == NULL : True), False);
 	ownprimary(widget, ev->time);
 	return index;
 }
@@ -1773,11 +1775,11 @@ mouse3click(Widget *widget, int x, int y)
 	index = getitemundercursor(widget, x, y);
 	if (index != -1) {
 		if (widget->issel[index] == NULL) {
-			highlight(widget, index, false);
+			highlight(widget, index, False);
 			unselectitems(widget);
-			selectitem(widget, index, true, false);
+			selectitem(widget, index, True, False);
 		} else {
-			highlight(widget, index, true);
+			highlight(widget, index, True);
 		}
 	}
 	return index;
@@ -1839,6 +1841,7 @@ rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 		max(w - 1, 0),
 		max(h - 1, 0)
 	);
+	widget->redraw = True;
 }
 
 static void
@@ -1855,11 +1858,12 @@ pixelstocolrow(Widget *widget, int visrow, int x, int y, int *col, int *row)
 	*row = i / widget->ncols;
 }
 
-static int
+static Bool
 rectselect(Widget *widget, int srcrow, int srcydiff, int x0, int y0, int x1, int y1)
 {
-	int sel, row, col, tmp, i;
-	int changed = false;
+	Bool changed = False;
+	Bool sel;
+	int row, col, tmp, i;
 	int col0, col1, row0, row1;
 
 	/* normalize source and destination points to geometry of icon area */
@@ -1894,27 +1898,27 @@ rectselect(Widget *widget, int srcrow, int srcydiff, int x0, int y0, int x1, int
 
 	/* select (unselect) items inside (outside) rectangle */
 	for (i = firstvisible(widget); i <= lastvisible(widget); i++) {
-		sel = true;
+		sel = True;
 		row = i / widget->ncols;
 		col = i % widget->ncols;
 		if (col < col0 || col > col1 || row < row0 || row > row1) {
 			/* item is out of selection */
-			sel = false;
+			sel = False;
 		} else if ((col == col0 && x0 > ITEM_WIDTH - ICON_MARGIN) ||
 		           (col == col1 && x1 < ICON_MARGIN)) {
 			/* item is on a column at edge of selection */
-			sel = false;
+			sel = False;
 		} else if ((row == row0 && y0 > THUMBSIZE) ||
 		           (row == row1 && y1 < 0)) {
 			/* item is on a row at edge of selection */
-			sel = false;
+			sel = False;
 		}
 		if (!sel && (widget->issel[i] == NULL || widget->issel[i]->index > 0))
 			continue;
 		if (sel && widget->issel[i] != NULL && widget->issel[i]->index > 0)
-			selectitem(widget, i, false, false);
-		selectitem(widget, i, sel, true);
-		changed = true;
+			selectitem(widget, i, False, False);
+		selectitem(widget, i, sel, True);
+		changed = True;
 	}
 	return changed;
 }
@@ -2332,9 +2336,40 @@ embed_close(Widget *widget, Time time)
 	);
 }
 
+static Bool
+is_timed_out(struct timespec *start, Time timeout)
+{
+	struct timespec stop;
+	Time elapsed;
+
+	if (timeout == 0)
+		return False;
+	if (clock_gettime(CLOCK_MONOTONIC, &stop) == -1)
+		return False;
+	elapsed = (stop.tv_sec - start->tv_sec) * 1000;
+	elapsed += stop.tv_nsec / 1000000;
+	elapsed -= start->tv_nsec / 1000000;
+	if (elapsed < timeout)
+		return False;
+	*start = stop;
+	return True;
+}
+
 /*
  * event filters
  */
+
+enum events {
+	/*
+	 * The .type field in XEvent(3) structures start from 2 because
+	 * 0 and 1 are reserved by the X11 protocol for errors and
+	 * replies.  XNextEvent(3) and related functions never return
+	 * an error or reply (or so it is expected).  So we use those
+	 * two values for our own purposes.
+	 */
+	CloseNotify     = 0,
+	TimeoutNotify   = 1,
+};
 
 static WidgetEvent
 keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text)
@@ -2381,10 +2416,10 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 				widget,
 				widget->highlight,
 				widget->issel[widget->highlight] == NULL,
-				false
+				False
 			);
 		}
-		highlight(widget, widget->highlight + 1, true);
+		highlight(widget, widget->highlight + 1, True);
 		break;
 	case XK_Prior:
 	case XK_Next:
@@ -2402,7 +2437,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	case XK_Left:
 	case XK_Right:
 hjkl:
-		redrawall = true;
+		redrawall = True;
 		if (ksym == XK_Home) {
 			index = 0;
 			widget->ydiff = 0;
@@ -2450,18 +2485,18 @@ hjkl:
 		if (widget->row != newrow) {
 			widget->ydiff = 0;
 			setrow(widget, newrow);
-			redrawall = true;
+			redrawall = True;
 		} else if (widget->row == index / widget->ncols) {
 			widget->ydiff = 0;
-			widget->redraw = true;
+			widget->redraw = True;
 		}
 draw:
 		previtem = widget->highlight;
-		highlight(widget, index, true);
+		highlight(widget, index, True);
 		if (xev->state & ShiftMask)
 			selectitems(widget, index, previtem);
 		else if (xev->state & ControlMask)
-			selectitem(widget, index, true, 0);
+			selectitem(widget, index, True, 0);
 		if (redrawall)
 			drawitems(widget);
 		break;
@@ -2510,14 +2545,36 @@ draw:
 	return WIDGET_NONE;
 }
 
-static WidgetEvent
-processevent(Widget *widget, XEvent *ev)
+static void
+compress_motion(Display *display, XEvent *event)
+{
+	XEvent next;
+
+	if (event->type != MotionNotify)
+		return;
+	while (XPending(display)) {
+		XPeekEvent(display, &next);
+		if (next.type != MotionNotify)
+			break;
+		if (next.xmotion.window != event->xmotion.window)
+			break;
+		if (next.xmotion.subwindow != event->xmotion.subwindow)
+			break;
+		XNextEvent(display, event);
+	}
+}
+
+static Bool
+filter_event(Widget *widget, XEvent *ev)
 {
 	int newrow;
 	char *str;
 
-	widget->redraw = false;
+	widget->redraw = False;
 	switch (ev->type) {
+	case MotionNotify:
+		compress_motion(widget->display, ev);
+		return False;
 	case CreateNotify:
 		if (ev->xcreatewindow.parent != widget->window)
 			break;
@@ -2558,26 +2615,27 @@ processevent(Widget *widget, XEvent *ev)
 		embed_focus(widget, CurrentTime);
 		break;
 	case UnmapNotify:
-		if (ev->xunmap.window != widget->child)
-			break;
-		widget->child = None;
+		if (ev->xunmap.window == widget->child)
+			widget->child = None;
 		break;
 	case DestroyNotify:
-		if (ev->xdestroywindow.window == widget->window)
-			return WIDGET_ERROR;
-		if (ev->xdestroywindow.window != widget->child)
+		if (ev->xdestroywindow.window == widget->child)
+			widget->child = None;
+		if (ev->xdestroywindow.window != widget->window)
 			break;
-		widget->child = None;
-		break;
+		widget->error = True;
+		goto close;
 	case ClientMessage:
 		if (ev->xclient.window != widget->window)
-			return WIDGET_NONE;
+			return False;
 		if (ev->xclient.message_type != widget->atoms[WM_PROTOCOLS])
-			return WIDGET_NONE;
+			return False;
 		if ((Atom)ev->xclient.data.l[0] != widget->atoms[WM_DELETE_WINDOW])
-			return WIDGET_NONE;
+			return False;
+close:
 		embed_close(widget, ev->xclient.data.l[1]);
-		return WIDGET_CLOSE;
+		ev->type = CloseNotify;
+		return False;
 	case ConfigureNotify:
 		if (ev->xconfigure.window != widget->window)
 			break;
@@ -2595,7 +2653,7 @@ processevent(Widget *widget, XEvent *ev)
 		break;
 	case PropertyNotify:
 		if (ev->xproperty.state != PropertyNewValue)
-			return WIDGET_NONE;
+			return False;
 		if (ev->xproperty.window == widget->root &&
 		    ev->xproperty.atom == XA_RESOURCE_MANAGER) {
 			str = gettextprop(
@@ -2605,20 +2663,11 @@ processevent(Widget *widget, XEvent *ev)
 				False
 			);
 			if (str == NULL)
-				return WIDGET_NONE;
+				return False;
 			loadresources(widget, str);
 			FREE(str);
 			drawitems(widget);
-			widget->redraw = true;
-		} else if (ev->xproperty.window == widget->window &&
-		           ev->xproperty.atom == widget->atoms[_CONTROL_GOTO]) {
-			FREE(widget->gototext);
-			widget->gototext = gettextprop(
-				widget,
-				widget->window,
-				widget->atoms[_CONTROL_GOTO],
-				True
-			);
+			widget->redraw = True;
 		}
 		break;
 	case SelectionRequest:
@@ -2634,10 +2683,10 @@ processevent(Widget *widget, XEvent *ev)
 			disownprimary(widget);
 		break;
 	default:
-		return WIDGET_NONE;
+		return False;
 	}
 	endevent(widget);
-	return WIDGET_INTERNAL;
+	return True;
 }
 
 static int
@@ -2647,29 +2696,22 @@ dnd_event_handler(XEvent *event, void *arg)
 	int x, y;
 	static Time lasttime = 0;
 
-	switch (processevent(widget, event)) {
-	case WIDGET_CLOSE:
-		XPutBackEvent(widget->display, event);
-		return -1;
-	case WIDGET_NONE:
-		break;
-	default:
+	if (filter_event(widget, event))
 		return 0;
-	}
-	switch (event->type) {
-	case MotionNotify:
-		x = event->xmotion.x;
-		y = event->xmotion.y;
-		highlight(widget, getitemundercursor(widget, x, y), True);
-		if (lasttime + SCROLL_TIME > event->xmotion.time)
-			break;
-		lasttime = event->xmotion.time;
-		if (y >= 0 && y < SCROLL_STEP)
-			scroll(widget, -SCROLL_STEP);
-		else if (y >= widget->h - SCROLL_STEP && y < widget->h)
-			scroll(widget, +SCROLL_STEP);
-		break;
-	}
+	if (event->type != MotionNotify)
+		return 0;
+	if (event->xmotion.window != widget->window)
+		return 0;
+	x = event->xmotion.x;
+	y = event->xmotion.y;
+	highlight(widget, getitemundercursor(widget, x, y), True);
+	if (lasttime + SCROLL_TIME > event->xmotion.time)
+		return 0;
+	lasttime = event->xmotion.time;
+	if (y < SCROLL_STEP)
+		scroll(widget, -SCROLL_STEP);
+	else if (y >= widget->h - SCROLL_STEP)
+		scroll(widget, +SCROLL_STEP);
 	endevent(widget);
 	return 0;
 }
@@ -2679,42 +2721,25 @@ dnd_event_handler(XEvent *event, void *arg)
  */
 
 static int
-nextevent(Widget *widget, XEvent *ev, int timeout)
+nextevent(Widget *widget, XEvent *ev, Time timeout)
 {
+	static struct timespec lasttime = { 0 };
 	struct pollfd pfd = {
 		.fd = widget->fd,
 		.events = POLLIN,
 	};
-	struct timespec ts;
-	int elapsed;
 
+	endevent(widget); /* end of previous event */
 	for (;;) {
-		if (XPending(widget->display) > 0)
-			goto done;
-		if (timeout > 0 && clock_gettime(CLOCK_MONOTONIC, &ts) != -1) {
-			elapsed = (ts.tv_sec - widget->time.tv_sec) * 1000;
-			elapsed += ts.tv_nsec / 1000000;
-			elapsed -= widget->time.tv_nsec / 1000000;
-			if (elapsed < timeout) {
-				timeout -= elapsed;
-			} else {
-				timeout = 0;
-			}
-		}
-		switch (poll(&pfd, 1, timeout)) {
-		case -1:
-			if (errno == EINTR)
+		if (is_timed_out(&lasttime, timeout))
+			return TimeoutNotify;
+		if (XPending(widget->display) == 0)
+			if (poll(&pfd, 1, timeout) <= 0)
 				continue;
-			goto done;
-		case 0:
-			return false;
-		default:
-			goto done;
-		}
+		(void)XNextEvent(widget->display, ev);
+		if (!filter_event(widget, ev))
+			return ev->type;
 	}
-done:
-	(void)XNextEvent(widget->display, ev);
-	return true;
 }
 
 static WidgetEvent
@@ -2722,9 +2747,8 @@ scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 {
 	XEvent ev;
 	int grabpos, pos, y;
-	struct timespec ts;
 
-	grabpos = widget->handlew / 2;             /* we grab the handle in its middle */
+	grabpos = widget->handlew / 2;
 	drawscroller(widget, gethandlepos(widget));
 	XMoveWindow(
 		widget->display, widget->scroller,
@@ -2739,80 +2763,64 @@ scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 	) != GrabSuccess)
 		goto done;
 	y = 0;
-	for (;;) {
-		if (!nextevent(widget, &ev, SCROLL_TIME)) {
-			if (clock_gettime(CLOCK_MONOTONIC, &ts) != -1)
-				widget->time = ts;
-			if (y >= 0 && y < SCROLLER_SIZE)
-				continue;
-			scroll(
-				widget,
-				y > SCROLLER_SIZE ? y - SCROLLER_SIZE : y
-			);
-			endevent(widget);
+	for (;;) switch (nextevent(widget, &ev, SCROLL_TIME)) {
+	case CloseNotify:
+		return WIDGET_CLOSE;
+	case TimeoutNotify:
+		if (y < 0)
+			scroll(widget, y);
+		else if (y > SCROLLER_SIZE)
+			scroll(widget, y - SCROLLER_SIZE);
+		continue;
+	case FocusIn:
+	case FocusOut:
+		goto done;
+	case MotionNotify:
+		if (ev.xmotion.window != widget->scroller)
+			continue;
+		if (ev.xmotion.y < 0)
+			y = ev.xmotion.y;
+		else if (ev.xmotion.y > SCROLLER_SIZE)
+			y = ev.xmotion.y - SCROLLER_SIZE;
+		else
+			y = 0;
+		if (ev.xmotion.state & Button1Mask)
+			scrollerset(widget, ev.xmotion.y - grabpos);
+		continue;
+	case ButtonRelease:
+		if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
+			scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP));
+			widget->redraw = True;
 			continue;
 		}
-		switch (processevent(widget, &ev)) {
-		case WIDGET_CLOSE:
-			XUnmapWindow(widget->display, widget->scroller);
-			return WIDGET_CLOSE;
-		case WIDGET_NONE:
-			break;
-		default:
+		if (ev.xbutton.window != widget->scroller)
 			continue;
-		}
-		switch (ev.type) {
-		case FocusIn:
-		case FocusOut:
+		/*
+		 * Scroller had active pointer grab.
+		 * Return if release is outside scroller.
+		 */
+		if (ev.xbutton.x < 0 || ev.xbutton.x >= SCROLLER_SIZE)
 			goto done;
-		case MotionNotify:
-			if (ev.xmotion.window != widget->scroller)
-				break;
-			if (ev.xmotion.y < 0)
-				y = ev.xmotion.y;
-			else if (ev.xmotion.y > SCROLLER_SIZE)
-				y = ev.xmotion.y - SCROLLER_SIZE;
-			else
-				y = 0;
-			if (ev.xmotion.state & Button1Mask)
-				scrollerset(widget, ev.xmotion.y - grabpos);
-			break;
-		case ButtonRelease:
-			if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
-				scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP));
-				widget->redraw = true;
-				break;
-			}
-			if (ev.xbutton.window != widget->scroller)
-				break;
-			/*
-			 * Scroller had active pointer grab.
-			 * Return if release is outside scroller.
-			 */
-			if (ev.xbutton.x < 0 || ev.xbutton.x >= SCROLLER_SIZE)
-				goto done;
-			if (ev.xbutton.y < 0 || ev.xbutton.y >= SCROLLER_SIZE)
-				goto done;
-			break;
-		case ButtonPress:
-			if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)
-				break;
-			if (ev.xbutton.button != Button1)
-				goto done;
-			if (ev.xbutton.window != widget->scroller)
-				goto done;
-			pos = gethandlepos(widget);
-			if (ev.xbutton.y < pos || ev.xbutton.y > pos + widget->handlew) {
-				/* grab handle in the middle */
-				grabpos = widget->handlew / 2;
-				scrollerset(widget, ev.xbutton.y - grabpos);
-			} else {
-				/* grab handle in position under pointer */
-				grabpos = ev.xbutton.y - pos;
-			}
-			break;
+		if (ev.xbutton.y < 0 || ev.xbutton.y >= SCROLLER_SIZE)
+			goto done;
+		continue;
+	case ButtonPress:
+		if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)
+			continue;
+		if (ev.xbutton.button != Button1)
+			goto done;
+		if (ev.xbutton.window != widget->scroller)
+			goto done;
+		pos = gethandlepos(widget);
+		if (ev.xbutton.y < pos || ev.xbutton.y > pos + widget->handlew) {
+			/* grab handle in the middle */
+			grabpos = widget->handlew / 2;
+			scrollerset(widget, ev.xbutton.y - grabpos);
+		} else {
+			/* grab handle in position under pointer */
+			grabpos = ev.xbutton.y - pos;
 		}
-		endevent(widget);
+		continue;
 	}
 done:
 	XUngrabPointer(widget->display, lasttime);
@@ -2821,61 +2829,38 @@ done:
 }
 
 static WidgetEvent
-selmode(Widget *widget, Time lasttime, int shift, int clickx, int clicky)
+selmode(Widget *widget, int shift, int clickx, int clicky)
 {
 	XEvent ev;
-	int rectrow, rectydiff, ownsel, pos;
+	int rectrow, rectydiff, ownsel;
 	int x = clickx;
 	int y = clicky;
 
 	rectrow = widget->row;
 	rectydiff = widget->ydiff;
-	ownsel = false;
+	ownsel = False;
 	if (!shift)
 		unselectitems(widget);
-	for (;;) {
-		if (!nextevent(widget, &ev, SCROLL_TIME)) {
-			pos = y;
-			if (pos > widget->h)
-				pos -= widget->h;
-			else if (pos >= 0)
-				continue;
-			if (pos > 0)
-				pos += SCROLL_STEP;
-			pos /= SCROLL_STEP;
-			if (pos != 0) {
-				scroll(widget, pos);
-				widget->redraw = true;
-				goto motion;
-			}
+	for (;;) switch (nextevent(widget, &ev, SCROLL_TIME)) {
+	case CloseNotify:
+		return WIDGET_CLOSE;
+	case TimeoutNotify:
+		if (y >= 0 && y < widget->h)
 			continue;
-		}
-		switch (processevent(widget, &ev)) {
-		case WIDGET_CLOSE:
-			return WIDGET_CLOSE;
-		case WIDGET_NONE:
-			break;
-		default:
-			continue;
-		}
-		switch (ev.type) {
-		case ButtonPress:
-		case ButtonRelease:
-			goto done;
-		case MotionNotify:
-			if (ev.xmotion.time - lasttime < MOTION_TIME)
-				break;
-			lasttime = ev.xmotion.time;
-			x = ev.xmotion.x;
-			y = ev.xmotion.y;
+		if (scroll(widget, (y > 0 ? +1 : -1) * SCROLLER_SIZE))
+			goto motion;
+		continue;
+	case ButtonPress:
+	case ButtonRelease:
+		goto done;
+	case MotionNotify:
+		x = ev.xmotion.x;
+		y = ev.xmotion.y;
 motion:
-			rectdraw(widget, rectrow, rectydiff, clickx, clicky, x, y);
-			if (rectselect(widget, rectrow, rectydiff, clickx, clicky, x, y))
-				ownsel = true;
-			commitdraw(widget);
-			break;
-		}
-		endevent(widget);
+		rectdraw(widget, rectrow, rectydiff, clickx, clicky, x, y);
+		if (rectselect(widget, rectrow, rectydiff, clickx, clicky, x, y))
+			ownsel = True;
+		continue;
 	}
 done:
 	rectclear(widget);
@@ -2958,7 +2943,97 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 	WidgetEvent event;
 	struct ctrldnd_drop drop;
 
-	while (!XNextEvent(widget->display, &ev)) {
+	for (;;) switch (nextevent(widget, &ev, 0)) {
+	case CloseNotify:
+		return WIDGET_CLOSE;
+	case PropertyNotify:
+		if (ev.xproperty.state != PropertyNewValue)
+			continue;
+		if (ev.xproperty.window != widget->window)
+			continue;
+		if (ev.xproperty.atom != widget->atoms[_CONTROL_GOTO])
+			continue;
+		free(widget->gototext);
+		widget->gototext = gettextprop(
+			widget,
+			widget->window,
+			widget->atoms[_CONTROL_GOTO],
+			True
+		);
+		if (widget->gototext != NULL) {
+			*text = widget->gototext;
+			return WIDGET_GOTO;
+		}
+		continue;
+	case KeyPress:
+		if (ev.xkey.window != widget->window)
+			continue;
+		event = keypress(widget, &ev.xkey, selitems, nitems, text);
+		if (event != WIDGET_NONE)
+			return event;
+		continue;
+	case ButtonPress:
+		clickx = ev.xbutton.x;
+		clicky = ev.xbutton.y;
+		if (ev.xbutton.window != widget->window)
+			continue;
+		if (ev.xbutton.button == Button1) {
+			clicki = mouse1click(widget, &ev.xbutton);
+		} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
+			scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP));
+			widget->redraw = True;
+		} else if (ev.xbutton.button == Button2) {
+			event = scrollmode(widget, ev.xmotion.time, ev.xmotion.x, ev.xmotion.y);
+			if (event != WIDGET_NONE)
+				return event;
+		} else if (ev.xbutton.button == Button3) {
+			if (mouse3click(widget, ev.xbutton.x, ev.xbutton.y) > 0)
+				*nitems = fillselitems(widget, selitems);
+			widget->redraw = True;
+			XUngrabPointer(widget->display, ev.xbutton.time);
+			XFlush(widget->display);
+			return WIDGET_CONTEXT;
+		}
+		continue;
+	case ButtonRelease:
+		if (ev.xbutton.window != widget->window)
+			continue;
+		if (ev.xbutton.button == BUTTON8)
+			return WIDGET_PREV;
+		if (ev.xbutton.button == BUTTON9)
+			return WIDGET_NEXT;
+		if (ev.xbutton.button != Button1)
+			continue;
+		if (clicki < 0 ||
+		    (ev.xbutton.state & (ControlMask | ShiftMask)) ||
+		    ev.xbutton.time - lasttime > DOUBLECLICK) {
+			lasttime = ev.xbutton.time;
+			continue;
+		}
+		if (widget->highlight >= 0) {
+			selitems[0] = widget->highlight;
+			*nitems = 1;
+		} else {
+			*nitems = fillselitems(widget, selitems);
+		}
+		return WIDGET_OPEN;
+	case MotionNotify:
+		if (ev.xmotion.window != widget->window)
+			continue;
+		if (!(ev.xmotion.state & Button1Mask))
+			continue;
+		if (diff(ev.xmotion.x, clickx) * diff(ev.xmotion.y, clicky) < DRAG_SQUARE)
+			continue;
+		if (clicki == 0)
+			continue;
+		if (clicki == -1)
+			event = selmode(widget, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
+		else
+			event = dragmode(widget, ev.xmotion.time, clicki, selitems, nitems);
+		if (event != WIDGET_NONE)
+			return event;
+		continue;
+	case ClientMessage:
 		drop = ctrldnd_getdrop(
 			&ev, &widget->atoms[UTF8_STRING], 1,
 			CTRLDND_ANYACTION, SCROLL_TIME,
@@ -2976,93 +3051,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			}
 		}
 		XFree(drop.data);
-		if (drop.window != None)
-			return WIDGET_INTERNAL;
-		switch (processevent(widget, &ev)) {
-		case WIDGET_CLOSE:
-			return WIDGET_CLOSE;
-		case WIDGET_NONE:
-			break;
-		default:
-			continue;
-		}
-		if (widget->gototext != NULL) {
-			*text = widget->gototext;
-			return WIDGET_GOTO;
-		}
-		switch (ev.type) {
-		case KeyPress:
-			if (ev.xkey.window != widget->window)
-				break;
-			event = keypress(widget, &ev.xkey, selitems, nitems, text);
-			if (event != WIDGET_NONE)
-				return event;
-			break;
-		case ButtonPress:
-			clickx = ev.xbutton.x;
-			clicky = ev.xbutton.y;
-			if (ev.xbutton.window != widget->window)
-				break;
-			if (ev.xbutton.button == Button1) {
-				clicki = mouse1click(widget, &ev.xbutton);
-			} else if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
-				scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP));
-				widget->redraw = true;
-			} else if (ev.xbutton.button == Button2) {
-				event = scrollmode(widget, ev.xmotion.time, ev.xmotion.x, ev.xmotion.y);
-				if (event != WIDGET_NONE)
-					return event;
-			} else if (ev.xbutton.button == Button3) {
-				if (mouse3click(widget, ev.xbutton.x, ev.xbutton.y) > 0)
-					*nitems = fillselitems(widget, selitems);
-				widget->redraw = true;
-				XUngrabPointer(widget->display, ev.xbutton.time);
-				XFlush(widget->display);
-				return WIDGET_CONTEXT;
-			}
-			break;
-		case ButtonRelease:
-			if (ev.xbutton.window != widget->window)
-				break;
-			if (ev.xbutton.button == BUTTON8)
-				return WIDGET_PREV;
-			if (ev.xbutton.button == BUTTON9)
-				return WIDGET_NEXT;
-			if (ev.xbutton.button != Button1)
-				break;
-			if (clicki < 0 ||
-			    (ev.xbutton.state & (ControlMask | ShiftMask)) ||
-			    ev.xbutton.time - lasttime > DOUBLECLICK) {
-				lasttime = ev.xbutton.time;
-				break;
-			}
-			if (widget->highlight >= 0) {
-				selitems[0] = widget->highlight;
-				*nitems = 1;
-			} else {
-				*nitems = fillselitems(widget, selitems);
-			}
-			return WIDGET_OPEN;
-		case MotionNotify:
-			if (ev.xmotion.window != widget->window)
-				break;
-			if (!(ev.xmotion.state & Button1Mask))
-				break;
-			if (diff(ev.xmotion.x, clickx) * diff(ev.xmotion.y, clicky) < DRAG_SQUARE)
-				break;
-			if (clicki == 0)
-				break;
-			if (clicki == -1)
-				event = selmode(widget, ev.xmotion.time, ev.xmotion.state & (ShiftMask | ControlMask), clickx, clicky);
-			else
-				event = dragmode(widget, ev.xmotion.time, clicki, selitems, nitems);
-			if (event != WIDGET_NONE)
-				return event;
-			break;
-		default:
-			break;
-		}
-		endevent(widget);
+		continue;
 	}
 	return WIDGET_CLOSE;
 }
@@ -3273,7 +3262,7 @@ initwindow(Widget *widget, struct Options *options)
 		1
 	);
 	(void)snprintf(buf, LEN(buf), "%lu", (unsigned long)widget->window);
-	if (setenv("WINDOWID", buf, true) == RETURN_FAILURE)
+	if (setenv("WINDOWID", buf, True) == RETURN_FAILURE)
 		warn("setenv");
 	setwinicon(widget);
 	ctrldnd_announce(widget->display, widget->window);
@@ -3538,7 +3527,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 int
 widget_set(Widget *widget, const char *cwd, const char *title, Item items[], size_t nitems, Scroll *scrl)
 {
-	widget->isset = true;
+	widget->isset = True;
 	XUndefineCursor(widget->display, widget->window);
 	cleanwidget(widget);
 	widget->items = items;
@@ -3632,19 +3621,14 @@ widget_geticons(Widget *widget)
 WidgetEvent
 widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **text)
 {
-	XEvent ev;
 	WidgetEvent retval;
 
 	*text = NULL;
 	*nitems = 0;
-	while (widget->start && XPending(widget->display) > 0) {
-		(void)XNextEvent(widget->display, &ev);
-		if (processevent(widget, &ev) == WIDGET_CLOSE) {
-			endevent(widget);
-			return WIDGET_CLOSE;
-		}
-	}
-	widget->start = true;
+	retval = widget_wait(widget);
+	if (retval == WIDGET_CLOSE || retval == WIDGET_ERROR)
+		return retval;
+	widget->start = True;
 	retval = mainmode(widget, selitems, nitems, text);
 	endevent(widget);
 	scrl->ydiff = widget->ydiff;
@@ -3658,14 +3642,14 @@ widget_wait(Widget *widget)
 {
 	XEvent ev;
 
-	while (XPending(widget->display) > 0) {
+	while (widget->start && XPending(widget->display) > 0) {
 		(void)XNextEvent(widget->display, &ev);
-		if (processevent(widget, &ev) == WIDGET_CLOSE) {
-			endevent(widget);
+		(void)filter_event(widget, &ev);
+		if (widget->error)
+			return WIDGET_ERROR;
+		if (ev.type == CloseNotify)
 			return WIDGET_CLOSE;
-		}
 	}
-	endevent(widget);
 	return WIDGET_NONE;
 }
 
