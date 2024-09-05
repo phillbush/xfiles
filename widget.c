@@ -2663,13 +2663,24 @@ close:
 				False
 			);
 			if (str == NULL)
-				return False;
+				break;
 			loadresources(widget, str);
 			FREE(str);
 			drawitems(widget);
 			widget->redraw = True;
+			break;
 		}
-		break;
+		if (ev->xproperty.window == widget->window &&
+		    ev->xproperty.atom == widget->atoms[_CONTROL_GOTO]) {
+			free(widget->gototext);
+			widget->gototext = gettextprop(
+				widget,
+				widget->window,
+				widget->atoms[_CONTROL_GOTO],
+				True
+			);
+		}
+		return False;
 	case SelectionRequest:
 		if (ev->xselectionrequest.owner != widget->window)
 			break;
@@ -2947,19 +2958,6 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 	case CloseNotify:
 		return WIDGET_CLOSE;
 	case PropertyNotify:
-		if (ev.xproperty.state != PropertyNewValue)
-			continue;
-		if (ev.xproperty.window != widget->window)
-			continue;
-		if (ev.xproperty.atom != widget->atoms[_CONTROL_GOTO])
-			continue;
-		free(widget->gototext);
-		widget->gototext = gettextprop(
-			widget,
-			widget->window,
-			widget->atoms[_CONTROL_GOTO],
-			True
-		);
 		if (widget->gototext != NULL) {
 			*text = widget->gototext;
 			return WIDGET_GOTO;
@@ -3626,6 +3624,10 @@ widget_poll(Widget *widget, int *selitems, int *nitems, Scroll *scrl, char **tex
 	*text = NULL;
 	*nitems = 0;
 	retval = widget_wait(widget);
+	if (widget->gototext != NULL) {
+		*text = widget->gototext;
+		return WIDGET_GOTO;
+	}
 	if (retval == WIDGET_CLOSE || retval == WIDGET_ERROR)
 		return retval;
 	widget->start = True;
