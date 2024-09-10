@@ -2745,7 +2745,7 @@ nextevent(Widget *widget, XEvent *ev, Time timeout)
 		if (is_timed_out(&lasttime, timeout))
 			return TimeoutNotify;
 		if (XPending(widget->display) == 0)
-			if (poll(&pfd, 1, timeout) <= 0)
+			if (poll(&pfd, 1, timeout?timeout:INFTIM) <= 0)
 				continue;
 		(void)XNextEvent(widget->display, ev);
 		if (!filter_event(widget, ev))
