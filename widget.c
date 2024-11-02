@@ -27,6 +27,7 @@
 #include <control/dragndrop.h>
 #include <control/font.h>
 
+#include "compat.h"
 #include "icons.h"
 #include "util.h"
 #include "widget.h"
