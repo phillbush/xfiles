@@ -69,7 +69,7 @@ ICONS = \
 	icons/folder.xpm
 
 PROG_CPPFLAGS = \
-	-D_POSIX_C_SOURCE=200809L -D_BSD_SOURCE -D_DEFAULT_SOURCE \
+	-D_POSIX_C_SOURCE=200809L -D_BSD_SOURCE -D_GNU_SOURCE -D_DEFAULT_SOURCE \
 	-I. -I/usr/local/include -I/usr/X11R6/include \
 	-I/usr/include/freetype2 -I/usr/X11R6/include/freetype2 \
 	${CPPFLAGS}
