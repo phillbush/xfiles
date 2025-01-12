@@ -2768,6 +2768,7 @@ scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 		clicky - SCROLLER_SIZE / 2 - 1
 	);
 	XMapRaised(widget->display, widget->scroller);
+	/* grab on scroller; so motion position is relative to it */
 	if (XGrabPointer(
 		widget->display, widget->scroller, False,
 		ButtonReleaseMask | ButtonPressMask | PointerMotionMask,
@@ -2807,14 +2808,6 @@ scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 		}
 		if (ev.xbutton.window != widget->scroller)
 			continue;
-		/*
-		 * Scroller had active pointer grab.
-		 * Return if release is outside scroller.
-		 */
-		if (ev.xbutton.x < 0 || ev.xbutton.x >= SCROLLER_SIZE)
-			goto done;
-		if (ev.xbutton.y < 0 || ev.xbutton.y >= SCROLLER_SIZE)
-			goto done;
 		continue;
 	case ButtonPress:
 		if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)
@@ -2822,6 +2815,11 @@ scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 		if (ev.xbutton.button != Button1)
 			goto done;
 		if (ev.xbutton.window != widget->scroller)
+			goto done;
+		/* return if press is outside scroller */
+		if (ev.xbutton.x < 0 || ev.xbutton.x >= SCROLLER_SIZE)
+			goto done;
+		if (ev.xbutton.y < 0 || ev.xbutton.y >= SCROLLER_SIZE)
 			goto done;
 		pos = gethandlepos(widget);
 		if (ev.xbutton.y < pos || ev.xbutton.y > pos + widget->handlew) {
