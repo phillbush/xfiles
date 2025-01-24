@@ -3060,7 +3060,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 static int
 initxconn(Widget *widget, struct Options *options)
 {
-	static char *atomnames[] = {
+	static char *atom_names[] = {
 #define X(atom, name) [atom] = name ? name : #atom,
 		ATOMS
 #undef  X
@@ -3094,7 +3094,7 @@ initxconn(Widget *widget, struct Options *options)
 		warnx("could not set connection to X server to close on exec");
 		return RETURN_FAILURE;
 	}
-	if (!XInternAtoms(widget->display, atomnames,
+	if (!XInternAtoms(widget->display, atom_names,
 	                  NATOMS, False, widget->atoms)) {
 		warnx("could not intern X atoms");
 		return RETURN_FAILURE;
@@ -3375,20 +3375,46 @@ initstreams(Widget *widget, struct Options *options)
 static int
 initmisc(Widget *widget, struct Options *options)
 {
-	/*
-	 * No need to check for errors here.
-	 *
-	 * - If cursor loading function returns None, ignore;
-	 *   XDefineCursor(3) just uses the default cursor when passed
-	 *   None.
-	 *
-	 * - If selecting PropertyNotify on root window fail, ignore;
-	 *   we should not be able to reload theme on the fly, but it
-	 *   is not important for the widget to work correctly.
-	 */
 	(void)options;
-	widget->busycursor = XCreateFontCursor(widget->display, XC_watch);
+
+	/*
+	 * The progress/half-busy cursor (rendered as the regular
+	 * pointing cursor with a spinning wheel or hourglass) is used
+	 * to indicate that some computation is in progress, but the
+	 * program still responds to user input.
+	 *
+	 * There is no default name for such cursor; and each theme may
+	 * use a different name for it.  We try all these possibilities
+	 * in turn.
+	 *
+	 * If all fail, we fallback to XC_watch, from default X11 cursor
+	 * set, which is mostly used for unresponsive programs during a
+	 * computation taking long time.
+	 */
+	for (int i = 0; i < 3; i++) {
+		static char *names[] = {
+			"progress", "half-busy", "left_ptr_watch"
+		};
+
+		widget->busycursor = XcursorLibraryLoadCursor(
+			widget->display, names[i]
+		);
+		if (widget->busycursor != None)
+			break;
+	}
+	if (widget->busycursor == None)
+		widget->busycursor = XCreateFontCursor(widget->display, XC_watch);
+
+	/*
+	 * Detect property changes on root to watch X Resources.
+	 */
 	(void)XSelectInput(widget->display, widget->root, PropertyChangeMask);
+
+	/*
+	 * No need to check for errors here:
+	 * If cursor is None, XDefineCursor(3) fallback to default cursor.
+	 * If not watching resources, we'll just not reload theme on the fly.
+	 */
 	return RETURN_SUCCESS;
 }
 
