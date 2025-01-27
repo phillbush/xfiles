@@ -912,13 +912,13 @@ resend_position:
 static Bool
 map_icon(Display *display, Window root, Atom const atomtab[], Window icon)
 {
-	unsigned int width, height;
+	unsigned int width = 0, height = 0;
 
 	/* map icon off-screen for now; it will follow pointer cursor later */
 	if (!XGetGeometry(
 		display, icon, &(Window){0}, &(int){0}, &(int){0},
 		&width, &height, &(unsigned){0}, &(unsigned){0}
-	)) return False;
+	) || width == 0 || height == 0) return False;
 	(void)XUnmapWindow(display, icon);
 	(void)XChangeWindowAttributes(
 		display, icon, CWOverrideRedirect,

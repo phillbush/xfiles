@@ -1489,15 +1489,16 @@ fillclipboard(Widget *widget, unsigned char **bufp, Bool uriformat)
 	struct Selection *sel;
 	struct clipboard *clip;
 	char const *delim = "\n";
-	FILE *stream;
 
 	if (widget->sel == NULL)
 		return -1;
 	clip = uriformat ? &widget->uriclip : &widget->plainclip;
-	stream = clip->stream;
 	if (clip->filled)
 		goto done;
-	rewind(stream);
+	if (fflush(clip->stream) == EOF)
+		goto done;
+	if (fseek(clip->stream, 0L, SEEK_SET) == -1)
+		goto done;
 	if (widget->sel != NULL && widget->sel->next == NULL) {
 		/* only one item selected; do not add trailling newline */
 		delim = "";
@@ -1506,15 +1507,15 @@ fillclipboard(Widget *widget, unsigned char **bufp, Bool uriformat)
 		char *name = widget->items[sel->index].fullname;
 
 		if (!uriformat)
-			(void)fprintf(stream, "%s%s", name, delim);
+			(void)fprintf(clip->stream, "%s%s", name, delim);
 		else
-			writeuri(stream, (unsigned char *)name);
+			writeuri(clip->stream, (unsigned char *)name);
 	}
 	clip->filled = True;
 done:
-	fflush(stream);
+	fflush(clip->stream);
 	*bufp = clip->buf;
-	return ferror(stream) ? -1 : ftello(stream);
+	return ferror(clip->stream) ? -1 : ftello(clip->stream);
 }
 
 static ssize_t
@@ -3707,10 +3708,12 @@ widget_thumb(Widget *widget, char *path, int item)
 		warnx("%s: not a ppm file", path);
 		goto error;
 	}
-	w = readsize(fp);
-	h = readsize(fp);
-	if (w <= 0 || w > THUMBSIZE || h <= 0 || h > THUMBSIZE) {
+	if ((w = readsize(fp)) <= 0 || (h = readsize(fp)) <= 0) {
 		warnx("%s: ppm file with invalid header", path);
+		goto error;
+	}
+	if (w > THUMBSIZE || h > THUMBSIZE) {
+		warnx("%s: ppm file too large: %dx%d", path, w, h);
 		goto error;
 	}
 	if (checkheader(fp, PPM_COLOR, PPM_COLOR_SIZE) == -1) {
