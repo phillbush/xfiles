@@ -25,11 +25,6 @@ SCRIPTS = \
 	examples/xfilesctl \
 	examples/xfilesthumb
 
-LINTS = \
-	${SRCS:=.lint} \
-	${MANS:=.lint} \
-	${SCRIPTS:=.lint}
-
 WINICONS = \
 	icons/winicon16x16.abgr \
 	icons/winicon32x32.abgr \
@@ -94,7 +89,8 @@ ${PROG}: ${OBJS}
 .c.o:
 	${CC} ${PROG_CFLAGS} -o $@ -c $<
 
-debug: ${DEBUG_PROG}
+debug:
+	scan-build ${MAKE} ${DEBUG_PROG}
 ${DEBUG_PROG}: ${DEBUG_OBJS}
 	${CC} -o $@ ${DEBUG_OBJS} ${PROG_LDFLAGS} ${DEBUG_FLAGS}
 .c.dbg:
@@ -109,17 +105,9 @@ xfiles.{dbg,o}:  util.h widget.h icons/file.xpm icons/folder.xpm
 widget.{dbg,o}:  util.h widget.h icons/x.xpm control/selection.h control/dragndrop.h control/font.h
 icons.{dbg,o}:   ${ICONS} ${WINICONS}
 
-lint: ${LINTS}
-${LINTS}: ${@:.lint=}
-${SCRIPTS:=.lint}:
-	@echo LINTING ${@:.lint=}
-	@-shellcheck ${@:.lint=} | tee $@
-${MANS:=.lint}:
-	@echo LINTING ${@:.lint=}
-	@-mandoc -T lint -W warning ${@:.lint=} | tee $@
-${SRCS:=.lint}:
-	@echo LINTING ${@:.lint=}
-	@-clang-tidy ${@:.lint=} -- -std=c99 ${PROG_CPPFLAGS} | tee $@
+lint: ${SCRIPTS} ${MANS}
+	-shellcheck ${SCRIPTS}
+	-mandoc -T lint -W warning ${MANS}
 
 tags: ${SRCS}
 	ctags ${SRCS}
@@ -128,7 +116,7 @@ clean:
 	rm -f ${OBJS} ${PROG} ${PROG:=.core}
 
 distclean: clean
-	rm -f ${DEBUG_OBJS} ${DEBUG_PROG} ${DEBUG_PROG:=.core}
-	rm -f ${LINTS} tags
+	rm -f ${DEBUG_OBJS} ${DEBUG_PROG} ${DEBUG_PROG:=.core} tags
+	rm -f tags
 
 .PHONY: all debug lint clean distclean
