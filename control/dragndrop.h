@@ -8,14 +8,13 @@
 
 #include <stddef.h>
 
-#define CTRLDND_ANYACTION (~0)
-
 enum ctrldnd_action {
 	CTRLDND_COPY      = 0x01,
 	CTRLDND_MOVE      = 0x02,
 	CTRLDND_LINK      = 0x04,
 	CTRLDND_ASK       = 0x08,
 	CTRLDND_PRIVATE   = 0x10,
+	CTRLDND_ANYACTION = 0xFFFF,
 };
 
 struct ctrldnd_drop {

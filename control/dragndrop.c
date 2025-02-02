@@ -501,6 +501,7 @@ translate_motionev(XEvent *event, Window dropsite)
 {
 	if (event->type != MotionNotify)
 		return False;
+	event->xmotion.window = dropsite;
 	return XTranslateCoordinates(
 		event->xmotion.display, event->xmotion.root, dropsite,
 		event->xmotion.x_root, event->xmotion.y_root,
@@ -572,8 +573,10 @@ handle_self_message(Display *display, int screen, Bool ignorepos,
 	root = RootWindow(display, screen);
 	dropsite = climsg->window;
 	dndowner = climsg->data.l[0];
-	event = get_motionev_from_positionmsg(display, root, climsg);
 	if (climsg->message_type == atomtab[MESSAGE_POSITION]) {
+		event = get_motionev_from_positionmsg(
+			display, root, climsg
+		);
 		callback(&event, arg);
 		if (ignorepos)
 			return;
