@@ -1664,7 +1664,7 @@ highlight(Widget *widget, int index, int redraw)
 		return;
 	prevhili = widget->highlight;
 	widget->highlight = index;
-	if (redraw)
+	if (redraw && index != 0)
 		drawitem(widget, index);
 	/* we still have to redraw the previous one */
 	drawitem(widget, prevhili);
@@ -1752,15 +1752,10 @@ mouse1click(Widget *widget, XButtonPressedEvent *ev)
 		return index;
 	if (!(ev->state & (ControlMask | ShiftMask)))
 		unselectitems(widget);
-	if (index < 0) {
+	if (index < 0)
 		return index;
-	}
-	/*
-	 * If index != 0, there's no need to ask highlight() to redraw the item,
-	 * as selectitem() or selectitems() will already redraw it.
-	 */
 	prevhili = widget->highlight;
-	highlight(widget, index, (index == 0));
+	highlight(widget, index, True);
 	if (prevhili != -1 && ev->state & ShiftMask)
 		selectitems(widget, widget->highlight, prevhili);
 	else
@@ -2706,7 +2701,7 @@ static int
 dnd_event_handler(XEvent *event, void *arg)
 {
 	Widget *widget = arg;
-	int x, y;
+	int index, x, y;
 	static Time lasttime = 0;
 
 	if (filter_event(widget, event))
@@ -2717,14 +2712,17 @@ dnd_event_handler(XEvent *event, void *arg)
 		return 0;
 	x = event->xmotion.x;
 	y = event->xmotion.y;
-	highlight(widget, getitemundercursor(widget, x, y), True);
-	if (lasttime + SCROLL_TIME > event->xmotion.time)
-		return 0;
-	lasttime = event->xmotion.time;
-	if (y < SCROLL_STEP)
-		scroll(widget, -SCROLL_STEP);
-	else if (y >= widget->h - SCROLL_STEP)
-		scroll(widget, +SCROLL_STEP);
+	index = getitemundercursor(widget, x, y);
+	if (index < 0)
+		index = 0;
+	highlight(widget, index, True);
+	if (lasttime + SCROLL_TIME <= event->xmotion.time) {
+		if (y < SCROLL_STEP)
+			scroll(widget, -SCROLL_STEP);
+		else if (y >= widget->h - SCROLL_STEP)
+			scroll(widget, +SCROLL_STEP);
+		lasttime = event->xmotion.time;
+	}
 	endevent(widget);
 	return 0;
 }
@@ -2847,6 +2845,7 @@ selmode(Widget *widget, int shift, int clickx, int clicky)
 	int x = clickx;
 	int y = clicky;
 
+	highlight(widget, 0, True);
 	rectrow = widget->row;
 	rectydiff = widget->ydiff;
 	ownsel = False;
@@ -2900,9 +2899,9 @@ dragmode(Widget *widget, Time timestamp, int index, int *selitems, int *nitems)
 	drop = ctrldnd_drag(
 		widget->display, widget->screen, timestamp, dragwin,
 		(Atom[]){
-			XA_STRING,
+			widget->atoms[TEXT_URI_LIST],
 			widget->atoms[UTF8_STRING],
-			widget->atoms[TEXT_URI_LIST]
+			XA_STRING,
 		},
 		(unsigned char const *[]){
 			plainbuf,
