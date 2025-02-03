@@ -2904,14 +2904,14 @@ dragmode(Widget *widget, Time timestamp, int index, int *selitems, int *nitems)
 			XA_STRING,
 		},
 		(unsigned char const *[]){
-			plainbuf,
-			plainbuf,
 			uribuf,
+			plainbuf,
+			plainbuf,
 		},
 		(size_t[]){
-			plainsize,
-			plainsize,
 			urisize,
+			plainsize,
+			plainsize,
 		},
 		3, CTRLDND_ANYACTION, SCROLL_TIME,
 		dnd_event_handler, widget
