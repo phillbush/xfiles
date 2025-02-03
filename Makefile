@@ -81,7 +81,6 @@ PROG_LDFLAGS = \
 
 DEBUG_FLAGS = \
 	-g -O0 -DDEBUG -Wall -Wextra -Wpedantic
-#	-fsanitize=address,undefined
 
 all: ${PROG}
 ${PROG}: ${OBJS}
@@ -89,8 +88,7 @@ ${PROG}: ${OBJS}
 .c.o:
 	${CC} ${PROG_CFLAGS} -o $@ -c $<
 
-debug:
-	scan-build ${MAKE} ${DEBUG_PROG}
+debug: ${DEBUG_PROG}
 ${DEBUG_PROG}: ${DEBUG_OBJS}
 	${CC} -o $@ ${DEBUG_OBJS} ${PROG_LDFLAGS} ${DEBUG_FLAGS}
 .c.dbg:
