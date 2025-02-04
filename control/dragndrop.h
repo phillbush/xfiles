@@ -17,13 +17,17 @@ enum ctrldnd_action {
 	CTRLDND_ANYACTION = 0xFFFF,
 };
 
+struct ctrldnd_data {
+	unsigned char  *data;
+	ssize_t         size;
+	Atom            target;
+};
+
 struct ctrldnd_drop {
 	enum ctrldnd_action action;
-	Window          window;
-	Atom            target;
+	struct ctrldnd_data content;
 	Time            time;
-	unsigned char  *data;
-	ssize_t         datasize;
+	Window          window;
 	int             x, y;
 };
 
@@ -37,10 +41,8 @@ struct ctrldnd_drop ctrldnd_drag(
 	int             screen,
 	Time            timestamp,
 	Window          icon,
-	Atom const      targets[],
-	unsigned char const *contents[],
-	size_t const    contentlen[],
-	size_t          ntargets,
+	struct ctrldnd_data const contents[],
+	size_t          ncontents,
 	enum ctrldnd_action actions,
 	Time            interval,
 	int           (*callback)(XEvent *, void *),

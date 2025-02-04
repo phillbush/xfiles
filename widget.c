@@ -2898,20 +2898,22 @@ dragmode(Widget *widget, Time timestamp, int index, int *selitems, int *nitems)
 	dragwin = create_dragwin(widget, index),
 	drop = ctrldnd_drag(
 		widget->display, widget->screen, timestamp, dragwin,
-		(Atom[]){
-			widget->atoms[TEXT_URI_LIST],
-			widget->atoms[UTF8_STRING],
-			XA_STRING,
-		},
-		(unsigned char const *[]){
-			uribuf,
-			plainbuf,
-			plainbuf,
-		},
-		(size_t[]){
-			urisize,
-			plainsize,
-			plainsize,
+		(struct ctrldnd_data[]){
+			{
+				.data   = uribuf,
+				.size   = urisize,
+				.target = widget->atoms[TEXT_URI_LIST],
+			},
+			{
+				.data   = plainbuf,
+				.size   = plainsize,
+				.target = widget->atoms[UTF8_STRING],
+			},
+			{
+				.data   = plainbuf,
+				.size   = plainsize,
+				.target = XA_STRING,
+			},
 		},
 		3, CTRLDND_ANYACTION, SCROLL_TIME,
 		dnd_event_handler, widget
@@ -3036,8 +3038,8 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			CTRLDND_ANYACTION, SCROLL_TIME,
 			dnd_event_handler, widget
 		);
-		if (drop.window == widget->window && drop.datasize > 0) {
-			*text = (char *)drop.data;
+		if (drop.window == widget->window && drop.content.size > 0) {
+			*text = (char *)drop.content.data;
 			*nitems = 1;
 			selitems[0] = getitemundercursor(widget, drop.x, drop.y);
 			switch (drop.action) {
@@ -3047,7 +3049,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			default:           return WIDGET_DROPASK;
 			}
 		}
-		XFree(drop.data);
+		XFree(drop.content.data);
 		continue;
 	}
 	return WIDGET_CLOSE;

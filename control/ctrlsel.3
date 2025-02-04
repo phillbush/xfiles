@@ -414,5 +414,5 @@ thus being able to get the selection from clients with bad incremental response
 Also, incremental conversion is easier to implement on the requestor side.
 .Pp
 The implementation of these functions is not thread-safe.
-They may change (and restore before returning) XLib's internal error handler function,
-which is a global value.
+They set XLib's internal error handler function, which is a global value;
+although they reset to its original value before returning.

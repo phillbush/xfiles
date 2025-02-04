@@ -19,13 +19,17 @@ enum ctrldnd_action {
 	CTRLDND_ANYACTION = ~0,
 };
 
+struct ctrldnd_data {
+	unsigned char      *data;
+	size_t              size;
+	Atom                target;
+};
+
 struct ctrldnd_drop {
 	enum ctrldnd_action action;
-	Window              window;
-	Atom                target;
+	struct ctrldnd_data content;
 	Time                time;
-	unsigned char      *data;
-	size_t              datasize;
+	Window              window;
 	int                 x, y;
 };
 .Ed
@@ -41,10 +45,8 @@ struct ctrldnd_drop {
 .Fa "int screen"
 .Fa "Time timestamp"
 .Fa "Window icon"
-.Fa "Atom const targets[]"
-.Fa "unsigned char const *contents[]"
-.Fa "size_t const contentlen[]"
-.Fa "size_t ntargets"
+.Fa "struct ctrldnd_data const contents[]"
+.Fa "size_t ncontents"
 .Fa "enum ctrldnd_action actions"
 .Fa "Time interval"
 .Fa "int (*callback)(XEvent *event, void *arg)"
@@ -95,6 +97,11 @@ function (which the blocking functions get as argument) is called whenever a non
 so the program can handle it.
 .Pp
 The
+.Ft "struct ctrldnd_data"
+structure specifies the content of a dragged/dropped selection as an array of bytes,
+together with its size (in bytes), and the target (format) of the content.
+.Pp
+The
 .Ft "struct ctrldnd_drop"
 structure (which the blocking functions return) specifies the state of the drop when the drag-and-drop operation terminates.
 .Ss Parameters
@@ -118,21 +125,15 @@ The function called by
 and
 .Fn ctrldnd_getdrop
 to handle non-drag-and-drop events.
-.It Fa contentlen
-The array of sizes of the buffers in the
-.Fa contents
-array.
-It MUST have
-.Fa ntargets
-members.
 .It Fa contents
-The array of buffers holding the dragged selection data.
+The array of contents for the dragged sellection into different targets/formats.
 It MUST have
 .Fa ntargets
 members.
-Each member MUST be in the format of the value at the same position in the
-.Fa targets
-array.
+Each member must be in a unique format,
+as specified by its
+.Fa target
+member.
 .It Fa display
 Points to the context of connection to the
 .Xr Xserver 1 .
@@ -154,20 +155,14 @@ The time in milliseconds between calls to the
 .Fa callback
 function with a synthetic motion event.
 If its value is zero, no synthetic motion event is passed to the callback function.
-.It Fa ntargets
+.It Fa ncontents , ntargets 
 The number of members in the
-.Fa targets ,
-.Fa contents ,
+.Fa contents
 and
-.Fa contentlen
+.Fa targets
 arrays.
 .It Fa screen
 The number of the screen where the drag-and-drop operation is happening.
-.It Fa targets
-The array of targets into which the dragged selection can be converted to.
-It MUST have
-.Fa ntargets
-members.
 .It Fa timestamp
 The time of the event that triggered the drag-and-drop operation.
 .El
@@ -196,6 +191,39 @@ Those constants are not equal to the
 .Ft Atom Ns s
 specified by the XDND protocol to denote their respective actions.
 They are defined as bitmask constants so they can be used together in an bitwise OR.
+.Ss Data structure
+The
+.Ft ctrldnd_data
+structure contains the content of a dragged or dropped selection in a given format/target.
+.Pp
+Its members are as follows:
+.Bl -tag -width Ds
+.It Fa data
+The address to the content of the drop selection converted into
+.Fa target .
+The caller is responsible for freeing it.
+.It Fa size
+The size in bytes of the converted content.
+.It Fa target
+The atom identifying the target (also known as format) into which the drop has been requested.
+When returned from a function,
+its value is
+.Dv None
+if the drop was not accepted, or was released onto a XDND-unaware window.
+.El
+.Pp
+Upon return of
+.Fa ctrldnd_drag
+and
+.Fa ctrldnd_getdrop ,
+if the drop was not accepted,
+or was released onto a XDND-unaware window,
+or the conversion failed,
+the value of the
+.Fa target
+field is
+.Dv None ;
+and the value of the other fields is undefined.
 .Ss Drop structure
 The
 .Ft ctrldnd_drop
@@ -214,32 +242,19 @@ Note that this is not the
 corresponding to the action, but a
 .Ft "enum ctrldnd_action"
 constant.
+.It Fa content
+The content of the drop.
+See the section
+.Sx Data structure
+above.
+.It Fa time
+The time the drop occurred.
 .It Fa window
 The window where the content has been dropped (also known as
 .Em dropsite ) .
 If the drop was not accepted, or was released onto a XDND-unaware window,
 its value is
 .Dv None .
-.It Fa target
-The atom naming the target (also known as format) into which the drop has been requested.
-If the drop was not accepted, or was released onto a XDND-unaware window,
-its value is
-.Dv None .
-.It Fa time
-The time the drop occurred.
-.It Fa data
-The address to the content of the drop selection converted into
-.Fa target .
-The caller is responsible for freeing it.
-If the drop was not accepted, or was released onto a XDND-unaware window,
-or the conversion failed,
-its value is
-.Dv NULL .
-.It Fa datasize
-The size in bytes of the converted content.
-If the drop was not accepted, or was released onto a XDND-unaware window,
-or the conversion failed,
-its value is zero or negative.
 .It Fa x , y
 The coordinates of the mouse pointer at the time of the drop
 relative to the dropsite window's origin.
@@ -311,32 +326,18 @@ However, if its value is
 a default icon window is created and destroyed automatically.
 .Pp
 The
-.Fa ntargets
+.Fa ncontents
 argument MUST be equal to the number of supported drop formats.
 .Pp
 The
-.Fa targets ,
-.Fa contents ,
-and
-.Fa contentlen
-arguments are arrays of 
-.Fa ntargets
-members each.
-The members of each of those arrays are as follows:
-.Bl -tag -offset indent -width "XXXXXXXXXX"
-.It Fa targets
-the format/target of the content,
-as an
-.Ft Atom
-number;
-.It Fa contents
-the content itself,
-as an
-.Ft "unsigned char *"
-buffer; and
-.It Fa contentlen
-the size of the content in bytes.
-.El
+.Fa contents
+argument is an array of
+.Fa ncontents
+members.
+Each member is the content of the dragged selection in a given format/target.
+See the section
+.Sx Data structure
+above.
 .Pp
 The
 .Fa actions
@@ -408,8 +409,8 @@ argument is an array of
 .Fa ntargets
 members.
 Each member is the
-.Atom
-number for a format/target of a drop that can be dropped onto the dropsite.
+.Ft Atom
+number identifying a format/target of the dropped selection.
 .Pp
 The
 .Fa callback
@@ -422,7 +423,6 @@ The
 argument is an opaque pointer passed to
 .Fa callback .
 .Sh RETURN VALUE
-.Pp
 The
 .Fn ctrldnd_announce
 function returns immediately.
@@ -433,7 +433,9 @@ and
 .Fn ctrldnd_getdrop
 functions block until a user input triggers their return
 (such as releasing a mouse button);
-and return the final state of the drag-and-drop operation.
+and return the final state of the drag-and-drop operation as a
+.Ft ctrldnd_drop
+structure.
 .Sh SEE ALSO
 .Xr ctrlsel 3 ,
 .Xr X 7

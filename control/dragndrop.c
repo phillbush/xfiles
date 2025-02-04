@@ -66,22 +66,23 @@ struct selection {
 	 * to be passed (as an opaque pointer) to ctrlsel_answer()'s
 	 * callback function.
 	 */
-	Atom const           *targets;
-	unsigned char const **contents;
-	size_t const         *lengths;
-	size_t                ntargets;
+	struct ctrldnd_data const *contents;
+	Atom const *targets;
+	size_t ntargets;
 };
 
 /* from libX11 but declared in X11/XKBlib.h */
 unsigned int XkbKeysymToModifiers(Display *, KeySym);
 
 static struct ctrldnd_drop const NO_DROP = {
-	.action   = 0,
-	.window   = None,
-	.target   = None,
-	.time     = 0,
-	.data     = NULL,
-	.datasize = 0,
+	.action  = 0,
+	.window  = None,
+	.time    = 0,
+	.content = {
+		.data   = NULL,
+		.size   = 0,
+		.target = None,
+	},
 };
 
 static int
@@ -163,9 +164,9 @@ answer(void *arg, Atom target, unsigned char **pbuf)
 	struct selection *dnddata = arg;
 
 	for (size_t i = 0; i < dnddata->ntargets; i++) {
-		if (dnddata->targets[i] == target) {
-			*pbuf = (unsigned char *)dnddata->contents[i];
-			return dnddata->lengths[i];
+		if (dnddata->contents[i].target == target) {
+			*pbuf = (unsigned char *)dnddata->contents[i].data;
+			return dnddata->contents[i].size;
 		}
 	}
 	return -1;
@@ -960,8 +961,7 @@ unmap_icon(Display *display, Atom const atomtab[], Window icon)
 
 struct ctrldnd_drop
 ctrldnd_drag(Display *display, int screen, Time epoch, Window icon,
-	Atom const targets[], unsigned char const *contents[],
-	size_t const contentlen[], size_t ntargets,
+	struct ctrldnd_data const contents[], size_t ncontents,
 	enum ctrldnd_action actions, Time interval,
 	int (*callback)(XEvent *, void *), void *arg)
 {
@@ -969,13 +969,17 @@ ctrldnd_drag(Display *display, int screen, Time epoch, Window icon,
 	Cursor cursors[NCURSORS] = { 0 };
 	Window dndowner = None;
 	struct ctrldnd_drop drop;
+	Atom targets[32];       /* hardcoded maximum */
 	struct selection dnddata = {
 		.targets  = targets,
 		.contents = contents,
-		.lengths  = contentlen,
-		.ntargets = ntargets,
+		.ntargets = 0,
 	};
 
+	for (size_t i = 0; i < ncontents && i < LEN(targets); i++) {
+		targets[i] = contents[i].target;
+		dnddata.ntargets++;
+	}
 	for (int i = 0; i < NCURSORS; i++) {
 		cursors[i] = XcursorLibraryLoadCursor(display, cursornames[i]);
 		if (cursors[i] == None) {
@@ -1239,17 +1243,19 @@ ctrldnd_getdrop(XEvent *climsg, Atom const targets[], size_t ntargets,
 		drop = (struct ctrldnd_drop) {
 			.window   = dropsite,
 			.action   = get_action_const(atomtab, action),
-			.target   = target,
 			.time     = event.xclient.data.l[2],
-			.data     = NULL,
-			.datasize = 0,
 			.x        = savedpos.xmotion.x,
 			.y        = savedpos.xmotion.y,
+			.content = {
+				.target = target,
+				.data   = NULL,
+				.size   = 0,
+			},
 		};
-		drop.datasize = ctrlsel_request(
+		drop.content.size = ctrlsel_request(
 			display, drop.time,
 			atomtab[SELECTION],
-			target, &drop.data
+			target, &drop.content.data
 		);
 	}
 	send_xmessage(
