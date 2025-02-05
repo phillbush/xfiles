@@ -41,7 +41,7 @@
 	X(PROPERTY_OPACITY, "_NET_WM_WINDOW_OPACITY"  )\
 	X(PROPERTY_TYPE,    "_NET_WM_WINDOW_TYPE"     )\
 	X(TYPE_DND,         "_NET_WM_WINDOW_TYPE_DND" )
-static char *atomnames[] = { ATOMS(NAME) };
+
 enum atoms {
 	ATOMS(ENUM)
 	NATOMS
@@ -55,7 +55,7 @@ enum atoms {
 	X(CURSOR_MOVE,          "dnd-move"     )\
 	X(CURSOR_LINK,          "dnd-link"     )\
 	X(CURSOR_ASK,           "dnd-ask"      )
-static char const *cursornames[] = { CURSORS(NAME) };
+
 enum cursors {
 	CURSORS(ENUM)
 	NCURSORS
@@ -71,9 +71,6 @@ struct selection {
 	size_t ntargets;
 };
 
-/* from libX11 but declared in X11/XKBlib.h */
-unsigned int XkbKeysymToModifiers(Display *, KeySym);
-
 static struct ctrldnd_drop const NO_DROP = {
 	.action  = 0,
 	.window  = None,
@@ -84,6 +81,20 @@ static struct ctrldnd_drop const NO_DROP = {
 		.target = None,
 	},
 };
+
+static Atom atomtab[NATOMS];
+
+static void
+init(Display *display)
+{
+	static char *atomnames[] = { ATOMS(NAME) };
+	static Bool done = False;
+
+	if (done)
+		return;
+	XInternAtoms(display, atomnames, NATOMS, False, atomtab);
+	done = True;
+}
 
 static int
 no_op(XEvent *event, void *arg)
@@ -236,7 +247,7 @@ error:
 }
 
 static Bool
-is_dndaware(Display *display, Window window, Atom const atomtab[], long *version)
+is_dndaware(Display *display, Window window, long *version)
 {
 	Atom *data = NULL;
 	Bool isaware = False;
@@ -250,7 +261,7 @@ is_dndaware(Display *display, Window window, Atom const atomtab[], long *version
 }
 
 static Window
-create_dndowner(Display *display, int screen, Atom const atomtab[], struct selection *dnddata)
+create_dndowner(Display *display, int screen, struct selection *dnddata)
 {
 	Pixmap icon = None;
 	Pixmap mask = None;
@@ -302,7 +313,7 @@ error:
 }
 
 static Bool
-is_dnd_message(Atom const atomtab[], Atom atom)
+is_dnd_message(Atom atom)
 {
 	static int const msgindices[] = {
 		MESSAGE_ENTER,
@@ -321,14 +332,14 @@ is_dnd_message(Atom const atomtab[], Atom atom)
 
 static Bool
 filter_event(XEvent *event, Window dndowner, Window icon,
-	Time epoch, Atom const atomtab[], struct selection *dnddata,
+	Time epoch, struct selection *dnddata,
 	int (*callback)(XEvent *, void *), void *arg)
 {
 	switch (event->type) {
 	case ClientMessage:
 		if (event->xclient.message_type == atomtab[MESSAGE_FINISHED])
 			return True;    /* broken client sent us; filter out */
-		if (is_dnd_message(atomtab, event->xclient.message_type))
+		if (is_dnd_message(event->xclient.message_type))
 			return False;
 		break;
 	case ButtonPress: case ButtonRelease:
@@ -401,7 +412,7 @@ timediff_msec(struct timespec *start)
 static Bool
 next_drag_event(Display *display, Window dndowner, Window icon,
 	Time epoch, Time interval, XEvent *savedpos, struct timespec *now,
-	Atom const atomtab[], struct selection *dnddata,
+	struct selection *dnddata,
 	int (*callback)(XEvent *, void *), void *arg, XEvent *event)
 {
 	for (;;) {
@@ -418,7 +429,7 @@ next_drag_event(Display *display, Window dndowner, Window icon,
 		if (nevents != 1)
 			return False;
 		(void)XNextEvent(display, event);
-		if (!filter_event(event, dndowner, icon, epoch, atomtab,
+		if (!filter_event(event, dndowner, icon, epoch,
 			dnddata, callback, arg)) {
 			return True;
 		}
@@ -426,7 +437,7 @@ next_drag_event(Display *display, Window dndowner, Window icon,
 }
 
 static Cursor
-get_cursor(Atom const atomtab[], Atom const cursors[], Atom action)
+get_cursor(Atom const cursors[], Atom action)
 {
 	if (action == None)
 		return cursors[CURSOR_NODROP];
@@ -442,7 +453,7 @@ get_cursor(Atom const atomtab[], Atom const cursors[], Atom action)
 }
 
 static Atom
-get_action_from_modifier(Atom const atomtab[], enum ctrldnd_action action_mask,
+get_action_from_modifier(enum ctrldnd_action action_mask,
 	unsigned int modifier)
 {
 	if (action_mask == 0)
@@ -468,7 +479,7 @@ get_action_from_modifier(Atom const atomtab[], enum ctrldnd_action action_mask,
 }
 
 static enum ctrldnd_action
-get_action_const(Atom const atomtab[], Atom action)
+get_action_const(Atom action)
 {
 	if (action == atomtab[ACTION_COPY])
 		return CTRLDND_COPY;
@@ -565,7 +576,7 @@ get_crossingev_from_motionev(XMotionEvent *motion, int type)
 
 static void
 handle_self_message(Display *display, int screen, Bool ignorepos,
-	XClientMessageEvent *climsg, Atom const atomtab[],
+	XClientMessageEvent *climsg,
 	int (*callback)(XEvent *, void *), void *arg)
 {
 	Window dndowner, dropsite, root;
@@ -606,7 +617,7 @@ handle_self_message(Display *display, int screen, Bool ignorepos,
 static Bool
 wait_finished_message(Display *display, int screen,
 	Window dndowner, Window dropsite, Time epoch,
-	Atom const atomtab[], struct selection *dnddata,
+	struct selection *dnddata,
 	int (*callback)(XEvent *, void *), void *arg)
 {
 	enum {
@@ -629,12 +640,12 @@ wait_finished_message(Display *display, int screen,
 			sender = event.xclient.data.l[0];
 			type = event.xclient.message_type;
 
-			if (!is_dnd_message(atomtab, event.xclient.message_type))
+			if (!is_dnd_message(event.xclient.message_type))
 				break;
 			if (sender == dndowner) {
 				handle_self_message(
 					display, screen, True,
-					&event.xclient, atomtab,
+					&event.xclient,
 					callback, arg
 				);
 				continue;
@@ -673,8 +684,7 @@ wait_finished_message(Display *display, int screen,
 }
 
 static Window
-get_where_dragging(Display *display, int screen, Atom const atomtab[],
-	int x, int y, long *version_ret)
+get_where_dragging(Display *display, int screen, int x, int y, long *version_ret)
 {
 	XErrorHandler oldhandler;
 	Window root, parent, child;
@@ -687,7 +697,7 @@ get_where_dragging(Display *display, int screen, Atom const atomtab[],
 		(child = get_pointed_child(display, root, parent, x, y)) != None;
 		parent = child
 	) {
-		if (!is_dndaware(display, child, atomtab, &version))
+		if (!is_dndaware(display, child, &version))
 			continue;
 		if (version < MIN_VERSION)
 			break;
@@ -706,7 +716,7 @@ found:
 
 static struct ctrldnd_drop
 get_where_dropped(Display *display, int screen, Window dndowner, Window icon,
-	Time epoch, Atom const atomtab[], Cursor const cursors[],
+	Time epoch, Cursor const cursors[],
 	struct selection *dnddata, enum ctrldnd_action actions, Time interval,
 	int (*callback)(XEvent *, void *), void *arg)
 {
@@ -720,11 +730,14 @@ get_where_dropped(Display *display, int screen, Window dndowner, Window icon,
 	XEvent savedpos;
 	KeySym key;
 
+	/* from libX11 but declared in X11/XKBlib.h */
+	unsigned int XkbKeysymToModifiers(Display *, KeySym);
+
 	dropsite = None;
 loop:
 	while (dropsite == None) {
 		(void)XNextEvent(display, &event);
-		if (filter_event(&event, dndowner, icon, epoch, atomtab,
+		if (filter_event(&event, dndowner, icon, epoch,
 			dnddata, callback, arg))
 			continue;
 		if (event.type == KeyPress || event.type == KeyRelease) {
@@ -737,7 +750,7 @@ loop:
 		if (event.type != MotionNotify)
 			return NO_DROP;
 		dropsite = get_where_dragging(
-			display, screen, atomtab,
+			display, screen,
 			event.xmotion.x_root,
 			event.xmotion.y_root,
 			&version
@@ -759,7 +772,7 @@ loop:
 	savedpos = event;
 	translate_motionev(&savedpos, dropsite);
 	action = get_action_from_modifier(
-		atomtab, actions,
+		actions,
 		savedpos.xmotion.state
 	);
 reset_status:
@@ -780,13 +793,13 @@ resend_position:
 	(void)clock_gettime(CLOCK_MONOTONIC, &now);
 	while (next_drag_event(
 		display, dndowner, icon, epoch, interval,
-		&savedpos, &now, atomtab, dnddata, callback, arg, &event
+		&savedpos, &now, dnddata, callback, arg, &event
 	)) switch (event.type) {
 	case ClientMessage:
 		if (event.xclient.message_type != atomtab[MESSAGE_STATUS]) {
 			handle_self_message(
 				display, screen, notifypos,
-				&event.xclient, atomtab,
+				&event.xclient,
 				callback, arg
 			);
 			continue;
@@ -804,7 +817,7 @@ resend_position:
 			accepted = False;
 		(void)XChangeActivePointerGrab(
 			display, GRAB_MASK,
-			get_cursor(atomtab, cursors, action),
+			get_cursor(cursors, action),
 			CurrentTime
 		);
 		gotstatus = True;
@@ -814,15 +827,12 @@ resend_position:
 		oldaction = action;
 
 		dropsite = get_where_dragging(
-			display, screen, atomtab,
+			display, screen,
 			event.xmotion.x_root,
 			event.xmotion.y_root,
 			&version
 		);
-		action = get_action_from_modifier(
-			atomtab, actions,
-			event.xmotion.state
-		);
+		action = get_action_from_modifier(actions, event.xmotion.state);
 		if (dropsite == None) {
 			(void)XChangeActivePointerGrab(
 				display, GRAB_MASK,
@@ -868,10 +878,7 @@ resend_position:
 		else
 			event.xkey.state &= ~XkbKeysymToModifiers(display, key);
 		oldaction = action;
-		action = get_action_from_modifier(
-			atomtab, actions,
-			event.xkey.state
-		);
+		action = get_action_from_modifier(actions, event.xkey.state);
 		if (action != oldaction)
 			goto reset_status;
 		continue;
@@ -885,7 +892,7 @@ resend_position:
 			);
 			(void)wait_finished_message(
 				display, screen,
-				dndowner, dropsite, epoch, atomtab,
+				dndowner, dropsite, epoch,
 				dnddata, callback, arg
 			);
 			(void)XTranslateCoordinates(
@@ -896,7 +903,7 @@ resend_position:
 			);
 			return (struct ctrldnd_drop){
 				.window = dropsite,
-				.action = get_action_const(atomtab, action),
+				.action = get_action_const(action),
 				.time = event.xbutton.time,
 				.x = x,
 				.y = y,
@@ -914,7 +921,7 @@ resend_position:
 }
 
 static Bool
-map_icon(Display *display, Window root, Atom const atomtab[], Window icon)
+map_icon(Display *display, Window root, Window icon)
 {
 	unsigned int width = 0, height = 0;
 
@@ -951,7 +958,7 @@ map_icon(Display *display, Window root, Atom const atomtab[], Window icon)
 }
 
 static void
-unmap_icon(Display *display, Atom const atomtab[], Window icon)
+unmap_icon(Display *display, Window icon)
 {
 	(void)XDeleteProperty(display, icon, atomtab[PROPERTY_OPACITY]);
 	(void)XDeleteProperty(display, icon, atomtab[PROPERTY_TYPE]);
@@ -965,7 +972,6 @@ ctrldnd_drag(Display *display, int screen, Time epoch, Window icon,
 	enum ctrldnd_action actions, Time interval,
 	int (*callback)(XEvent *, void *), void *arg)
 {
-	Atom atomtab[NATOMS];
 	Cursor cursors[NCURSORS] = { 0 };
 	Window dndowner = None;
 	struct ctrldnd_drop drop;
@@ -976,11 +982,14 @@ ctrldnd_drag(Display *display, int screen, Time epoch, Window icon,
 		.ntargets = 0,
 	};
 
+	init(display);
 	for (size_t i = 0; i < ncontents && i < LEN(targets); i++) {
 		targets[i] = contents[i].target;
 		dnddata.ntargets++;
 	}
 	for (int i = 0; i < NCURSORS; i++) {
+		static char const *cursornames[] = { CURSORS(NAME) };
+
 		cursors[i] = XcursorLibraryLoadCursor(display, cursornames[i]);
 		if (cursors[i] == None) {
 			/*
@@ -992,20 +1001,18 @@ ctrldnd_drag(Display *display, int screen, Time epoch, Window icon,
 	}
 	if (!grab_input(display, screen, epoch, cursors[CURSOR_DRAG]))
 		goto done;
-	if (!XInternAtoms(display, atomnames, NATOMS, False, atomtab))
-		goto done;
-	if ((dndowner = create_dndowner(display, screen, atomtab, &dnddata)) == None)
+	if ((dndowner = create_dndowner(display, screen, &dnddata)) == None)
 		goto done;
 	if ((epoch = ctrlsel_own(display, dndowner, epoch, atomtab[SELECTION])) == 0)
 		goto done;
 	if (icon == None)
 		icon = dndowner;
-	if (!map_icon(display, RootWindow(display, screen), atomtab, icon))
+	if (!map_icon(display, RootWindow(display, screen), icon))
 		goto done;
 	if (callback == NULL)
 		callback = no_op;
 	drop = get_where_dropped(
-		display, screen, dndowner, icon, epoch, atomtab, cursors,
+		display, screen, dndowner, icon, epoch, cursors,
 		&dnddata, actions, interval, callback, arg
 	);
 done:
@@ -1019,7 +1026,7 @@ done:
 		if (cursors[i] != None)
 			XFreeCursor(display, cursors[i]);
 	if (icon != None)
-		unmap_icon(display, atomtab, icon);
+		unmap_icon(display, icon);
 	if (dndowner != None)
 		XDestroyWindow(display, dndowner);
 	return drop;
@@ -1037,7 +1044,7 @@ has_atom(Atom const atoms[], size_t natoms, Atom atom)
 }
 
 static Atom
-find_best_target(XClientMessageEvent *climsg, Atom const atomtab[],
+find_best_target(XClientMessageEvent *climsg,
 	Atom const targets[], size_t ntargets)
 {
 	XErrorHandler oldhandler;
@@ -1077,7 +1084,6 @@ ctrldnd_getdrop(XEvent *climsg, Atom const targets[], size_t ntargets,
 {
 	Display *display;
 	XEvent event;
-	Atom atomtab[NATOMS];
 	Atom target, action;
 	Window root, dndowner, dropsite;
 	XEvent savedpos;
@@ -1091,8 +1097,7 @@ ctrldnd_getdrop(XEvent *climsg, Atom const targets[], size_t ntargets,
 	if (ntargets == 0)
 		return NO_DROP;
 	display = climsg->xclient.display;
-	if (!XInternAtoms(display, atomnames, NATOMS, False, atomtab))
-		return NO_DROP;
+	init(display);
 	if (climsg->xclient.message_type != atomtab[MESSAGE_ENTER])
 		return NO_DROP;
 	dropsite = climsg->xclient.window;
@@ -1113,7 +1118,7 @@ ctrldnd_getdrop(XEvent *climsg, Atom const targets[], size_t ntargets,
 		dropzone.width  = attr.width;
 		dropzone.height = attr.height;
 	}
-	target = find_best_target(&climsg->xclient, atomtab, targets, ntargets);
+	target = find_best_target(&climsg->xclient, targets, ntargets);
 	if (callback == NULL)
 		callback = no_op;
 	gotposition = False;
@@ -1166,7 +1171,7 @@ ctrldnd_getdrop(XEvent *climsg, Atom const targets[], size_t ntargets,
 			callback(&event, arg);
 			continue;
 		case ClientMessage:
-			if (is_dnd_message(atomtab, event.xclient.message_type))
+			if (is_dnd_message(event.xclient.message_type))
 				break;
 			/* FALLTHROUGH */
 		default:
@@ -1203,7 +1208,6 @@ ctrldnd_getdrop(XEvent *climsg, Atom const targets[], size_t ntargets,
 				action = atomtab[ACTION_COPY];
 			} else {
 				do_accept = actions & get_action_const(
-					atomtab,
 					event.xclient.data.l[4]
 				);
 				action = do_accept ? event.xclient.data.l[4] : None;
@@ -1242,7 +1246,7 @@ ctrldnd_getdrop(XEvent *climsg, Atom const targets[], size_t ntargets,
 	if (do_accept) {
 		drop = (struct ctrldnd_drop) {
 			.window   = dropsite,
-			.action   = get_action_const(atomtab, action),
+			.action   = get_action_const(action),
 			.time     = event.xclient.data.l[2],
 			.x        = savedpos.xmotion.x,
 			.y        = savedpos.xmotion.y,
@@ -1271,10 +1275,10 @@ ctrldnd_getdrop(XEvent *climsg, Atom const targets[], size_t ntargets,
 void
 ctrldnd_announce(Display *display, Window dropsite)
 {
+	init(display);
 	(void)XChangeProperty(
 		display, dropsite,
-		XInternAtom(display, atomnames[AWARE], False),
-		XA_ATOM, 32,
+		atomtab[AWARE], XA_ATOM, 32,
 		PropModeReplace,
 		(void *)&(Atom){MAX_VERSION},
 		1
