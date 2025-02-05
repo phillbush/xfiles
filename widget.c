@@ -74,8 +74,6 @@
 
 #define FREE(x)         do{free(x); x = NULL;}while(0)
 
-#define UNKNOWN_STATUS  "<\?\?\?>"
-
 /* ellipsis has two dots rather than three; the third comes from the extension */
 #define ELLIPSIS        ".."
 
@@ -247,7 +245,6 @@ struct Widget {
 
 	/* X11 stuff */
 	Display *display;
-	Atom atoms[NATOMS];
 	GC gc;
 	Cursor busycursor;
 	Window window, root, child;
@@ -403,6 +400,8 @@ struct Options {
 	char **argv;
 };
 
+static Atom atoms[NATOMS];
+
 static int
 error_handler(Display *display, XErrorEvent *error)
 {
@@ -420,9 +419,10 @@ error_handler(Display *display, XErrorEvent *error)
 	return 0; /* unreachable */
 }
 
-static char *
+static char const *
 getitemstatus(Widget *widget, int index)
 {
+	static char const *UNKNOWN_STATUS = "<\?\?\?>";
 	if (index < 0 || index >= widget->nitems)
 		return UNKNOWN_STATUS;
 	if (widget->items[widget->highlight].status == NULL)
@@ -580,7 +580,7 @@ drawstatusbar(Widget *widget)
 {
 	size_t statuslen, scrolllen;
 	int countwid, statuswid, scrollwid, rightwid;
-	char *status;
+	char const *status;
 	char countstr[64];    /* enough for writing number of files */
 	char scrollstr[8];    /* enough for writing the percentage */
 	int scrollpct;
@@ -1264,8 +1264,8 @@ settitle(Widget *widget)
 		 * and the older WM_NAME.
 		 */
 		{
-			.prop = widget->atoms[_NET_WM_NAME],
-			.type = widget->atoms[UTF8_STRING],
+			.prop = atoms[_NET_WM_NAME],
+			.type = atoms[UTF8_STRING],
 		},
 		{
 			.prop = XA_WM_NAME,
@@ -1527,9 +1527,9 @@ convertcallback(void *arg, Atom target, unsigned char **pbuf)
 		*pbuf = (unsigned char *)"";
 		return 0;
 	}
-	if (target == XA_STRING || target == widget->atoms[UTF8_STRING])
+	if (target == XA_STRING || target == atoms[UTF8_STRING])
 		return fillclipboard(widget, pbuf, False);
-	if (target == widget->atoms[TEXT_URI_LIST])
+	if (target == atoms[TEXT_URI_LIST])
 		return fillclipboard(widget, pbuf, True);
 	return -1;
 }
@@ -1545,8 +1545,8 @@ sendprimary(Widget *widget, XEvent *event)
 		event, widget->seltime,
 		(Atom[]){
 			XA_STRING,
-			widget->atoms[UTF8_STRING],
-			widget->atoms[TEXT_URI_LIST]
+			atoms[UTF8_STRING],
+			atoms[TEXT_URI_LIST]
 		}, 3,
 		convertcallback, widget
 	);
@@ -1603,8 +1603,8 @@ cleanwidget(Widget *widget)
 	(void)XChangeProperty(
 		widget->display,
 		widget->window,
-		widget->atoms[_CONTROL_STATUS],
-		widget->atoms[UTF8_STRING],
+		atoms[_CONTROL_STATUS],
+		atoms[UTF8_STRING],
 		8,
 		PropModeReplace,
 		(unsigned char *)"",
@@ -1658,7 +1658,7 @@ static void
 highlight(Widget *widget, int index, int redraw)
 {
 	int prevhili;
-	char *status;
+	char const *status;
 
 	if (widget->highlight == index || index < 0 || index >= widget->nitems)
 		return;
@@ -1674,8 +1674,8 @@ highlight(Widget *widget, int index, int redraw)
 		(void)XChangeProperty(
 			widget->display,
 			widget->window,
-			widget->atoms[_CONTROL_STATUS],
-			widget->atoms[UTF8_STRING],
+			atoms[_CONTROL_STATUS],
+			atoms[UTF8_STRING],
 			8,
 			PropModeReplace,
 			(unsigned char *)widget->items[widget->highlight].name,
@@ -1684,8 +1684,8 @@ highlight(Widget *widget, int index, int redraw)
 		(void)XChangeProperty(
 			widget->display,
 			widget->window,
-			widget->atoms[_CONTROL_STATUS],
-			widget->atoms[UTF8_STRING],
+			atoms[_CONTROL_STATUS],
+			atoms[UTF8_STRING],
 			8,
 			PropModeAppend,
 			(unsigned char *)" - ",
@@ -1694,8 +1694,8 @@ highlight(Widget *widget, int index, int redraw)
 		(void)XChangeProperty(
 			widget->display,
 			widget->window,
-			widget->atoms[_CONTROL_STATUS],
-			widget->atoms[UTF8_STRING],
+			atoms[_CONTROL_STATUS],
+			atoms[UTF8_STRING],
 			8,
 			PropModeAppend,
 			(unsigned char *)status,
@@ -1705,8 +1705,8 @@ highlight(Widget *widget, int index, int redraw)
 		(void)XChangeProperty(
 			widget->display,
 			widget->window,
-			widget->atoms[_CONTROL_STATUS],
-			widget->atoms[UTF8_STRING],
+			atoms[_CONTROL_STATUS],
+			atoms[UTF8_STRING],
 			8,
 			PropModeReplace,
 			(unsigned char *)"",
@@ -2205,7 +2205,7 @@ setwinicon(Widget *widget)
 		(void)XChangeProperty(
 			widget->display,
 			widget->window,
-			widget->atoms[_NET_WM_ICON],
+			atoms[_NET_WM_ICON],
 			XA_CARDINAL,
 			32,
 			(i == 0) ? PropModeReplace : PropModeAppend,
@@ -2218,7 +2218,7 @@ setwinicon(Widget *widget)
 		(void)XChangeProperty(
 			widget->display,
 			widget->window,
-			widget->atoms[_NET_WM_ICON],
+			atoms[_NET_WM_ICON],
 			XA_CARDINAL,
 			32,
 			PropModeAppend,
@@ -2247,7 +2247,7 @@ embed_message(Widget *widget, Time time, long msg, long d0, long d1, long d2)
 			.type = ClientMessage,
 			.display = widget->display,
 			.window = widget->child,
-			.message_type = widget->atoms[_XEMBED],
+			.message_type = atoms[_XEMBED],
 			.format = 32,
 			.data.l[0] = time,
 			.data.l[1] = msg,
@@ -2325,9 +2325,9 @@ embed_close(Widget *widget, Time time)
 			.type = ClientMessage,
 			.display = widget->display,
 			.window = widget->child,
-			.message_type = widget->atoms[WM_PROTOCOLS],
+			.message_type = atoms[WM_PROTOCOLS],
 			.format = 32,
-			.data.l[0] = widget->atoms[WM_DELETE_WINDOW],
+			.data.l[0] = atoms[WM_DELETE_WINDOW],
 			.data.l[1] = time,
 		}}
 	);
@@ -2625,9 +2625,9 @@ filter_event(Widget *widget, XEvent *ev)
 	case ClientMessage:
 		if (ev->xclient.window != widget->window)
 			return False;
-		if (ev->xclient.message_type != widget->atoms[WM_PROTOCOLS])
+		if (ev->xclient.message_type != atoms[WM_PROTOCOLS])
 			return False;
-		if ((Atom)ev->xclient.data.l[0] != widget->atoms[WM_DELETE_WINDOW])
+		if ((Atom)ev->xclient.data.l[0] != atoms[WM_DELETE_WINDOW])
 			return False;
 close:
 		embed_close(widget, ev->xclient.data.l[1]);
@@ -2668,12 +2668,12 @@ close:
 			break;
 		}
 		if (ev->xproperty.window == widget->window &&
-		    ev->xproperty.atom == widget->atoms[_CONTROL_GOTO]) {
+		    ev->xproperty.atom == atoms[_CONTROL_GOTO]) {
 			free(widget->gototext);
 			widget->gototext = gettextprop(
 				widget,
 				widget->window,
-				widget->atoms[_CONTROL_GOTO],
+				atoms[_CONTROL_GOTO],
 				True
 			);
 		}
@@ -2902,12 +2902,12 @@ dragmode(Widget *widget, Time timestamp, int index, int *selitems, int *nitems)
 			{
 				.data   = uribuf,
 				.size   = urisize,
-				.target = widget->atoms[TEXT_URI_LIST],
+				.target = atoms[TEXT_URI_LIST],
 			},
 			{
 				.data   = plainbuf,
 				.size   = plainsize,
-				.target = widget->atoms[UTF8_STRING],
+				.target = atoms[UTF8_STRING],
 			},
 			{
 				.data   = plainbuf,
@@ -3034,7 +3034,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 		continue;
 	case ClientMessage:
 		drop = ctrldnd_getdrop(
-			&ev, &widget->atoms[UTF8_STRING], 1,
+			&ev, &atoms[UTF8_STRING], 1,
 			CTRLDND_ANYACTION, SCROLL_TIME,
 			dnd_event_handler, widget
 		);
@@ -3096,8 +3096,7 @@ initxconn(Widget *widget, struct Options *options)
 		warnx("could not set connection to X server to close on exec");
 		return RETURN_FAILURE;
 	}
-	if (!XInternAtoms(widget->display, atom_names,
-	                  NATOMS, False, widget->atoms)) {
+	if (!XInternAtoms(widget->display, atom_names, NATOMS, False, atoms)) {
 		warnx("could not intern X atoms");
 		return RETURN_FAILURE;
 	}
@@ -3213,7 +3212,7 @@ initwindow(Widget *widget, struct Options *options)
 	(void)XSetWMProtocols(
 		widget->display,
 		widget->window,
-		&widget->atoms[WM_DELETE_WINDOW],
+		&atoms[WM_DELETE_WINDOW],
 		1
 	);
 	(void)XmbSetWMProperties(
@@ -3233,8 +3232,8 @@ initwindow(Widget *widget, struct Options *options)
 	(void)XChangeProperty(
 		widget->display,
 		widget->window,
-		widget->atoms[_NET_WM_NAME],
-		widget->atoms[UTF8_STRING],
+		atoms[_NET_WM_NAME],
+		atoms[UTF8_STRING],
 		8,
 		PropModeReplace,
 		(unsigned char *)options->class,
@@ -3243,17 +3242,17 @@ initwindow(Widget *widget, struct Options *options)
 	(void)XChangeProperty(
 		widget->display,
 		widget->window,
-		widget->atoms[_NET_WM_WINDOW_TYPE],
+		atoms[_NET_WM_WINDOW_TYPE],
 		XA_ATOM,
 		32,
 		PropModeReplace,
-		(unsigned char *)&widget->atoms[_NET_WM_WINDOW_TYPE_NORMAL],
+		(unsigned char *)&atoms[_NET_WM_WINDOW_TYPE_NORMAL],
 		1
 	);
 	(void)XChangeProperty(
 		widget->display,
 		widget->window,
-		widget->atoms[_NET_WM_PID],
+		atoms[_NET_WM_PID],
 		XA_CARDINAL,
 		32,
 		PropModeReplace,
@@ -3599,8 +3598,8 @@ widget_set(Widget *widget, const char *cwd, const char *title, Item items[], siz
 	XChangeProperty(
 		widget->display,
 		widget->window,
-		widget->atoms[_CONTROL_CWD],
-		widget->atoms[UTF8_STRING],
+		atoms[_CONTROL_CWD],
+		atoms[UTF8_STRING],
 		8,
 		PropModeReplace,
 		(unsigned char *)cwd,
