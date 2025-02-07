@@ -13,14 +13,13 @@
 
 #define ENUM(sym) sym,
 #define NAME(sym) #sym,
+
 #define ATOMS(X)                                          \
 	X(TIMESTAMP)                                      \
 	X(TARGETS)                                        \
 	X(MULTIPLE)                                       \
 	X(INCR)                                           \
 	X(ATOM_PAIR)
-enum atoms { ATOMS(ENUM) NATOMS };
-static char *atomnames[NATOMS] = { ATOMS(NAME) };
 
 #define SYNC_NTRIES 120 /* iterate at most this times */
 #define SYNC_WAIT   6   /* wait at most this milliseconds between each try */
@@ -40,6 +39,25 @@ enum errors {
 	CTRL_ETIMEDOUT  = -ETIMEDOUT,
 	CTRL_EMSGSIZE   = -EMSGSIZE,
 };
+
+enum atoms {
+	ATOMS(ENUM)
+	NATOMS
+};
+
+static Atom atomtab[NATOMS];
+
+static void
+init(Display *display)
+{
+	static char *atomnames[NATOMS] = { ATOMS(NAME) };
+	static Bool done = False;
+
+	if (done)
+		return;
+	XInternAtoms(display, atomnames, NATOMS, False, atomtab);
+	done = True;
+}
 
 static int
 ignoreerror(Display *display, XErrorEvent *event)
@@ -123,7 +141,7 @@ getcontent(Display *display, Window requestor, Atom property, unsigned char **pb
 	ret = 0;
 	if (status != Success)
 		ret = CTRL_ENOMEM;
-	else if (type == XInternAtom(display, atomnames[INCR], False))
+	else if (type == atomtab[INCR])
 		ret = CTRL_EMSGSIZE;
 	else if (*pbuf != NULL && len > 0)
 		return len;
@@ -133,7 +151,7 @@ getcontent(Display *display, Window requestor, Atom property, unsigned char **pb
 }
 
 static ssize_t
-getatompairs(XSelectionRequestEvent const *event, Atom const atomtab[], Atom **atoms)
+getatompairs(XSelectionRequestEvent const *event, Atom **atoms)
 {
 	unsigned long nitems, remain;
 	int status, format;
@@ -252,6 +270,7 @@ ctrlsel_request(Display *display, Time timestamp, Atom selection,
 	Window requestor;
 	ssize_t retval;
 
+	init(display);
 	if (selection == None || target == None)
 		return CTRL_NOERROR;
 	if ((requestor = createwindow(display)) == None)
@@ -266,10 +285,10 @@ ctrlsel_request(Display *display, Time timestamp, Atom selection,
 ssize_t
 ctrlsel_gettargets(Display *display, Time timestamp, Atom selection, Atom **ptargets)
 {
+	init(display);
 	return ctrlsel_request(
 		display, timestamp, selection,
-		XInternAtom(display, atomnames[TARGETS], False),
-		(unsigned char **)ptargets
+		atomtab[TARGETS], (unsigned char **)ptargets
 	);
 }
 
@@ -308,11 +327,10 @@ answer(XSelectionRequestEvent const *event, Time time,
 		goto done;
 	if (event->time != CurrentTime && event->time < time)
 		goto done;      /* out-of-time request */
-	(void)XInternAtoms(event->display, atomnames, NATOMS, False, atomtab);
 	if (event->target == atomtab[MULTIPLE]) {
 		if (event->property == None)
 			goto done;
-		natoms = getatompairs(event, atomtab, &p);
+		natoms = getatompairs(event, &p);
 		if (natoms < 0)
 			retval = CTRL_ENOMEM;
 		if (natoms <= 0)
@@ -417,6 +435,7 @@ ctrlsel_answer(XEvent const *ep, Time time,
 
 	if (ep->type != SelectionRequest)
 		return 0;
+	init(ep->xany.display);
 	oldhandler = seterrfun(ep->xany.display, ignoreerror);
 	retval = answer(&ep->xselectionrequest, time, targets, ntargets, callback, arg);
 	(void)seterrfun(ep->xany.display, oldhandler);
