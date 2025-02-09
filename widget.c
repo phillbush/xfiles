@@ -1690,8 +1690,6 @@ mouse1click(Widget *widget, XButtonPressedEvent *ev)
 	int prevhili, index;
 
 	index = getitemundercursor(widget, ev->x, ev->y);
-	if (index > 0 && widget->issel[index] != NULL)
-		return index;
 	if (!(ev->state & (ControlMask | ShiftMask)))
 		unselectitems(widget);
 	if (index < 0)
@@ -3480,7 +3478,7 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 
 #define COLOR(r,g,b) ((XRenderColor){ \
 	.red = 0x##r##FF, .green = 0x##g##FF, .blue = 0x##b##FF, .alpha = 0xFFFF \
-})
+	})
 	*widget = (Widget){
 		.class = class,
 		.colors[SELECT_NOT][COLOR_BG].chans = COLOR(00,00,00),
