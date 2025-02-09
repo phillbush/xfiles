@@ -2,6 +2,7 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <locale.h>
 #include <poll.h>
 #include <stdio.h>
@@ -64,45 +65,6 @@
 	X(BARSTATUS, "EnableStatusBar",  "enableStatusBar")   \
 	X(OPACITY,   "Opacity",          "opacity")
 
-#define DEF_COLOR_BG    (XRenderColor){ .red = 0x0000, .green = 0x0000, .blue = 0x0000, .alpha = 0xFFFF }
-#define DEF_COLOR_FG    (XRenderColor){ .red = 0xFFFF, .green = 0xFFFF, .blue = 0xFFFF, .alpha = 0xFFFF }
-#define DEF_COLOR_SELBG (XRenderColor){ .red = 0x3400, .green = 0x6500, .blue = 0xA400, .alpha = 0xFFFF }
-#define DEF_COLOR_SELFG (XRenderColor){ .red = 0xFFFF, .green = 0xFFFF, .blue = 0xFFFF, .alpha = 0xFFFF }
-#define DEF_SIZE        (XRectangle){ .x = 0, .y = 0, .width = 600 , .height = 460 }
-#define DEF_OPACITY     0xFFFF
-#define DEF_STATUSBAR   True
-
-#define FREE(x)         do{free(x); x = NULL;}while(0)
-
-/* ellipsis has two dots rather than three; the third comes from the extension */
-#define ELLIPSIS        ".."
-
-/* opacity of drag-and-drop mini window */
-#define DND_OPACITY     0x7FFFFFFF
-
-/* opacity of rectangular selection */
-#define SEL_OPACITY     0xC000
-#define RECT_OPACITY    0x4000
-
-/* constants to check a .ppm file */
-#define PPM_HEADER      "P6\n"
-#define PPM_COLOR       "255\n"
-
-/* how much to scroll on PageUp/PageDown (half the window height) */
-#define PAGE_STEP(w)    ((w)->h / 2)
-
-/* window capacity (max number of rows that can fit on the window) */
-#define WIN_ROWS(w)     ((w)->h / (w)->itemh)
-
-/* number of WHOLE rows that the current directory has */
-#define WHL_ROWS(w)     ((w)->nitems / (w)->ncols)
-
-/* 0 if all rows are entirely filled; 1 if there's an extra, half-filled row */
-#define MOD_ROWS(w)     (((w)->nitems % (w)->ncols) != 0 ? 1 : 0)
-
-/* actual number of rows (either whole or not) that the current directory has */
-#define ALL_ROWS(w)     (WHL_ROWS(w) + MOD_ROWS(w))
-
 #define STATUSBAR_HEIGHT(w) ((w)->fonth * 2)
 #define STATUSBAR_MARGIN(w) ((w)->fonth / 2)
 
@@ -131,28 +93,6 @@ enum {
 };
 
 enum {
-	/* size of border of rectangular selection */
-	RECT_BORDER     = 1,
-
-	/* distance the cursor must move to be considered a drag */
-	DRAG_THRESHOLD  = 8,
-	DRAG_SQUARE     = (DRAG_THRESHOLD * DRAG_THRESHOLD),
-
-	/* buttons not defined by X.h */
-	BUTTON8         = 8,
-	BUTTON9         = 9,
-
-	/* one byte was 8 bits in size last time I checked */
-	BYTE            = 8,
-
-	/* color depths */
-	CLIP_DEPTH      = 1,                    /* 0/1 */
-	PPM_DEPTH       = 3,                    /* RGB */
-	DATA_DEPTH      = 4,                    /* BGRA */
-
-	/* sizes of string buffers */
-	KSYM_BUFSIZE    = 64,                   /* key symbol name buffer size */
-
 	/* hardcoded object sizes in pixels */
 	/* there's no ITEM_HEIGHT for it is computed at runtime from font height */
 	THUMBSIZE       = 64,                   /* maximum thumbnail size */
@@ -160,18 +100,12 @@ enum {
 	ITEM_WIDTH      = (THUMBSIZE * 2),      /* width of an item (icon + margins) */
 	MARGIN          = 16,                   /* top margin above first row */
 
-	/* constants for parsing .ppm files */
-	PPM_HEADER_SIZE = (sizeof(PPM_HEADER) - 1),
-	PPM_COLOR_SIZE  = (sizeof(PPM_COLOR) - 1),
-	PPM_BUFSIZE     = 8,
-
 	/* draw up to NLINES lines of label; each one up to LABELWIDTH pixels long */
 	NLINES          = 2,                    /* change it for more lines below icons */
 	LABELWIDTH      = ITEM_WIDTH - 16,      /* save 8 pixels each side around label */
 
 	/* times in milliseconds */
 	DOUBLECLICK     = 250,                  /* time of a doubleclick, in milliseconds */
-	MOTION_TIME     = 32,                   /* update time rate for rectangular selection */
 	SCROLL_TIME     = 128,
 
 	/* scrolling */
@@ -270,7 +204,7 @@ struct Widget {
 	const char **cliresources;
 
 	char *gototext;
-	char ksymbuf[KSYM_BUFSIZE];     /* buffer where the keysym passed to xfilesctl is held */
+	char ksymbuf[64];               /* buffer where the keysym passed to xfilesctl is held */
 
 	struct {
 		Pixmap pix;
@@ -401,6 +335,9 @@ struct Options {
 };
 
 static Atom atoms[NATOMS];
+
+/* ellipsis has two dots rather than three; the third comes from the extension */
+static char const *ELLIPSIS = "..";
 
 static int
 error_handler(Display *display, XErrorEvent *error)
@@ -805,6 +742,8 @@ static int
 calcsize(Widget *widget, int w, int h)
 {
 	int ncols, nrows, ret;
+	int nrows_in_window;
+	int nrows_in_dir;
 	double d;
 
 	ret = False;
@@ -824,16 +763,19 @@ calcsize(Widget *widget, int w, int h)
 	else
 		widget->h = widget->winh;
 	widget->w = widget->winw;
+	nrows_in_window = widget->h / widget->itemh;
 	widget->ncols = max(widget->w / widget->itemw, 1);
-	widget->nrows = max(WIN_ROWS(widget) + (widget->h % widget->itemh ? 2 : 1), 1);
+	widget->nrows = max(nrows_in_window + (widget->h % widget->itemh ? 2 : 1), 1);
+	nrows_in_dir = widget->nitems / widget->ncols;
+	nrows_in_dir += widget->nitems % widget->ncols != 0;    /* extra unfilled row */
 	widget->x0 = max((widget->w - widget->ncols * widget->itemw) / 2, 0);
-	widget->nscreens = ALL_ROWS(widget) - WIN_ROWS(widget) + 1;
+	widget->nscreens = nrows_in_dir - nrows_in_window + 1;
 	widget->nscreens = max(widget->nscreens, 1);
 	d = (double)widget->nscreens / SCROLLER_MIN;
 	d = (d < 1.0 ? 1.0 : d);
 	widget->handlew = max(SCROLLER_SIZE / d - 2, 1);
 	widget->handlew = min(widget->handlew, HANDLE_MAX_SIZE);
-	if (widget->handlew == HANDLE_MAX_SIZE && ALL_ROWS(widget) > WIN_ROWS(widget))
+	if (widget->handlew == HANDLE_MAX_SIZE && nrows_in_dir > nrows_in_window)
 		widget->handlew = HANDLE_MAX_SIZE - 1;
 	if (ncols != widget->ncols || nrows != widget->nrows) {
 		widget->pixw = widget->ncols * widget->itemw;
@@ -1026,7 +968,6 @@ drawlabel(Widget *widget, int index, int x, int y)
 	if (extension != NULL && extension[1] != '\0') {
 		extensionlen = strlen(extension);
 		extensionw = ctrlfnt_width(widget->fontset, extension, extensionlen);
-		/* draw ellipsis */
 		drawname(
 			widget,
 			color,
@@ -1134,7 +1075,9 @@ drawitem(Widget *widget, int index)
 			.red   = 0xFFFF,
 			.green = 0xFFFF,
 			.blue  = 0xFFFF,
-			.alpha = SEL_OPACITY,
+
+			/* opacity for color layer above selected items */
+			.alpha = 0xC000,
 		},
 		x, y,
 		widget->itemw,
@@ -1357,8 +1300,6 @@ scroll(Widget *widget, int y)
 		return False;
 	if (y < 0 && widget->row == 0 && widget->ydiff == 0)
 		return False;
-	if (ALL_ROWS(widget) + 1 < widget->nrows)
-		return False;
 	widget->redraw = True;
 	prevhand = gethandlepos(widget);
 	prevdiff = widget->ydiff;
@@ -1574,31 +1515,32 @@ cleanwidget(Widget *widget)
 {
 	struct Thumb *thumb;
 	struct Selection *sel;
-	void *tmp;
 
 	if (!widget->isset)
 		return;
 	resetclipboard(widget);
 	thumb = widget->thumbhead;
 	while (thumb != NULL) {
-		tmp = thumb;
+		struct Thumb *tmp = thumb;
 		thumb = thumb->next;
-		XDestroyImage(((struct Thumb *)tmp)->img);
-		FREE(tmp);
+		XDestroyImage(tmp->img);
+		free(tmp);
 	}
 	sel = widget->sel;
 	while (sel != NULL) {
-		tmp = sel;
+		struct Selection *tmp = sel;
 		sel = sel->next;
-		FREE(tmp);
+		free(tmp);
 	}
 	widget->sel = NULL;
 	widget->rectsel = NULL;
+#define FREE(x) (free(x), x = NULL)
 	FREE(widget->gototext);
 	FREE(widget->thumbs);
 	FREE(widget->linelen);
 	FREE(widget->nlines);
 	FREE(widget->issel);
+#undef  FREE
 	disownprimary(widget);
 	(void)XChangeProperty(
 		widget->display,
@@ -1646,7 +1588,7 @@ selectitem(Widget *widget, int index, int select, int rectsel)
 			sel->prev->next = sel->next;
 		if (*header == sel)
 			*header = sel->next;
-		FREE(sel);
+		free(sel);
 		widget->issel[index] = NULL;
 	} else {
 		return;
@@ -1831,7 +1773,9 @@ rectdraw(Widget *widget, int row, int ydiff, int x0, int y0, int x, int y)
 			.red   = 0xFFFF,
 			.green = 0xFFFF,
 			.blue  = 0xFFFF,
-			.alpha = RECT_OPACITY,
+
+			/* opacity for color layer above rectangular selection */
+			.alpha = 0x4000,
 		},
 		x + 1,
 		y + 1,
@@ -1982,9 +1926,9 @@ scrollerset(Widget *widget, int pos)
 }
 
 static int
-checkheader(FILE *fp, char *header, size_t size)
+checkheader(FILE *fp, unsigned char const *header, size_t size)
 {
-	char buf[PPM_BUFSIZE];
+	char buf[8];    /* enough for a .PPM header field */
 
 	if (fread(buf, 1, size, fp) != size)
 		return RETURN_FAILURE;
@@ -2068,6 +2012,10 @@ getgeometry(Widget *widget, XRectangle *rect)
 	int x, y, flags, retval;
 	XrmDatabase xdb;
 	char *str, *geometry;
+	static XRectangle DEF_SIZE = {
+		.x = 0, .y = 0,
+		.width = 600 , .height = 460
+	};
 
 	*rect = DEF_SIZE;
 	retval = 0;
@@ -2374,7 +2322,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 	KeySym ksym;
 	unsigned int state;
 	int row[2];
-	int redrawall, previtem, index, newrow, n, i;
+	int redrawall, previtem, index, newrow, i;
 	char *kstr;
 
 	if (!XkbLookupKeySym(widget->display, xev->keycode, xev->state, &state, &ksym))
@@ -2420,7 +2368,8 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 		break;
 	case XK_Prior:
 	case XK_Next:
-		if (scroll(widget, (ksym == XK_Prior ? -1 : 1) * PAGE_STEP(widget))) {
+		/* scroll half page up or down */
+		if (scroll(widget, (ksym == XK_Prior ? -1 : 1) * widget->h/2)) {
 			index = widget->row * widget->ncols;
 			if (widget->ydiff != 0 && index + 1 < widget->nitems)
 				index += widget->ncols;
@@ -2452,31 +2401,32 @@ hjkl:
 			setrow(widget, 0);
 		}
 		if (ksym == XK_Up || ksym == XK_k) {
-			n = -widget->ncols;
+			index = widget->highlight - widget->ncols;
 		} else if (ksym == XK_Down || ksym == XK_j) {
-			n = widget->highlight < (WHL_ROWS(widget)) * widget->ncols
-			  ? widget->nitems - widget->highlight - 1
-			  : 0;
-			n = min(widget->ncols, n);
+			if (widget->highlight / widget->ncols >= widget->nitems / widget->ncols)
+				break;
+			index = min(widget->nitems - 1, widget->highlight + widget->ncols);
 		} else if (ksym == XK_Left || ksym == XK_h) {
-			n = -1;
+			index = widget->highlight - 1;
 		} else {
-			n = 1;
+			index = widget->highlight + 1;
 		}
-		if ((index = widget->highlight + n) < 0 || index >= widget->nitems)
+		if (index == widget->highlight || index < 0 || index >= widget->nitems)
 			break;
 		row[0] = widget->highlight / widget->ncols;
 		row[1] = index / widget->ncols;
 		newrow = widget->row;
 		for (i = 0; i < 2; i++) {
+			int nrows_in_window = widget->h / widget->itemh;
+
 			/*
 			 * Try to make both previously highlighted item
 			 * and new highlighted item visible.
 			 */
 			if (row[i] < newrow) {
 				newrow = row[i];
-			} else if (row[i] >= newrow + WIN_ROWS(widget)) {
-				newrow = row[i] - WIN_ROWS(widget) + 1;
+			} else if (row[i] >= newrow + nrows_in_window) {
+				newrow = row[i] - nrows_in_window + 1;
 			}
 		}
 		if (widget->row != newrow) {
@@ -2530,8 +2480,8 @@ draw:
 		 * it however wants.
 		 */
 		kstr = XKeysymToString(ksym);
+		(void)snprintf(widget->ksymbuf, sizeof(widget->ksymbuf), "^%s", kstr);
 		*text = widget->ksymbuf;
-		(void)snprintf(*text, KSYM_BUFSIZE, "^%s", kstr);
 		*nitems = 0;
 		if (widget->sel != NULL)
 			*nitems = fillselitems(widget, selitems);
@@ -2565,7 +2515,6 @@ static Bool
 filter_event(Widget *widget, XEvent *ev)
 {
 	int newrow;
-	char *str;
 
 	widget->redraw = False;
 	switch (ev->type) {
@@ -2653,6 +2602,7 @@ close:
 			return False;
 		if (ev->xproperty.window == widget->root &&
 		    ev->xproperty.atom == XA_RESOURCE_MANAGER) {
+			char *str;
 			str = gettextprop(
 				widget,
 				widget->root,
@@ -2662,7 +2612,7 @@ close:
 			if (str == NULL)
 				break;
 			loadresources(widget, str);
-			FREE(str);
+			free(str);
 			drawitems(widget);
 			widget->redraw = True;
 			break;
@@ -2997,9 +2947,9 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 	case ButtonRelease:
 		if (ev.xbutton.window != widget->window)
 			continue;
-		if (ev.xbutton.button == BUTTON8)
+		if (ev.xbutton.button == 8)
 			return WIDGET_PREV;
-		if (ev.xbutton.button == BUTTON9)
+		if (ev.xbutton.button == 9)
 			return WIDGET_NEXT;
 		if (ev.xbutton.button != Button1)
 			continue;
@@ -3021,7 +2971,8 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			continue;
 		if (!(ev.xmotion.state & Button1Mask))
 			continue;
-		if (diff(ev.xmotion.x, clickx) * diff(ev.xmotion.y, clicky) < DRAG_SQUARE)
+		/* 64: square of distance cursor must move to be considered a dnd */
+		if (diff(ev.xmotion.x, clickx) * diff(ev.xmotion.y, clicky) < 64)
 			continue;
 		if (clicki == 0)
 			continue;
@@ -3469,7 +3420,7 @@ widget_free(Widget *widget)
 			);
 		}
 	}
-	FREE(widget->icons);
+	free(widget->icons);
 
 	if (widget->plainclip.stream != NULL)
 		fclose(widget->plainclip.stream);
@@ -3497,7 +3448,7 @@ widget_free(Widget *widget)
 		XFreeGC(widget->display, widget->gc);
 	if (widget->display != NULL)
 		XCloseDisplay(widget->display);
-	FREE(widget);
+	free(widget);
 	ctrlfnt_term();
 }
 
@@ -3526,14 +3477,18 @@ widget_create(const char *class, const char *name, int argc, char *argv[], const
 		warn("malloc");
 		return NULL;
 	}
+
+#define COLOR(r,g,b) ((XRenderColor){ \
+	.red = 0x##r##FF, .green = 0x##g##FF, .blue = 0x##b##FF, .alpha = 0xFFFF \
+})
 	*widget = (Widget){
 		.class = class,
-		.colors[SELECT_NOT][COLOR_BG].chans = DEF_COLOR_BG,
-		.colors[SELECT_NOT][COLOR_FG].chans = DEF_COLOR_FG,
-		.colors[SELECT_YES][COLOR_BG].chans = DEF_COLOR_SELBG,
-		.colors[SELECT_YES][COLOR_FG].chans = DEF_COLOR_SELFG,
-		.status_enable = DEF_STATUSBAR,
-		.opacity = DEF_OPACITY,
+		.colors[SELECT_NOT][COLOR_BG].chans = COLOR(00,00,00),
+		.colors[SELECT_NOT][COLOR_FG].chans = COLOR(FF,FF,FF),
+		.colors[SELECT_YES][COLOR_BG].chans = COLOR(34,65,A4),
+		.colors[SELECT_YES][COLOR_FG].chans = COLOR(FF,FF,FF),
+		.status_enable = True,
+		.opacity = 0xFFFF,
 		.lock = PTHREAD_MUTEX_INITIALIZER,
 		.highlight = -1,
 		.itemw = ITEM_WIDTH,
@@ -3690,11 +3645,18 @@ widget_fd(Widget *widget)
 void
 widget_thumb(Widget *widget, char *path, int item)
 {
+	enum color_depths {
+		CLIP_DEPTH = 1,		/* 0/1 */
+		PPM_DEPTH = 3,		/* RGB */
+		DATA_DEPTH = 4,		/* BGRA */
+	};
 	FILE *fp;
 	size_t size, i;
 	int w, h;
 	char buf[DATA_DEPTH];
 	unsigned char *data;
+	static unsigned char const PPM_HEADER[] = {'P', '6', '\n'};
+	static unsigned char const PPM_COLOR[] = {'2', '5', '5', '\n'};
 
 	if (item < 0 || item >= widget->nitems || widget->thumbs == NULL)
 		return;
@@ -3704,7 +3666,7 @@ widget_thumb(Widget *widget, char *path, int item)
 		warn("%s", path);
 		goto error;
 	}
-	if (checkheader(fp, PPM_HEADER, PPM_HEADER_SIZE) == -1) {
+	if (checkheader(fp, PPM_HEADER, sizeof(PPM_HEADER)) == -1) {
 		warnx("%s: not a ppm file", path);
 		goto error;
 	}
@@ -3716,7 +3678,7 @@ widget_thumb(Widget *widget, char *path, int item)
 		warnx("%s: ppm file too large: %dx%d", path, w, h);
 		goto error;
 	}
-	if (checkheader(fp, PPM_COLOR, PPM_COLOR_SIZE) == -1) {
+	if (checkheader(fp, PPM_COLOR, sizeof(PPM_COLOR)) == -1) {
 		warnx("%s: ppm file with invalid header", path);
 		goto error;
 	}
@@ -3754,7 +3716,7 @@ widget_thumb(Widget *widget, char *path, int item)
 		ZPixmap,
 		0, (char *)data,
 		w, h,
-		DATA_DEPTH * BYTE,
+		DATA_DEPTH * CHAR_BIT,
 		0
 	);
 	if (widget->thumbs[item]->img == NULL) {
@@ -3771,8 +3733,9 @@ widget_thumb(Widget *widget, char *path, int item)
 error:
 	if (fp != NULL)
 		fclose(fp);
-	FREE(data);
-	FREE(widget->thumbs[item]);
+	free(data);
+	free(widget->thumbs[item]);
+	widget->thumbs[item] = NULL;
 }
 
 void
