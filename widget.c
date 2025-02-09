@@ -1305,12 +1305,13 @@ scroll(Widget *widget, int y)
 	prevdiff = widget->ydiff;
 	newrow = prevrow = widget->row;
 	widget->ydiff += y;
-	newrow += widget->ydiff / widget->itemh;
 	if (widget->ydiff < 0) {
-		widget->ydiff += widget->itemh;
-		newrow--;
+		newrow += widget->ydiff / widget->itemh - 1;
+		widget->ydiff = widget->ydiff % widget->itemh + widget->itemh;
+	} else {
+		newrow += widget->ydiff / widget->itemh;
+		widget->ydiff %= widget->itemh;
 	}
-	widget->ydiff %= widget->itemh;
 	if (newrow > widget->nscreens) {
 		widget->ydiff = 0;
 		newrow = widget->nscreens - 1;
