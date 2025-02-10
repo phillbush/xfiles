@@ -122,13 +122,6 @@ enum {
 };
 
 enum {
-	TARGET_STRING,
-	TARGET_UTF8,
-	TARGET_URI,
-	TARGET_LAST
-};
-
-enum {
 	COLOR_BG,
 	COLOR_FG,
 	COLOR_LAST,
@@ -2144,48 +2137,6 @@ error:
 }
 
 static void
-setwinicon(Widget *widget)
-{
-	size_t i;
-
-	for (i = 0; i < nwin_icons; i++) {
-		(void)XChangeProperty(
-			widget->display,
-			widget->window,
-			atoms[_NET_WM_ICON],
-			XA_CARDINAL,
-			32,
-			(i == 0) ? PropModeReplace : PropModeAppend,
-			(unsigned char *)(unsigned long []){
-				win_icons[i].size,
-				win_icons[i].size,
-			},
-			2
-		);
-		(void)XChangeProperty(
-			widget->display,
-			widget->window,
-			atoms[_NET_WM_ICON],
-			XA_CARDINAL,
-			32,
-			PropModeAppend,
-			(unsigned char *)win_icons[i].data,
-			win_icons[i].size * win_icons[i].size
-		);
-	}
-}
-
-static Bool
-is_override(Display *display, Window window)
-{
-	XWindowAttributes wattr;
-
-	if (!XGetWindowAttributes(display, window, &wattr))
-		wattr.override_redirect = False;
-	return wattr.override_redirect;
-}
-
-static void
 embed_message(Widget *widget, Time time, long msg, long d0, long d1, long d2)
 {
 	XSendEvent(
@@ -2513,6 +2464,7 @@ compress_motion(Display *display, XEvent *event)
 static Bool
 filter_event(Widget *widget, XEvent *ev)
 {
+	XWindowAttributes wattr;
 	int newrow;
 
 	widget->redraw = False;
@@ -2537,7 +2489,9 @@ filter_event(Widget *widget, XEvent *ev)
 	case MapRequest:
 		if (ev->xmaprequest.parent != widget->window)
 			break;
-		if (is_override(widget->display, ev->xmaprequest.window))
+		if (!XGetWindowAttributes(widget->display, ev->xmaprequest.window, &wattr))
+			break;
+		if (!wattr.override_redirect)
 			break;
 		embed_set(widget, CurrentTime, ev->xmaprequest.window);
 		break;
@@ -3212,7 +3166,31 @@ initwindow(Widget *widget, struct Options *options)
 	(void)snprintf(buf, LEN(buf), "%lu", (unsigned long)widget->window);
 	if (setenv("WINDOWID", buf, True) == RETURN_FAILURE)
 		warn("setenv");
-	setwinicon(widget);
+	for (size_t i = 0; i < nwin_icons; i++) {
+		(void)XChangeProperty(
+			widget->display,
+			widget->window,
+			atoms[_NET_WM_ICON],
+			XA_CARDINAL,
+			32,
+			(i == 0) ? PropModeReplace : PropModeAppend,
+			(unsigned char *)(unsigned long []){
+				win_icons[i].size,
+				win_icons[i].size,
+			},
+			2
+		);
+		(void)XChangeProperty(
+			widget->display,
+			widget->window,
+			atoms[_NET_WM_ICON],
+			XA_CARDINAL,
+			32,
+			PropModeAppend,
+			(unsigned char *)win_icons[i].data,
+			win_icons[i].size * win_icons[i].size
+		);
+	}
 	ctrldnd_announce(widget->display, widget->window);
 	return RETURN_SUCCESS;
 }
@@ -3339,8 +3317,8 @@ initmisc(Widget *widget, struct Options *options)
 	 * in turn.
 	 *
 	 * If all fail, we fallback to XC_watch, from default X11 cursor
-	 * set, which is mostly used for unresponsive programs during a
-	 * computation taking long time.
+	 * set.  It is mostly used to show that a program is busy and is
+	 * unresponsive to user input.
 	 */
 	for (int i = 0; i < 3; i++) {
 		static char *names[] = {
