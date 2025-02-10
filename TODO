@@ -35,10 +35,60 @@ the xfilesctl script by calling xclip(1) or a similar utility.  It
 should just handle a list of path pre-processed by XFiles.
 
 
+§ Use XFiles as a file selection dialog
+
+(Proposed at https://github.com/phillbush/xfiles/issues/42)
+
+Implement mode for XFiles to be used as a file selection dialog rather
+than as a file browser.
+
+
+§ Improve scroller widget feedback
+
+Add more feedback to the scroller widget.
+
+For example, show arrows pointing to the directions which the user can
+scroll to; and, during scrolling highlight the arrow pointing to the
+direction of the scroll.  Just like how Firefox does on its scroller
+widget.
+
+For example, show the first letter of the first visible file (or the
+highlight file) during scroll.  Just like how smartphone contacts list
+applications show the letter of the contact in alphabetical order and
+highlight the letter of the currently visible contact, for additional
+feedback.
+
+
+§ Improve scrolling feedback
+
+Add zigzag pattern to the direction where user can scroll further.
+
+Or add a scrollbar like a normal program.
+
+
 § Write progress dialog/indicator program
 
-Write program (for xfilesctl to fork) to show progress of ongoing file
+Write program (for xfiles to fork) to show progress of ongoing file
 operations.
+
+
+§ Write file inspector program
+
+Write program (for xfiles to fork) to show size, owner, permissions,
+mtime, etc of selected files.
+
+
+§ Write control/prompt.c
+
+Implement a text input field widget prompting the user for the path of a
+directory or file, or for a filename to search.  This should replace
+dmenu as “prompt widget”.
+
+
+§ Write control/menu.c and control/piemenu.c
+
+Implement radial menu and detacheable linear menu widgets for context
+action.  This should replace xmenu as “menu widget”.
 
 
 § Early drag-and-drop return
@@ -155,6 +205,39 @@ Set an error handler callback to handle non-fatal X protocol errors.
 That should be similar to what is done at <./control/dragndrop.c>.
 
 
+§ Addopt X11-like command-line options(?)
+
+(I am not sure whether this should be implemented.)
+
+Replace single-letter UNIX-like command-line flags with full-name
+X11-like command-line flags.
+
+This would open room to specify resources at invocation time as
+arguments.  For example, `-bg` or `-font` or `-opacity`.
+
+
+§ Implement translation resources(?)
+
+(I am not sure whether this should be implemented.)
+
+Add a `*translations` resource to handle keybinds-to-actions
+translations.
+
+That should remove the burden on xfilesctl (and maybe even remove this
+file entirely?).
+
+
+§ Dynamic icons(?)
+
+(I am not sure whether this should be implemented.)
+
+Rather than static icons representing directory entries, use dynamic
+icons that can incorporate the state of the entry or thumbnails.
+
+For example, show the thumbnails of the children files over the folder
+icon of a directory.  Just like how Windows Explorer™ and Dolphin do.
+
+
 § Drag whole file content(?)
 
 (I am not sure whether this should be implemented.)
@@ -230,10 +313,47 @@ If implemented, I will likely remove vi HJKL hardcoded keyboard commands.
 § Use XDG thumbnail spec(?)
 
 (I am not sure whether this should be implemented.)
+(Proposed at https://github.com/phillbush/xfiles/issues/51)
 
-Use XDG specification for caching and saving thumbnails, so them can be
-shared between different file managers.  That requires using libpng(3)
-as an additional dependency.
+Use [XDG] specification for caching and saving thumbnails, so them can
+be shared between different file managers.
+
+That requires adding dependencies for handling PNG and MD5.  Options are
+libpng(3); or include a single-file header (like stb_image) with xfiles.
+
+[XDG]: https://specifications.freedesktop.org/thumbnail-spec/latest-single/
+
+
+§ Zooming and changing icon size(?)
+
+(I am not sure whether this should be implemented.)
+(Proposed at https://github.com/phillbush/xfiles/issues/50)
+
+Either:
+• Draw larger versions for the icons; or
+• Implement a simple scalable format (no SVG) for drawing lines on fixed
+  angles, and filling colors.
+
+Also save thumbnails on multiple sizes (implementing XDG thumbnail-spec
+helps).
+
+
+§ Spatial navigation(?)
+
+(I am not sure whether this should be implemented.)
+(Proposed at https://github.com/phillbush/xfiles/issues/43)
+
+Open each directory on its own window, like early file browsers.
+
+Requires saving window location per-directory, which means filling
+each directory with a dotfile containing xfiles metadata.
+
+If that is the case; i should look for another file browser that does
+that and just copy the syntax of its per-directory dotfile.  Users of
+such mode should be prepared to be treated like MacOS X users are when
+they upload archive files with hidden .DS_Store everywhere.
+
+Maybe that's a bad idea.
 
 
 § Write configure script(?)
