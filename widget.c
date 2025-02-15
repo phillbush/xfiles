@@ -1591,7 +1591,7 @@ selectitem(Widget *widget, int index, int select, int rectsel)
 }
 
 static void
-highlight(Widget *widget, int index, int redraw)
+highlight(Widget *widget, int index)
 {
 	int prevhili;
 	char const *status;
@@ -1600,9 +1600,9 @@ highlight(Widget *widget, int index, int redraw)
 		return;
 	prevhili = widget->highlight;
 	widget->highlight = index;
-	if (redraw && index != 0)
+	if (index != 0)
 		drawitem(widget, index);
-	/* we still have to redraw the previous one */
+	/* we still have to redraw the previous entry */
 	drawitem(widget, prevhili);
 	drawstatusbar(widget);
 	if (widget->highlight > 0) {
@@ -1684,12 +1684,14 @@ mouse1click(Widget *widget, XButtonPressedEvent *ev)
 	int prevhili, index;
 
 	index = getitemundercursor(widget, ev->x, ev->y);
+	if (index > 0 && widget->issel[index] != NULL)
+		return index;
 	if (!(ev->state & (ControlMask | ShiftMask)))
 		unselectitems(widget);
 	if (index < 0)
 		return index;
 	prevhili = widget->highlight;
-	highlight(widget, index, True);
+	highlight(widget, index);
 	if (prevhili != -1 && ev->state & ShiftMask)
 		selectitems(widget, widget->highlight, prevhili);
 	else
@@ -1705,12 +1707,10 @@ mouse3click(Widget *widget, int x, int y)
 
 	index = getitemundercursor(widget, x, y);
 	if (index != -1) {
+		highlight(widget, index);
 		if (widget->issel[index] == NULL) {
-			highlight(widget, index, False);
 			unselectitems(widget);
 			selectitem(widget, index, True, False);
-		} else {
-			highlight(widget, index, True);
 		}
 	}
 	return index;
@@ -2314,7 +2314,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 				False
 			);
 		}
-		highlight(widget, widget->highlight + 1, True);
+		highlight(widget, widget->highlight + 1);
 		break;
 	case XK_Prior:
 	case XK_Next:
@@ -2323,7 +2323,7 @@ keypress(Widget *widget, XKeyEvent *xev, int *selitems, int *nitems, char **text
 			index = widget->row * widget->ncols;
 			if (widget->ydiff != 0 && index + 1 < widget->nitems)
 				index += widget->ncols;
-			highlight(widget, index, True);
+			highlight(widget, index);
 		}
 		break;
 	case XK_Home:
@@ -2389,7 +2389,7 @@ hjkl:
 		}
 draw:
 		previtem = widget->highlight;
-		highlight(widget, index, True);
+		highlight(widget, index);
 		if (xev->state & ShiftMask)
 			selectitems(widget, index, previtem);
 		else if (xev->state & ControlMask)
@@ -2618,7 +2618,7 @@ dnd_event_handler(XEvent *event, void *arg)
 	index = getitemundercursor(widget, x, y);
 	if (index < 0)
 		index = 0;
-	highlight(widget, index, True);
+	highlight(widget, index);
 	if (lasttime + SCROLL_TIME <= event->xmotion.time) {
 		if (y < SCROLL_STEP)
 			scroll(widget, -SCROLL_STEP);
@@ -2748,7 +2748,7 @@ selmode(Widget *widget, int shift, int clickx, int clicky)
 	int x = clickx;
 	int y = clicky;
 
-	highlight(widget, 0, True);
+	highlight(widget, 0);
 	rectrow = widget->row;
 	rectydiff = widget->ydiff;
 	ownsel = False;
@@ -2827,7 +2827,7 @@ dragmode(Widget *widget, Time timestamp, int index, int *selitems, int *nitems)
 		return WIDGET_NONE;
 	/* user dropped items on widget's own window */
 	index = getitemundercursor(widget, drop.x, drop.y);
-	highlight(widget, index, True);
+	highlight(widget, index);
 	if (index < 1 || index >= widget->nitems)
 		return WIDGET_NONE;
 	if (widget->issel[index] != NULL)
@@ -2912,6 +2912,7 @@ mainmode(Widget *widget, int *selitems, int *nitems, char **text)
 			lasttime = ev.xbutton.time;
 			continue;
 		}
+		highlight(widget, getitemundercursor(widget, ev.xbutton.x, ev.xbutton.y));
 		if (widget->highlight >= 0) {
 			selitems[0] = widget->highlight;
 			*nitems = 1;
