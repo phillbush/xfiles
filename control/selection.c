@@ -9,7 +9,6 @@
 #include <X11/Xatom.h>
 
 #include <control/selection.h>
-#include "util.h"
 
 #define ENUM(sym) sym,
 #define NAME(sym) #sym,

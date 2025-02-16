@@ -286,7 +286,7 @@ case ButtonPress:
 		event.xbutton.time, selection
 	);
 	if (epoch == 0)
-		fprintf(stderr, "ctrlsel: could not own selection\n");
+		fprintf(stderr, "ctrlsel: could not own selection\en");
 	break;
 case SelectionClear:
 	if (event.xselectionclear.window != owner)
