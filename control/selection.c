@@ -315,7 +315,6 @@ answer(XSelectionRequestEvent const *event, Time time,
 	ssize_t natoms = PAIR_LENGTH;
 	int retval = CTRL_NOERROR;
 	Atom storeat = None;    /* requestor's property where we'll store data */
-	Atom atomtab[NATOMS] = { 0 };
 	Atom *p = NULL;
 	Atom *atoms = (Atom []){
 		[PAIR_TARGET]   = event->target,
