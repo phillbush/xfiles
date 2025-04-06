@@ -2660,9 +2660,9 @@ static WidgetEvent
 scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 {
 	XEvent ev;
-	int grabpos, pos, y;
+	int grabpos, pos;
+	Bool went_out = False;
 
-	grabpos = widget->handlew / 2;
 	drawscroller(widget, gethandlepos(widget));
 	XMoveWindow(
 		widget->display, widget->scroller,
@@ -2677,61 +2677,54 @@ scrollmode(Widget *widget, Time lasttime, int clickx, int clicky)
 		GrabModeAsync, GrabModeAsync, None, None, lasttime
 	) != GrabSuccess)
 		goto done;
-	y = 0;
+	pos = 0;
 	for (;;) switch (nextevent(widget, &ev, SCROLL_TIME)) {
-	case CloseNotify:
-		return WIDGET_CLOSE;
 	case TimeoutNotify:
-		if (y < 0)
-			scroll(widget, y);
-		else if (y > SCROLLER_SIZE)
-			scroll(widget, y - SCROLLER_SIZE);
+		if (pos < 0)
+			scroll(widget, pos);
+		else if (pos > SCROLLER_SIZE)
+			scroll(widget, pos - SCROLLER_SIZE);
 		continue;
 	case FocusIn:
 	case FocusOut:
 		goto done;
 	case MotionNotify:
-		if (ev.xmotion.window != widget->scroller)
-			continue;
 		if (ev.xmotion.y < 0)
-			y = ev.xmotion.y;
+			pos = ev.xmotion.y;
 		else if (ev.xmotion.y > SCROLLER_SIZE)
-			y = ev.xmotion.y - SCROLLER_SIZE;
+			pos = ev.xmotion.y - SCROLLER_SIZE;
 		else
-			y = 0;
-		if (ev.xmotion.state & Button1Mask)
-			scrollerset(widget, ev.xmotion.y - grabpos);
+			continue;
+		went_out = True;
 		continue;
 	case ButtonRelease:
-		if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5) {
+		if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)
 			scroll(widget, (ev.xbutton.button == Button4 ? -SCROLL_STEP : +SCROLL_STEP));
-			widget->redraw = True;
-			continue;
-		}
-		if (ev.xbutton.window != widget->scroller)
-			continue;
+		if (ev.xbutton.button == Button1 || ev.xbutton.button == Button3)
+			goto done;
+		if (ev.xbutton.button == Button2 && went_out)
+			goto done;
 		continue;
 	case ButtonPress:
 		if (ev.xbutton.button == Button4 || ev.xbutton.button == Button5)
 			continue;
 		if (ev.xbutton.button != Button1)
 			goto done;
-		if (ev.xbutton.window != widget->scroller)
-			goto done;
 		/* return if press is outside scroller */
 		if (ev.xbutton.x < 0 || ev.xbutton.x >= SCROLLER_SIZE)
 			goto done;
 		if (ev.xbutton.y < 0 || ev.xbutton.y >= SCROLLER_SIZE)
 			goto done;
-		pos = gethandlepos(widget);
-		if (ev.xbutton.y < pos || ev.xbutton.y > pos + widget->handlew) {
-			/* grab handle in the middle */
+		went_out = False;
+		grabpos = gethandlepos(widget);
+		if (ev.xbutton.y < grabpos || ev.xbutton.y > grabpos + widget->handlew)
 			grabpos = widget->handlew / 2;
-			scrollerset(widget, ev.xbutton.y - grabpos);
-		} else {
-			/* grab handle in position under pointer */
-			grabpos = ev.xbutton.y - pos;
-		}
+		else
+			grabpos = ev.xbutton.y - grabpos;
+		scrollerset(widget, ev.xbutton.y - grabpos);
+		while (nextevent(widget, &ev, SCROLL_TIME) != ButtonRelease)
+			if (ev.type == MotionNotify)
+				scrollerset(widget, ev.xmotion.y - grabpos);
 		continue;
 	}
 done:
